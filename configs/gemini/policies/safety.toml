@@ -1,0 +1,16 @@
+[[rules]]
+id = "deny-shell-network"
+tool = "run_shell_command"
+action = "deny"
+command_regex = "(?i)\\b(curl|wget|Invoke-WebRequest|Invoke-RestMethod|nc|ncat|netcat)\\b"
+
+[[rules]]
+id = "deny-recursive-delete"
+tool = "run_shell_command"
+action = "deny"
+command_regex = "(?i)\\b(rm\\s+-rf|Remove-Item.*-Recurse.*-Force)\\b"
+
+[[rules]]
+id = "deny-protected-dot-files"
+action = "deny"
+path_regex = "(^|[\\\\/])[.](env|ssh|aws|kube|docker|npmrc|pypirc)([\\\\/]|$|[.])"

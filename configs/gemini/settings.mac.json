@@ -1,0 +1,36 @@
+{
+  "hooksConfig": {
+    "enabled": true
+  },
+  "hooks": {
+    "BeforeAgent": [
+      {
+        "command": ".ai-safety/hooks/macos/guard-prompt.sh"
+      }
+    ],
+    "BeforeTool": [
+      {
+        "toolName": "run_shell_command",
+        "command": ".ai-safety/hooks/macos/guard-bash.sh"
+      },
+      {
+        "toolName": "write_file",
+        "command": ".ai-safety/hooks/macos/guard-write.sh"
+      },
+      {
+        "toolName": "web_fetch",
+        "command": ".ai-safety/hooks/macos/guard-webfetch.sh"
+      }
+    ],
+    "AfterModel": [
+      {
+        "command": ".ai-safety/hooks/macos/guard-post-output.sh"
+      }
+    ],
+    "AfterAgent": [
+      {
+        "command": ".ai-safety/hooks/macos/guard-post-output.sh"
+      }
+    ]
+  }
+}

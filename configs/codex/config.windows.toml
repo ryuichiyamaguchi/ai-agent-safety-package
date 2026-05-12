@@ -1,0 +1,38 @@
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+model_reasoning_effort = "medium"
+
+[features]
+hooks = true
+
+[sandbox_workspace_write]
+network_access = false
+exclude_tmpdir_env_var = true
+exclude_slash_tmp = true
+
+[windows]
+sandbox = "unelevated"
+
+[shell_environment_policy]
+inherit = "all"
+exclude = [
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "GITHUB_TOKEN",
+  "NPM_TOKEN",
+  "SLACK_BOT_TOKEN"
+]
+
+[profiles.safe]
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+model_reasoning_effort = "medium"
+
+[profiles.safe.sandbox_workspace_write]
+network_access = false
+exclude_tmpdir_env_var = true
+exclude_slash_tmp = true

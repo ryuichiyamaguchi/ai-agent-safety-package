@@ -1,0 +1,71 @@
+{
+  "packageVersion": "1.0.0",
+  "hookApiVersion": "1",
+  "defaultWorkspaceName": "safe-workspace",
+  "allowedDomains": [
+    "developers.openai.com",
+    "platform.openai.com",
+    "docs.anthropic.com",
+    "code.claude.com",
+    "github.com",
+    "raw.githubusercontent.com",
+    "gemini.google.com",
+    "ai.google.dev",
+    "cloud.google.com",
+    "registry.npmjs.org",
+    "pypi.org",
+    "files.pythonhosted.org"
+  ],
+  "protectedPathRegex": [
+    "(^|[\\\\/])[.]env([.].*)?$",
+    "(^|[\\\\/])[.]ssh([\\\\/]|$)",
+    "(^|[\\\\/])[.]aws([\\\\/]|$)",
+    "(^|[\\\\/])[.]azure([\\\\/]|$)",
+    "(^|[\\\\/])[.]gnupg([\\\\/]|$)",
+    "(^|[\\\\/])[.]kube([\\\\/]|$)",
+    "(^|[\\\\/])[.]docker([\\\\/]|$)",
+    "(^|[\\\\/])[.]config[\\\\/]gcloud([\\\\/]|$)",
+    "(^|[\\\\/])secrets?([\\\\/]|$)",
+    "(^|[\\\\/])creds?([\\\\/]|$)",
+    "(^|[\\\\/])id[_-]rsa$",
+    "(^|[\\\\/])id[_-]ed25519$",
+    "(^|[\\\\/])known[_-]hosts$",
+    "(^|[\\\\/])[.]npmrc$",
+    "(^|[\\\\/])[.]pypirc$"
+  ],
+  "secretRegex": [
+    { "name": "OpenAI API key", "pattern": "sk-(proj-)?[A-Za-z0-9_\\-]{20,}" },
+    { "name": "Anthropic API key", "pattern": "sk-ant-[A-Za-z0-9_\\-]{20,}" },
+    { "name": "Google API key", "pattern": "AIza[0-9A-Za-z_\\-]{25,}" },
+    { "name": "AWS access key", "pattern": "\\b(AKIA|ASIA)[0-9A-Z]{16}\\b" },
+    { "name": "GitHub token", "pattern": "\\bgh[pousr]_[A-Za-z0-9_]{36,255}\\b" },
+    { "name": "Slack token", "pattern": "\\bxox[baprs]-[A-Za-z0-9\\-]{10,}\\b" },
+    { "name": "JWT", "pattern": "\\beyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\b" },
+    { "name": "Private key block", "pattern": "-----BEGIN (RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----" },
+    { "name": "Generic sensitive assignment", "pattern": "(?i)(api[_-]?key|secret|token|password|passwd|pwd)\\s*[:=]\\s*['\\\"]?[A-Za-z0-9_\\.\\-\\/+=]{12,}" }
+  ],
+  "dangerousCommandRegex": [
+    "(?i)\\b(cat|type|Get-Content|gc|more|less)\\b.*(^|\\s|[\\\\/])[.]env([.].*)?(\\s|$)",
+    "(?i)\\bpython(3)?\\b.*open\\s*\\(\\s*['\\\"][^'\\\"]*[.]env",
+    "(?i)\\b(node|ruby|perl|php)\\b.*[.]env",
+    "(?i)\\b(curl|wget|Invoke-WebRequest|iwr|Invoke-RestMethod|irm|nc|ncat|netcat)\\b",
+    "(?i)\\brm\\s+(-[A-Za-z]*r[A-Za-z]*f|-rf|-fr)\\b",
+    "(?i)\\bRemove-Item\\b.*\\b-Recurse\\b.*\\b-Force\\b",
+    "(?i)\\b(del|erase|rd|rmdir)\\b.*\\b(/s|/q)\\b",
+    "(?i)\\b(format|diskpart|cipher\\s+/w)\\b",
+    "(?i)\\bchmod\\s+777\\b",
+    "(?i)\\b(ssh|scp|sftp|rsync)\\b",
+    "(?i)\\b(git\\s+push|npm\\s+publish|twine\\s+upload)\\b",
+    "(?i)\\b(env|printenv|set)\\b.*(KEY|TOKEN|SECRET|PASSWORD)",
+    "(?i)\\b(Get-ChildItem|gci|dir)\\s+Env:"
+  ],
+  "generatedCodeDenyRegex": [
+    "(?i)open\\s*\\(\\s*['\\\"][^'\\\"]*[.]env",
+    "(?i)(readFileSync|read_file|Get-Content|File[.]read|Path\\().*[.]env",
+    "(?i)(requests[.]|fetch\\s*\\(|axios[.]|urllib[.]|Invoke-WebRequest|curl_exec)",
+    "(?i)(subprocess|child_process|ProcessStartInfo).*[.]env"
+  ],
+  "allowShellNetwork": false,
+  "allowWorkspaceOutsideWrites": false,
+  "maxHookInputBytes": 262144
+}

@@ -1,0 +1,133 @@
+{
+  "env": {
+    "AI_SAFE_ENGINE": "claude",
+    "AI_SAFE_LOG_DIR": "${userHome}/.ai-safety/logs",
+    "CLAUDE_CODE_NO_FLICKER": "1"
+  },
+  "cleanupPeriodDays": 120,
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "disableBypassPermissionsMode": "disable",
+    "allow": [
+      "Read(./**)",
+      "LS(./**)",
+      "Glob(./**)",
+      "Grep(./**)",
+      "Edit(./**)",
+      "Write(./**)",
+      "MultiEdit(./**)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(npm test*)",
+      "Bash(npm run build*)",
+      "Bash(npm run lint*)",
+      "Bash(python3 -m pytest*)",
+      "Bash(pytest*)",
+      "WebFetch(domain:developers.openai.com)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:code.claude.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:gemini.google.com)",
+      "WebFetch(domain:ai.google.dev)",
+      "WebFetch(domain:cloud.google.com)"
+    ],
+    "ask": [
+      "Bash(*)"
+    ],
+    "deny": [
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(rm -rf *)",
+      "Bash(git push *)",
+      "Bash(npm publish *)"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "-lc",
+              "p=\"${CLAUDE_PROJECT_DIR}/.ai-safety/hooks/macos/guard-prompt.sh\"; if [ ! -x \"$p\" ]; then echo \"AI Safety hook missing: $p\" >&2; exit 2; fi; \"$p\""
+            ]
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "-lc",
+              "p=\"${CLAUDE_PROJECT_DIR}/.ai-safety/hooks/macos/guard-bash.sh\"; if [ ! -x \"$p\" ]; then echo \"AI Safety hook missing: $p\" >&2; exit 2; fi; \"$p\""
+            ]
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "-lc",
+              "p=\"${CLAUDE_PROJECT_DIR}/.ai-safety/hooks/macos/guard-write.sh\"; if [ ! -x \"$p\" ]; then echo \"AI Safety hook missing: $p\" >&2; exit 2; fi; \"$p\""
+            ]
+          }
+        ]
+      },
+      {
+        "matcher": "WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "-lc",
+              "p=\"${CLAUDE_PROJECT_DIR}/.ai-safety/hooks/macos/guard-webfetch.sh\"; if [ ! -x \"$p\" ]; then echo \"AI Safety hook missing: $p\" >&2; exit 2; fi; \"$p\""
+            ]
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Read|WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "-lc",
+              "p=\"${CLAUDE_PROJECT_DIR}/.ai-safety/hooks/macos/guard-post-output.sh\"; if [ ! -x \"$p\" ]; then echo \"AI Safety hook missing: $p\" >&2; exit 2; fi; \"$p\""
+            ]
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "-lc",
+              "p=\"${CLAUDE_PROJECT_DIR}/.ai-safety/hooks/macos/guard-post-output.sh\"; if [ ! -x \"$p\" ]; then echo \"AI Safety hook missing: $p\" >&2; exit 2; fi; \"$p\""
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

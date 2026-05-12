@@ -1,0 +1,54 @@
+{
+  "hooks": {
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/bin/bash -lc 'p=\".ai-safety/hooks/macos/guard-prompt.sh\"; if [ ! -x \"$p\" ]; then echo \"AI Safety hook missing: $p\" >&2; exit 2; fi; \"$p\"'"
+        }
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/bin/bash -lc 'p=\".ai-safety/hooks/macos/guard-bash.sh\"; if [ ! -x \"$p\" ]; then echo \"AI Safety hook missing: $p\" >&2; exit 2; fi; \"$p\"'"
+        }
+      ]
+    },
+    {
+      "matcher": "Write|Edit|MultiEdit|apply_patch",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/bin/bash -lc 'p=\".ai-safety/hooks/macos/guard-write.sh\"; if [ ! -x \"$p\" ]; then echo \"AI Safety hook missing: $p\" >&2; exit 2; fi; \"$p\"'"
+        }
+      ]
+    },
+    {
+      "matcher": "WebFetch|web_fetch",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/bin/bash -lc 'p=\".ai-safety/hooks/macos/guard-webfetch.sh\"; if [ ! -x \"$p\" ]; then echo \"AI Safety hook missing: $p\" >&2; exit 2; fi; \"$p\"'"
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "Bash|Read|WebFetch|web_fetch",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/bin/bash -lc 'p=\".ai-safety/hooks/macos/guard-post-output.sh\"; if [ ! -x \"$p\" ]; then echo \"AI Safety hook missing: $p\" >&2; exit 2; fi; \"$p\"'"
+        }
+      ]
+    }
+  ]
+  }
+}

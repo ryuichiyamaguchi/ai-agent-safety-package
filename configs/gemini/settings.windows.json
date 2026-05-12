@@ -1,0 +1,36 @@
+{
+  "hooksConfig": {
+    "enabled": true
+  },
+  "hooks": {
+    "BeforeAgent": [
+      {
+        "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .ai-safety\\hooks\\windows\\guard-prompt.ps1"
+      }
+    ],
+    "BeforeTool": [
+      {
+        "toolName": "run_shell_command",
+        "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .ai-safety\\hooks\\windows\\guard-bash.ps1"
+      },
+      {
+        "toolName": "write_file",
+        "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .ai-safety\\hooks\\windows\\guard-write.ps1"
+      },
+      {
+        "toolName": "web_fetch",
+        "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .ai-safety\\hooks\\windows\\guard-webfetch.ps1"
+      }
+    ],
+    "AfterModel": [
+      {
+        "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .ai-safety\\hooks\\windows\\guard-post-output.ps1"
+      }
+    ],
+    "AfterAgent": [
+      {
+        "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .ai-safety\\hooks\\windows\\guard-post-output.ps1"
+      }
+    ]
+  }
+}

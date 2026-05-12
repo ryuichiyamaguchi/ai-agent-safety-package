@@ -1,0 +1,94 @@
+# 自宅 Mac で使う
+
+自分の Mac で AI エージェント安全運用パッケージを使う手順です。
+
+## Mac の利点
+
+Mac では macOS の Seatbelt サンドボックスが Codex CLI と連動します。Windows ネイティブよりも **OS レベルで強い防御**が効きます。バグはありますが、それを補う層も組み込んであります。
+
+## 前提
+
+- macOS Monterey (12) 以降推奨
+- Cursor または VS Code がインストール済み
+- Codex CLI がインストール済み（`codex --version` が動く）
+- Bash 環境（標準で入っている）
+
+## ステップ 1：パッケージのダウンロード
+
+GitHub の Release ページから ZIP をダウンロード。
+
+ダウンロード先：`~/Downloads` または `~/Desktop`
+
+## ステップ 2：展開
+
+Finder で ZIP をダブルクリック → 同じ場所に展開されます。
+
+## ステップ 3：インストール
+
+ターミナル（または Cursor の Terminal）を開いて：
+
+```bash
+cd ~/Downloads/ai-agent-safety-package-v1
+bash scripts/macos/install.sh ~/Documents/my-ai-workspace
+```
+
+`my-ai-workspace` は好きな名前に変更可。
+
+グローバルの Claude 設定も上書きしたい場合：
+
+```bash
+bash scripts/macos/install.sh ~/Documents/my-ai-workspace --global-claude
+```
+
+## ステップ 4：動作確認
+
+```bash
+~/Documents/my-ai-workspace/.ai-safety/hooks/macos/doctor.sh ~/Documents/my-ai-workspace
+```
+
+`pass=10 fail=0` を確認。
+
+## ステップ 5：使う
+
+```bash
+cd ~/Documents/my-ai-workspace
+bash .ai-safety/hooks/macos/launch-codex-safe.sh
+```
+
+Claude Code の場合：
+
+```bash
+bash .ai-safety/hooks/macos/launch-claude-safe.sh
+```
+
+## 自分の本物のプロジェクトで使う
+
+`my-ai-workspace` の中に作業フォルダを置く、または既存のプロジェクトに直接インストールすることもできます。
+
+```bash
+bash scripts/macos/install.sh /path/to/your/existing/project
+```
+
+既存の `.claude/`、`.codex/`、`.gemini/` 設定はバックアップを取った上で上書きされます。
+
+## バックアップ / リストア / アップデート
+
+```bash
+bash .ai-safety/hooks/macos/backup.sh
+bash .ai-safety/hooks/macos/update-safety.sh
+bash .ai-safety/hooks/macos/restore.sh
+```
+
+## Apple Silicon Mac での注意
+
+Codex CLI が動かないケースが報告されています。`codex --version` でバージョン確認できない場合は、Codex CLI を Rosetta 経由でインストールし直す必要があるかもしれません。
+
+```bash
+arch -x86_64 npm install -g @openai/codex
+```
+
+## 困った時
+
+- `doctor` で fail → 講師へ
+- Gatekeeper 警告（「開発元未確認」）→ 同梱スクリプトは未署名なので警告が出ることがあります。「右クリック → 開く」で初回のみ実行許可してください
+- ZIP 展開後に実行権限が落ちた → `chmod +x .ai-safety/hooks/macos/*.sh`
