@@ -20,7 +20,7 @@ Day3 は「Cursor を開いて、Codex と Gemini を実際に動かす」ハン
 
 ここに書いてあることだけやってください。奥の深い「なぜ安全なのか」という話は、別のドキュメントに書きました（困った時や興味が出た時に読んでください）。
 
-> **バージョン対応**：このドキュメントは v1.0.8 以降向けです。v1.0.7 をお使いの場合は `docs/01_学校PCで使う.md` を参照してください。
+> **バージョン対応**：このドキュメントは v1.0.9 以降向けです。v1.0.7 をお使いの場合は `docs/01_学校PCで使う.md` を参照してください。
 
 ---
 
@@ -28,7 +28,7 @@ Day3 は「Cursor を開いて、Codex と Gemini を実際に動かす」ハン
 
 このページは、**Day3 の講義で実際にターミナルに打つコマンド集**です。
 
-v1.0.8 の安全なパッケージは既に Desktop（または Documents）に展開済み、インストールも完了している前提です。
+v1.0.9 の安全なパッケージは既に Desktop（または Documents）に展開済み、インストールも完了している前提です。
 
 > 参考：インストール手順は `docs/01_学校PCで使う.md` を見てください。
 
@@ -110,7 +110,7 @@ powershell -ExecutionPolicy Bypass -File .ai-safety\hooks\windows\launch-codex-s
 
 - 最初、Codex のプロンプトが出ます：`codex>`
 - ここに、あなたの指示を日本語で打ち込めます
-- v1.0.8 では、以下の防御が**勝手に**効いています：
+- v1.0.9 では、以下の防御が**勝手に**効いています：
   - workspace 外への書き込みは OS が拒否（`--sandbox workspace-write`）
   - インターネット通信は全ブロック（`network_access = false`）
   - **危ないコマンドを実行しようとすると、承認ダイアログが出て止まる**（`--ask-for-approval untrusted`）
@@ -182,7 +182,7 @@ powershell -ExecutionPolicy Bypass -File .ai-safety\hooks\windows\launch-gemini-
 
 **Codex との違い**
 
-v1.0.8 では、Gemini CLI は **Policy Engine（ポリシー判定）だけ効きます**。承認ダイアログ（hook）はまだ実装されていません。つまり：
+v1.0.9 では、Gemini CLI は **Policy Engine（ポリシー判定）だけ効きます**。承認ダイアログ（hook）はまだ実装されていません。つまり：
 
 - ファイル削除、インターネット送信のような危ないコマンドは、Policy Engine で検査されます
 - ただし「ダイアログで止まる」という体験は、Codex ほど明確ではありません
@@ -255,7 +255,7 @@ gemini --version
 
 ### 「承認ダイアログが出ない」
 
-v1.0.8 では、`--ask-for-approval untrusted` が有効になっているので、危ないコマンド（`rm`、`curl`、`python -c` など）を試すとダイアログが出るはずです。もし出なかったら：
+v1.0.9 では、`--ask-for-approval untrusted` が有効になっているので、危ないコマンド（`rm`、`curl`、`python -c` など）を試すとダイアログが出るはずです。もし出なかったら：
 
 - Codex / Gemini の新しいバージョンが自動アップデートされた可能性
 - launcher が実際に動いていない可能性
