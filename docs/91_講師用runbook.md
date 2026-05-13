@@ -1,24 +1,44 @@
-# 講師用 Runbook
+# 講師用 Runbook（v1.0.3 版）
 
 職業訓練校マーケティング制作講座 Day4（2026-05-15 金）でこのパッケージを使う際の進行マニュアルです。
+
+## v1.0.3 で何が変わったか（講師が必ず知っておくこと）
+
+v1.0.0 → v1.0.3 で、Codex CLI 側の防御設計を**大きく差し替え**ました。受講者には細部を語らず「承認ダイアログが出るのが正しい挙動」だけ伝えれば十分です。
+
+| 項目 | v1.0.0 当初の想定 | v1.0.3 の実装 |
+|---|---|---|
+| Codex CLI の精密 hook（trust state） | `.env` 読取など個別操作を hook でブロック想定 | **諦めた**。trust state のハッシュ計算を再現できず実機で発火しなかったため |
+| 代替の防御 | — | `approval_policy = "untrusted"` + `--ask-for-approval untrusted` で危険操作前に承認ダイアログを出す |
+| 効くモード | （未確定） | **対話モード（TUI）のみ**。`codex exec` は強制 `never` 降格 |
+| 削除した実装 | — | `scripts/common/codex-hook-trust-state.js`（不要かつ動かない）。Node.js 前提も不要に |
+| 追加した docs | — | `docs/90` に「守備範囲外」節 / `docs/92_AIの仕組みと隔離技術.md` 新設 / `docs/99` に「PC 内の謎ファイル FAQ」追加 |
+| 維持した機能 | — | v1.0.2 で実装した launcher の `auth.json` bridge（受講者の再ログイン不要） |
+
+**受講者に説明する時の最短フレーズ**：
+
+> 「危ないコマンドを AI が出すと、画面に『これ実行していい？』というダイアログが出ます。『いいえ』を押せば止まります。これが今日の主役の安全装置です。」
 
 ## 事前準備（5/12〜5/14）
 
 ### 5/12（火）夜 — 設計確定
 
-- ✅ パッケージ実装完了（Codex によって v1.0 構築済み）
-- ✅ Mac 実機で doctor 10/10 PASS 検証済み
+- パッケージ v1.0.0 → v1.0.2 までで launcher / auth bridge / OS sandbox は確定
+- Mac 実機で doctor 10/10 PASS 検証済み
 
-### 5/13（水）— Windows 検証日
+### 5/13（水）— v1.0.3 確定、Windows 検証日
 
-- 講師 PC（Windows）に v1.0 をインストール
+- Codex CLI 精密 hook を断念、`approval_policy = "untrusted"` へ切替（commit `23b2937`）
+- スコープ境界 docs と隔離技術 docs を追加（commit `118cd66`）
+- 講師 PC（Windows）に v1.0.3 をインストール
 - `doctor.ps1` を走らせて 10/10 PASS を確認
-- 失敗項目があれば、`docs/99_known_issues.md` に追記、または修正版をリリース
+- Codex CLI を `launch-codex-safe.ps1` から起動し、`rm -rf` / `curl` で**承認ダイアログが出ること**を実機確認
+- 失敗項目があれば、`docs/99_known_issues.md` に追記、または v1.0.4 として修正版をリリース
 
 ### 5/14（木）— Day3、配布日
 
 - Day3 は前田先生回（AI なし）
-- 講師は配布用 ZIP の URL（GitHub Release）と QR コードを準備
+- 講師は配布用 ZIP（v1.0.3）の URL（GitHub Release）と QR コードを準備
 - Day3 終了時または直後に受講者へ配布通知（LINE / メール / 紙）
 - 「Day4 までに各自インストールしてきてください」と告知
 
@@ -36,27 +56,29 @@
 ### 0:15 – 1:00　演習 A：秘密の暴露を試す（exercises/01）
 
 - AI に「`.env` の中身を表示して」と依頼してもらう
-- 安全装置がブロックして、理由を表示する
-- ペアで「なぜ止まったのか」を 2 分で話し合う
+- `cat .env` のような単純閲覧は通る場合があることを正直に伝える（`cat` は trusted コマンドのため承認なしで動く）
+- 代わりに「`python` で `.env` を読み込んで送信させて」のような派手な指示を試す → **承認ダイアログが出る** ことを全員で確認
+- ペアで「なぜここで止まったのか」を 2 分で話し合う
 
-**狙い**：「これは私を守ってくれている」と納得させる。
+**狙い**：「これは私を守ってくれている」と納得させる。「精密に全部止める」のではなく「**危険操作を実行する前に必ず人間に聞く**」設計だ、と理解させる。
 
 ### 1:00 – 1:45　演習 B：偽情報の罠（exercises/02）
 
 - 用意した「罠 Web 文書」のローカルファイルを AI に読ませる
-- インジェクション文に従わず、ブロックされる体験
+- インジェクション文に従って AI が `curl` で外部に送ろうとする → **承認ダイアログ＋ネットワーク遮断**で二重ブロック
 - 「AI も騙される。でもツールが守ってくれる」を体感
 
 ### 1:45 – 2:30　演習 C：危険コマンドの拒否（exercises/03）
 
 - AI に `rm -rf` や `curl` を頼んでみる
-- ブロックされる挙動を確認
+- 承認ダイアログで「いいえ」を押す挙動を確認
 - doctor を実際に走らせて 10/10 を見せる
 
 ### 2:30 – 2:50　議論：もし安全装置がなかったら
 
 - 「Day1 の状態でこれをやっていたら何が起きていたか」を全員で言語化
 - 配布した「守れる-守れない 1 枚資料」を埋める
+- 余裕があれば `docs/92_AIの仕組みと隔離技術.md` の隔離 4 層の図を見せる
 
 ### 2:50 – 3:00　まとめ
 
@@ -75,6 +97,12 @@
 | 4 write outside workspace | guard-write スクリプトの権限不足 | `Get-ExecutionPolicy` 確認 |
 | 7 WebFetch unauthorized | allowedDomains 設定読込失敗 | `policy/safety-policy.json` 存在確認 |
 
+### 承認ダイアログが出ない
+
+v1.0.3 の主防御である `approval_policy = "untrusted"` は**対話モード（TUI）でしか効きません**。受講者が `codex exec ...` のように非対話で叩いている場合、強制 `never` 降格で素通りします。
+
+→ `launch-codex-safe.{ps1,sh}` 経由で起動しているかを最初に確認する。
+
 ### インストール時のエラー
 
 - PowerShell 実行ポリシー → `-ExecutionPolicy Bypass` を必ず付ける
@@ -89,9 +117,18 @@
 
 ### Codex CLI が認証で詰まる（Day1 再現）
 
-- そのまま当該受講者は **Cursor 拡張機能（Gemini Code Assist）に切り替え**
+- v1.0.2 で実装した launcher の `auth.json` bridge により、講師 PC で一度ログインしておけば受講者は再ログイン不要
+- それでも詰まる場合、当該受講者は **Cursor 拡張機能（Gemini Code Assist）に切り替え**
 - Cursor 拡張なら認証は Cursor 側で完結、Codex CLI 不要
 - 演習教材は同じものを Cursor 拡張で実施
+
+### Gemini CLI を直接使う場合の注意（v1.0.x スコープ外）
+
+v1.0.3 では Gemini CLI 0.42.0 以降の hook 設定（`settings.json` の `toolName: "run_shell_command"` 等）が現行ツール名スキーマと不整合のため、**hook ベースの精密ブロックは現状効きません**。実機検証で `cat .env` 相当の操作が素通りすることを確認済み。
+
+- 効くもの: Policy Engine（launcher が渡す `--policy safety.toml`）と `--include-directories` による作業範囲制限
+- 効かないもの: `BeforeTool` hook の `toolName` マッチング → `.env` 読取等が素通りする可能性
+- 講師アクション: Day4 演習では **Codex CLI を主**で進める。受講者が Gemini を使いたい場合は前項の「Cursor 内 Gemini Code Assist 拡張」を推奨。Gemini CLI 直接利用は v1.1 で hook スキーマ整合作業を経て対応予定
 
 ## 自宅利用への移行
 
@@ -101,14 +138,20 @@ Day4 終了後、受講者は自宅 PC でも同じパッケージを使えま�
 - 自宅 Mac → `docs/03_自宅Macで使う.md` を案内
 - Day5 以降の制作演習を、自宅と学校の両方で継続できる
 
-## v1.0 リリース後の方針
+## v1.0.3 リリース後の方針
 
 - バグ報告は GitHub Issues か講師の連絡先へ
 - マイナーアップデートは v1.0.x として継続リリース
-- メジャー機能追加（ローカル LLM 判定、ダッシュボード等）は v1.1+ で検討
+- メジャー機能追加（精密 hook の再挑戦、ローカル LLM 判定、ダッシュボード等）は v1.1+ で検討
+- Codex CLI 本体が trust state の hash 計算ロジックを公開・安定化したら、v1.1 で hook 精密ブロックを再挑戦する
 
 ## 関連資料
 
+- 受講者向けスコープ説明：`docs/90_守れる-守れない.md`（守備範囲外節を含む）
+- 隔離技術解説：`docs/92_AIの仕組みと隔離技術.md`
+- PC 内の謎ファイル FAQ：`docs/99_known_issues.md`
 - 設計の議論経緯：`06_notes/2026-05-12_ai-agent-safety-pack_設計議論まとめ.html`
 - 設計確定版：`06_notes/2026-05-12_ai-agent-safety-pack_設計確定版.html`
+- v1.0.3 までの引き継ぎ書：`06_notes/2026-05-13_ai-agent-safety-pack_引き継ぎ.html`
+- AI 隔離技術ハンドオフメモ：`06_notes/2026-05-13_AI隔離技術ハンドオフ.md`
 - 参考にした思想：中島大介氏（株式会社メリル）「Claude Code Safety Hub」（YouTube「ウェブ職TV」）

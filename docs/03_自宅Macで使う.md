@@ -1,6 +1,6 @@
 # 自宅 Mac で使う
 
-自分の Mac で AI エージェント安全運用パッケージを使う手順です。
+自分の Mac で AI エージェント安全運用パッケージ v1.0.3 を使う手順です。
 
 ## Mac の利点
 
@@ -15,7 +15,7 @@ Mac では macOS の Seatbelt サンドボックスが Codex CLI と連動しま
 
 ## ステップ 1：パッケージのダウンロード
 
-GitHub の Release ページから ZIP をダウンロード。
+GitHub の Release ページから v1.0.3 の ZIP をダウンロード。
 
 ダウンロード先：`~/Downloads` または `~/Desktop`
 
@@ -55,6 +55,19 @@ cd ~/Documents/my-ai-workspace
 bash .ai-safety/hooks/macos/launch-codex-safe.sh
 ```
 
+これで Codex CLI が**対話モード（TUI）**で安全装置付きに起動します。
+
+v1.0.3 の launcher は次の構成を強制します。
+
+- `--sandbox workspace-write`：workspace 外への書き込みを macOS Seatbelt が OS レベルで拒否
+- `network_access = false`：外部通信を全遮断
+- `--ask-for-approval untrusted`：`cat` / `ls` / `sed` などの安全コマンド以外は、**実行前に承認プロンプト**を出す
+- `shell_environment_policy.exclude`：`OPENAI_API_KEY` などのシークレット環境変数を AI に渡さない
+
+`python -c "open('.env')..."` や `curl`、`rm -rf`、`git push --force` のような操作は承認プロンプトで止まります。そこで「いいえ」を押せば実行されません。
+
+> 注意：v1.0.3 の `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
+
 Claude Code の場合：
 
 ```bash
@@ -92,3 +105,9 @@ arch -x86_64 npm install -g @openai/codex
 - `doctor` で fail → 講師へ
 - Gatekeeper 警告（「開発元未確認」）→ 同梱スクリプトは未署名なので警告が出ることがあります。「右クリック → 開く」で初回のみ実行許可してください
 - ZIP 展開後に実行権限が落ちた → `chmod +x .ai-safety/hooks/macos/*.sh`
+
+## もう一歩深く知りたい人へ
+
+- 守れること／守れないこと、Computer Use / Cowork / ブラウザ ChatGPT が守備範囲外な理由：`docs/90_守れる-守れない.md`
+- VM・サンドボックスの違い、Mac の TCC と Windows の防御モデル比較：`docs/92_AIの仕組みと隔離技術.md`
+- PC 内の謎フォルダ・謎ファイル FAQ（`~/Library/Application Support/Claude/` が 20GB ある等）：`docs/99_known_issues.md`
