@@ -2,7 +2,7 @@
 
 ## 3 行で全部
 
-この日の全ての仕事は、以下の 3 行で完結します（Day1 の呪いを解き、launcher を起動するだけ）。
+この日の全ての仕事は、以下の 3 行で完結します）。
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
