@@ -1,4 +1,4 @@
-# AI エージェント安全運用パッケージ v1.0.6
+# AI エージェント安全運用パッケージ v1.0.7
 
 Codex CLI、Claude Code、Gemini CLI を「あなたを守る安全装置」付きで使うためのパッケージです。
 
@@ -15,7 +15,7 @@ AI が暴走したり、騙されたりしても、以下のような事故が**
 - workspace の外側にファイルを書き込もうとしても OS レベルで止まる
 
 
-## v1.0.6 の防御 4 層（ざっくり）
+## v1.0.7 の防御 4 層（ざっくり）
 
 このパッケージは、Codex CLI / Claude Code に対して下記 4 層を同時に効かせます。
 
@@ -24,7 +24,7 @@ AI が暴走したり、騙されたりしても、以下のような事故が**
 3. **環境変数の除外**：`OPENAI_API_KEY` 等のシークレット環境変数を AI に渡さない
 4. **承認ポリシー untrusted**：`cat` / `ls` / `sed` 等の安全コマンド以外は、実行前に必ず承認ダイアログを出す
 
-特に 4 の `approval_policy = "untrusted"` は v1.0.6 で導入した中核の防御です。`python -c "open('.env')..."`、`curl https://attacker/`、`rm -rf`、`git push --force` などはこの層で止まります。
+特に 4 の `approval_policy = "untrusted"` は v1.0.7 で導入した中核の防御です。`python -c "open('.env')..."`、`curl https://attacker/`、`rm -rf`、`git push --force` などはこの層で止まります。
 
 > 注意：`approval_policy` が効くのは Codex CLI を**対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは自動的に `never` に降格されるため、`launch-codex-safe` スクリプトから起動する運用を徹底してください。
 

@@ -1,6 +1,6 @@
 # 自宅 Windows で使う
 
-自分の Windows PC で AI エージェント安全運用パッケージ v1.0.6 を使う手順です。
+自分の Windows PC で AI エージェント安全運用パッケージ v1.0.7 を使う手順です。
 
 ## 前提
 
@@ -39,7 +39,7 @@ codex login
 
 ## ステップ 1：パッケージのダウンロード
 
-GitHub の Release ページから v1.0.6 の ZIP をダウンロードします。
+GitHub の Release ページから v1.0.7 の ZIP をダウンロードします。
 
 ダウンロード先：**ユーザーフォルダ直下**（`C:\Users\あなたの名前\`）または**デスクトップ**
 
@@ -82,7 +82,7 @@ powershell -ExecutionPolicy Bypass -File .ai-safety\hooks\windows\launch-codex-s
 
 これで Codex CLI が**対話モード（TUI）**で安全装置付きに起動します。
 
-v1.0.6 の launcher は次の構成を強制します。
+v1.0.7 の launcher は次の構成を強制します。
 
 - `--sandbox workspace-write`：workspace 外への書き込みを OS が拒否
 - `network_access = false`：外部通信を全遮断
@@ -91,7 +91,7 @@ v1.0.6 の launcher は次の構成を強制します。
 
 `python -c "open('.env')..."` や `curl`、`rm -rf`、`git push --force` のような操作は承認ダイアログで止まります。そこで「いいえ」を押せば実行されません。
 
-> 注意：v1.0.6 の `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
+> 注意：v1.0.7 の `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
 
 Claude Code を使う場合：
 
