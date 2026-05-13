@@ -122,6 +122,32 @@ v1.0.3 の主防御である `approval_policy = "untrusted"` は**対話モー�
 - Cursor 拡張なら認証は Cursor 側で完結、Codex CLI 不要
 - 演習教材は同じものを Cursor 拡張で実施
 
+### Windows の ConstrainedLanguage Mode 環境（hook が全部 fail に見える時）
+
+v1.0.5 以降では既定で `features.hooks = false` に切り替えたため、通常はこの症状は出ません。
+ただし旧バージョン（v1.0.4 以前）の launcher で起動した受講者環境で、Codex TUI 内に
+`PreToolUse hook (failed) error: hook exited with code 1` のような赤い行が連続して出ることがあります。
+
+原因: PowerShell が `ConstrainedLanguage Mode` で起動している環境（企業 AppLocker / WDAC / 学校 PC のグループポリシー）では、
+hook スクリプトが `[Console]::OutputEncoding` 等のプロパティ設定で `PropertySetterNotSupportedInConstrainedLanguage` 例外を出して死にます。
+
+確認方法（受講者 PC で実行）:
+
+```powershell
+$ExecutionContext.SessionState.LanguageMode
+```
+
+→ `ConstrainedLanguage` が返ったら確定。`FullLanguage` ならこの問題ではない。
+
+対処（v1.0.5 以降を配布した場合は不要）:
+
+- v1.0.5 以降に乗り換える（hook を呼ばないので fail メッセージも出ない）
+- v1.0.4 以前を使い続ける場合は、講師が「赤い hook failed は無視して OK、approval ダイアログが本日の主役」と事前案内する
+
+重要: hook が fail でも `approval_policy = "untrusted"` の最後の砦は機能します。
+受講者が `rm` / `python で .env 読取` / ファイル書込み を AI に頼んだ時、approval ダイアログが
+出て「No」を選べば止まります。Day4 演習の核心はこの動作なので、hook 失敗は致命傷ではありません。
+
 ### Gemini CLI を直接使う場合の注意（v1.0.x スコープ外）
 
 v1.0.3 では Gemini CLI 0.42.0 以降の hook 設定（`settings.json` の `toolName: "run_shell_command"` 等）が現行ツール名スキーマと不整合のため、**hook ベースの精密ブロックは現状効きません**。実機検証で `cat .env` 相当の操作が素通りすることを確認済み。

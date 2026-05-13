@@ -29,7 +29,6 @@ $argsList = @(
     "--profile", "safe",
     "--sandbox", "workspace-write",
     "--ask-for-approval", "untrusted",
-    "--enable", "hooks",
     "-c", "windows.sandbox=`"unelevated`""
 )
 

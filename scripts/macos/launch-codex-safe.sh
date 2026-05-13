@@ -17,7 +17,7 @@ if [ -f "$HOME/.codex/auth.json" ] && [ ! -e "$CODEX_HOME/auth.json" ]; then
   ln -sf "$HOME/.codex/auth.json" "$CODEX_HOME/auth.json"
 fi
 
-cmd=(codex --cd "$workspace" --profile safe --sandbox workspace-write --ask-for-approval untrusted --enable hooks)
+cmd=(codex --cd "$workspace" --profile safe --sandbox workspace-write --ask-for-approval untrusted)
 if command -v caffeinate >/dev/null 2>&1; then
   cmd=(caffeinate -dimsu "${cmd[@]}")
 fi

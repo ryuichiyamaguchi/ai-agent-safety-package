@@ -3,7 +3,7 @@ approval_policy = "untrusted"
 model_reasoning_effort = "medium"
 
 [features]
-hooks = true
+hooks = false
 
 [sandbox_workspace_write]
 network_access = false
