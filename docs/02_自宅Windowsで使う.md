@@ -12,7 +12,30 @@
 Cursor / Codex CLI のインストールが未済の方は、まず以下を済ませてください。
 
 - Cursor：[cursor.com](https://cursor.com) から DL してインストール
-- Codex CLI：Cursor 内で `npm install -g @openai/codex`（または公式手順）
+- Node.js：[nodejs.org](https://nodejs.org/) から LTS 版 MSI を DL してインストール（`npm install` に必要）
+- Codex CLI：Cursor 内で `npm install -g @openai/codex`（次の「ステップ 0」を済ませてから）
+
+## ステップ 0：最初の儀式（5分・必須）
+
+Cursor のターミナルを開いて、以下の 1 行を実行してください。**Codex CLI を `npm install` する前に必ずやってください**。
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+確認プロンプトで `Y` を押す → 完了。
+
+**なぜ必要か**：Windows の標準設定では PowerShell スクリプトの実行が止められており、このままだと `npm` コマンド（実体は `npm.ps1`）や一部の `.ps1` スクリプトが動きません。この 1 行で「自分のユーザーの範囲だけ、署名付きスクリプトを許可する」設定に変えます（システム全体には影響しません）。
+
+**一度実行すれば永続的に有効**です。
+
+実行後、PowerShell を一度閉じて開き直すと確実です。その後で：
+
+```powershell
+npm install -g @openai/codex
+codex --version
+codex login
+```
 
 ## ステップ 1：パッケージのダウンロード
 
