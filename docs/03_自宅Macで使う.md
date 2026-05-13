@@ -1,6 +1,6 @@
 # 自宅 Mac で使う
 
-自分の Mac で AI エージェント安全運用パッケージ v1.0.3 を使う手順です。
+自分の Mac で AI エージェント安全運用パッケージ v1.0.5 を使う手順です。
 
 ## Mac の利点
 
@@ -15,7 +15,7 @@ Mac では macOS の Seatbelt サンドボックスが Codex CLI と連動しま
 
 ## ステップ 1：パッケージのダウンロード
 
-GitHub の Release ページから v1.0.3 の ZIP をダウンロード。
+GitHub の Release ページから v1.0.5 の ZIP をダウンロード。
 
 ダウンロード先：`~/Downloads` または `~/Desktop`
 
@@ -57,7 +57,7 @@ bash .ai-safety/hooks/macos/launch-codex-safe.sh
 
 これで Codex CLI が**対話モード（TUI）**で安全装置付きに起動します。
 
-v1.0.3 の launcher は次の構成を強制します。
+v1.0.5 の launcher は次の構成を強制します。
 
 - `--sandbox workspace-write`：workspace 外への書き込みを macOS Seatbelt が OS レベルで拒否
 - `network_access = false`：外部通信を全遮断
@@ -66,7 +66,7 @@ v1.0.3 の launcher は次の構成を強制します。
 
 `python -c "open('.env')..."` や `curl`、`rm -rf`、`git push --force` のような操作は承認プロンプトで止まります。そこで「いいえ」を押せば実行されません。
 
-> 注意：v1.0.3 の `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
+> 注意：v1.0.5 の `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
 
 Claude Code の場合：
 
