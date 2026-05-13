@@ -1,5 +1,5 @@
 sandbox_mode = "workspace-write"
-approval_policy = "never"
+approval_policy = "untrusted"
 model_reasoning_effort = "medium"
 
 [features]
@@ -29,7 +29,7 @@ exclude = [
 
 [profiles.safe]
 sandbox_mode = "workspace-write"
-approval_policy = "never"
+approval_policy = "untrusted"
 model_reasoning_effort = "medium"
 
 [profiles.safe.sandbox_workspace_write]
