@@ -1,6 +1,6 @@
 # AI Safety Workspace Rules
 
-This workspace is managed by AI Safety Package v1.0.7.
+This workspace is managed by AI Safety Package v1.0.8.
 
 - Start agents only through the provided safe gateway or launch scripts.
 - Keep real keys, tokens, customer data, and private access files outside this workspace.
