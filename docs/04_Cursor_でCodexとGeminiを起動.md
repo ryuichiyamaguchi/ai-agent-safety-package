@@ -34,7 +34,7 @@ v1.0.8 の安全なパッケージは既に Desktop（または Documents）に�
 
 ---
 
-## 0. 最初の儀式（Day1 の傷を癒す）
+## 0. 最初の儀式
 
 ### Set-ExecutionPolicy（1 回目：必須）
 
