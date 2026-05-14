@@ -219,17 +219,54 @@ my-project/
   data/
 ```
 
-### Q. このパッケージが「環境変数を読ませない」のに、AI はどうやって API キーを使うんですか？
-
-A. 本物の利用環境では、API キーは「ユーザーが明示的に」コード内に渡します。
+### ❌ レベル 0：絶対 NG — コードに直接書く
 
 ```python
-# ユーザーが手動で API キーを渡す例
-client = OpenAI(api_key="sk-proj-AbCd...")  # ← 自分で書く
-response = client.chat.completions.create(...)
+client = OpenAI(api_key="sk-proj-AbCd...")  # ← 絶対NG
 ```
 
-つまり「環境変数から自動的に読む」のではなく「ユーザーが直接指定する」設計にすることで、漏洩リスクを減らせます。
+GitHub に push した瞬間に世界中に公開されます。 bot が秒単位でスキャンしているので、数分で誰かに使われ始めます（過去に何度も事故が起きています）。
+
+### ⚠️ レベル 1：基本 — `.env` ファイル + 環境変数（ローカル開発のデファクト）
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])  # 環境変数から読む
+```
+
+- `OPENAI_API_KEY` は `.env` ファイルに書く
+- `.env` を `.gitignore` で GitHub から除外する
+- アプリ起動時に `.env` の中身が環境変数に展開され、`os.environ` から読み取る
+
+ローカル開発でよく使われる方法ですが、**`.env` ファイルは PC 内に平文で保存される**ため、完璧ではありません。 PC が盗まれたり、別のソフトウェアに読まれたりするリスクは残ります。
+
+### ✅ レベル 2：より安全 — OS の暗号化保管庫（キーチェーン）
+
+OS にはユーザーごとに暗号化された保管庫が標準で備わっています。 そこにキーを置き、コードからは `keyring` ライブラリ経由で取り出します。
+
+- **macOS**: キーチェーン（Keychain）
+- **Windows**: 資格情報マネージャー（Credential Manager）
+- **Linux**: Secret Service（GNOME Keyring / KWallet など）
+
+```python
+import keyring
+from openai import OpenAI
+
+api_key = keyring.get_password("openai", "default")  # OSの暗号化保管庫から取り出す
+client = OpenAI(api_key=api_key)
+```
+
+キーチェーンに保存されたキーは、OS がログインユーザーごとに暗号化して保管します。 `.env` ファイルが平文で残るリスクを避けられます。 個人の本番運用ならこれが最低ライン。
+
+### 🏢 レベル 3：本番運用 — クラウドのシークレット管理サービス
+
+チーム開発や本番サーバーでは、**AWS Secrets Manager** / **HashiCorp Vault** / **GCP Secret Manager** / **Azure Key Vault** のようなクラウドサービスからランタイムで取得します。 IAM ロール（権限制御）と組み合わせて、「このサーバーだけがこのキーを読める」状態にします。 今日は概念だけ知っておけば十分。
+
+---
+
+**このパッケージが守ってくれるのは、上のどのレベルであっても、AI エージェント（Codex / Gemini / Claude Code）が悪意のあるプロンプトを受け取って、勝手に `.env` やキーチェーンを読んで外部に送信する事故**です。 あなた自身は、最低でもレベル 1（`.env`）、本格運用ならレベル 2（キーチェーン）を使ってください。
 
 ---
 
