@@ -54,21 +54,23 @@ Cursor で展開したフォルダを開きます。
 Cursor の Terminal で以下を実行：
 
 ```
-powershell -ExecutionPolicy Bypass -File scripts\windows\install.ps1 -Workspace "$env:USERPROFILE\Documents\my-ai-workspace"
+powershell -File scripts\windows\install.ps1 -Workspace "$env:USERPROFILE\Documents\my-ai-workspace"
 ```
+
+※ 事前に `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` を実行済みであることが前提です（ステップ 0 参照）。
 
 `my-ai-workspace` は好きな名前に変更可。`Documents` 配下に作るのを推奨します。
 
 `-InstallGlobalClaudeSettings` オプションを付けると、グローバルの Claude 設定も上書きされます（バックアップ付き）。`safe-workspace` の外で Claude を起動した時にも基本防御を効かせたい場合のみ付けてください。
 
 ```
-powershell -ExecutionPolicy Bypass -File scripts\windows\install.ps1 -Workspace "$env:USERPROFILE\Documents\my-ai-workspace" -InstallGlobalClaudeSettings
+powershell -File scripts\windows\install.ps1 -Workspace "$env:USERPROFILE\Documents\my-ai-workspace" -InstallGlobalClaudeSettings
 ```
 
 ## ステップ 4：動作確認
 
 ```
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Documents\my-ai-workspace\.ai-safety\hooks\windows\doctor.ps1"
+powershell -File "$env:USERPROFILE\Documents\my-ai-workspace\.ai-safety\hooks\windows\doctor.ps1"
 ```
 
 `pass=10 fail=0` を確認。
@@ -77,7 +79,7 @@ powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Documents\my-ai-works
 
 ```
 cd $env:USERPROFILE\Documents\my-ai-workspace
-powershell -ExecutionPolicy Bypass -File .ai-safety\hooks\windows\launch-codex-safe.ps1
+powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1
 ```
 
 これで Codex CLI が**対話モード（TUI）**で安全装置付きに起動します。
@@ -96,7 +98,7 @@ v1.0.9 の launcher は次の構成を強制します。
 Claude Code を使う場合：
 
 ```
-powershell -ExecutionPolicy Bypass -File .ai-safety\hooks\windows\launch-claude-safe.ps1
+powershell -File .ai-safety\hooks\windows\launch-claude-safe.ps1
 ```
 
 ## 自分の本物のプロジェクトで使う
@@ -112,9 +114,9 @@ powershell -ExecutionPolicy Bypass -File .ai-safety\hooks\windows\launch-claude-
 ## バックアップ / リストア / アップデート
 
 ```
-powershell -ExecutionPolicy Bypass -File .ai-safety\hooks\windows\backup.ps1
-powershell -ExecutionPolicy Bypass -File .ai-safety\hooks\windows\update-safety.ps1
-powershell -ExecutionPolicy Bypass -File .ai-safety\hooks\windows\restore.ps1
+powershell -File .ai-safety\hooks\windows\backup.ps1
+powershell -File .ai-safety\hooks\windows\update-safety.ps1
+powershell -File .ai-safety\hooks\windows\restore.ps1
 ```
 
 ## 困った時

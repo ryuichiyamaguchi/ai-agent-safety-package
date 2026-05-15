@@ -82,8 +82,10 @@ bash .ai-safety/hooks/macos/launch-claude-safe.sh
 
 ```powershell
 cd "$env:USERPROFILE\Documents\my-ai-workspace"
-powershell -ExecutionPolicy Bypass -File ".ai-safety\hooks\windows\launch-claude-safe.ps1"
+powershell -File ".ai-safety\hooks\windows\launch-claude-safe.ps1"
 ```
+
+※ 事前に `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` を実行済みであることが前提です（docs/01 / docs/02 のステップ 0 参照）。
 
 launcher が次の防御を自動で有効にします。
 
@@ -105,7 +107,7 @@ launcher が次の防御を自動で有効にします。
 ### Windows
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Documents\my-ai-workspace\.ai-safety\hooks\windows\doctor.ps1"
+powershell -File "$env:USERPROFILE\Documents\my-ai-workspace\.ai-safety\hooks\windows\doctor.ps1"
 ```
 
 `pass=10 fail=0` と出ればOKです。10 種の攻撃がすべてブロックされていることを確認できます。

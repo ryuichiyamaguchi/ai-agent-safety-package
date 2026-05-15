@@ -4,13 +4,21 @@ v1.0 時点で把握している既知の問題と回避策。
 
 ## Windows
 
-### `doctor.ps1` 起動時に PowerShell の実行ポリシー警告
+### ExecutionPolicy の変更が許可されない端末（学校 PC など）
 
-回避：`-ExecutionPolicy Bypass` を付ける。
+通常運用では、最初に一度だけ以下を実行しておけばパッケージ内のスクリプトは素の `powershell -File ...` で動きます。
 
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
+
+ただし組織のグループポリシーによっては `Set-ExecutionPolicy` 自体が拒否される場合があります。その場合の**最終手段の回避策**として、その都度以下のように `-ExecutionPolicy Bypass` を明示する運用も可能です。
+
+```powershell
 powershell -ExecutionPolicy Bypass -File <スクリプトパス>
 ```
+
+**重要**：これは「自分が中身を確認した、信頼できるスクリプト」だけに使うこと。**他人から渡された `.ps1` に対して `-Bypass` を付けない**原則は守ってください（詳しくは `docs/01_学校PCで使う.md` のコラム「`-ExecutionPolicy Bypass` は使わない」参照）。
 
 ### Codex CLI の Windows サンドボックスが効かない
 

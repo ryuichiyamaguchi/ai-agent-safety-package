@@ -7,7 +7,7 @@
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 Unblock-File -Path .ai-safety\hooks\windows\launch-codex-safe.ps1
-powershell -ExecutionPolicy Bypass -File .ai-safety\hooks\windows\launch-codex-safe.ps1
+powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1
 ```
 
 1 行目は既に Day1 でやったなら飛ばしてOK。2 行目も一度実行すれば二度目以降は不要。3 行目だけが毎日のコマンドです。
@@ -103,7 +103,7 @@ Cursor の下部に黒いターミナルウィンドウが出ればOK。ここ�
 ターミナルに以下をコピペして Enter：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .ai-safety\hooks\windows\launch-codex-safe.ps1
+powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1
 ```
 
 **何が起こるか**
@@ -172,7 +172,7 @@ Terminal → New Terminal
 その新しいタブで：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .ai-safety\hooks\windows\launch-gemini-safe.ps1
+powershell -File .ai-safety\hooks\windows\launch-gemini-safe.ps1
 ```
 
 **何が起こるか**
@@ -321,7 +321,7 @@ A：大丈夫です。Policy Engine が自動的に危ないコマンドを拒�
 毎日、Cursor でプロジェクトフォルダを開いたら、ターミナルにこの 1 行を貼るだけ：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .ai-safety\hooks\windows\launch-codex-safe.ps1
+powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1
 ```
 
 （Day1 で `Set-ExecutionPolicy` と `Unblock-File` を一度済ませていれば、これだけでOK）
