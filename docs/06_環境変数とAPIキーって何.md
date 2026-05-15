@@ -339,6 +339,8 @@ cp workspace-template/aiexclude.template /path/to/workspace/.aiexclude
 
 `.gitignore` と `.aiexclude` の両方に **`.codex/` `.claude/` `.gemini/` `.ai-safety/logs/`** が含まれていることを確認してから `git init` / `git add` してください。
 
+> Windows の `launch-codex-safe.ps1` は v1.0.10 以降、`auth.json` を workspace 内に物理コピーせず、`~/.codex/auth.json` への **SymbolicLink**（生成できない環境では ACL ロックダウン + Hidden 属性付きフォールバックコピー）として配置します。よって `.gitignore` を外して `git add -f .codex` してもリンク本体だけが上がり、トークン実体は `~/.codex/auth.json` に留まります（ただし `git` の挙動はバージョン依存なので、運用上は `.gitignore` での除外を必ず維持してください）。
+
 すでに add してしまった場合の対処:
 
 ```bash
