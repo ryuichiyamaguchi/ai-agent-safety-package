@@ -86,10 +86,25 @@ extract_url() {
   printf '%s' "$RAW_INPUT" | sed -nE 's/.*"url"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -n 1
 }
 
-is_allowed_domain() {
+is_blocked_domain() {
   local host="$1"
   case "$host" in
-    developers.openai.com|*.developers.openai.com|platform.openai.com|*.platform.openai.com|docs.anthropic.com|*.docs.anthropic.com|code.claude.com|*.code.claude.com|github.com|*.github.com|raw.githubusercontent.com|*.raw.githubusercontent.com|gemini.google.com|*.gemini.google.com|ai.google.dev|*.ai.google.dev|cloud.google.com|*.cloud.google.com|registry.npmjs.org|pypi.org|files.pythonhosted.org)
+    gist.github.com|*.gist.github.com|gist.githubusercontent.com|*.gist.githubusercontent.com|*.pages.dev|*.workers.dev|pastebin.com|*.pastebin.com|hastebin.com|*.hastebin.com|0x0.st|transfer.sh|*.transfer.sh|file.io|*.file.io|anonfiles.com|*.anonfiles.com)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_allowed_domain() {
+  local host="$1"
+  if is_blocked_domain "$host"; then
+    return 1
+  fi
+  case "$host" in
+    developers.openai.com|*.developers.openai.com|platform.openai.com|*.platform.openai.com|docs.anthropic.com|*.docs.anthropic.com|code.claude.com|*.code.claude.com|github.com|api.github.com|raw.githubusercontent.com|objects.githubusercontent.com|docs.github.com|gemini.google.com|*.gemini.google.com|ai.google.dev|*.ai.google.dev|cloud.google.com|*.cloud.google.com|registry.npmjs.org|pypi.org|files.pythonhosted.org)
       return 0
       ;;
     *)

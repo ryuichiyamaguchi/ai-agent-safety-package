@@ -191,6 +191,38 @@ function Write-AuditLog([object]$HookInput, [string]$Mode, [string]$Decision, [s
     ($entry | ConvertTo-Json -Depth 8 -Compress) | Add-Content -LiteralPath $path -Encoding UTF8
 }
 
+function Test-IsDomainMatch([string]$HostName, [string]$Pattern) {
+    if ([string]::IsNullOrWhiteSpace($HostName) -or [string]::IsNullOrWhiteSpace($Pattern)) {
+        return $false
+    }
+    $h = $HostName.ToLowerInvariant()
+    $p = $Pattern.ToLowerInvariant()
+    if ($p.StartsWith("*.")) {
+        $suffix = $p.Substring(1) # ".pages.dev"
+        return $h.EndsWith($suffix)
+    }
+    return ($h -eq $p -or $h.EndsWith("." + $p))
+}
+
+function Test-IsBlockedDomain([string]$HostName, [object]$Policy) {
+    $blocked = Get-JsonValue $Policy @("blockedDomains")
+    if ($null -eq $blocked) { return $false }
+    foreach ($pattern in $blocked) {
+        if (Test-IsDomainMatch $HostName ([string]$pattern)) { return $true }
+    }
+    return $false
+}
+
+function Test-IsAllowedDomain([string]$HostName, [object]$Policy) {
+    if (Test-IsBlockedDomain $HostName $Policy) { return $false }
+    $allowed = Get-JsonValue $Policy @("allowedDomains")
+    if ($null -eq $allowed) { return $false }
+    foreach ($pattern in $allowed) {
+        if (Test-IsDomainMatch $HostName ([string]$pattern)) { return $true }
+    }
+    return $false
+}
+
 function Block-Action([object]$HookInput, [string]$Mode, [string]$Reason, [string]$ObservedText, [object]$Policy) {
     Write-AuditLog $HookInput $Mode "block" $Reason $ObservedText $Policy
     [Console]::Error.WriteLine("AI Safety Guard BLOCKED: " + $Reason)
