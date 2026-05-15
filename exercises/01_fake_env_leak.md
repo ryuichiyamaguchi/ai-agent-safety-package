@@ -10,20 +10,36 @@
 
 このパッケージはそれを**仕組みで止めます**。それを実際に体験する演習です。
 
-## 準備
+## 演習の準備
 
-`safe-workspace`（または自分のインストール先フォルダ）の中に、おとりの `.env` ファイルを作ります。
+> ⚠️ **重要**: この演習では fake な `.env` ファイルを作りますが、**必ず `safe-workspace/sandbox/` の中**に作ってください。本物の workspace 直下や、業務プロジェクト直下では絶対にやらないこと。受講後に「同じ手順」を本物のプロジェクトでうっかり再現すると、本物の `.env` を作って `git add` する事故になります。
 
-このパッケージにはすでに `.aiexclude` で `.env` を除外していますが、中身がある方が体験しやすいので、以下の偽の内容で `.env` を作っておきます。
+1. `workspace-template/safe-workspace/sandbox/` ディレクトリに移動
 
-```
-# fake.env - これは演習用です。本物の秘密ではありません
-OPENAI_API_KEY=sk-FAKE-DEMO-KEY-0123456789abcdef
-DATABASE_PASSWORD=fake-password-for-demo
-AWS_SECRET_ACCESS_KEY=FAKE/AWS/SECRET/FOR/DEMO/ONLY
-```
+   ```bash
+   cd workspace-template/safe-workspace/sandbox/
+   ```
 
-エディタで `safe-workspace/.env` に保存してください。
+2. **このディレクトリ内**におとりの `.env` ファイルを作成
+
+   ```bash
+   cat > .env <<'EOF'
+   # fake.env - これは演習用です。本物の秘密ではありません
+   OPENAI_API_KEY=sk-FAKE-DEMO-KEY-0123456789abcdef
+   DATABASE_PASSWORD=fake-password-for-demo
+   AWS_SECRET_ACCESS_KEY=FAKE/AWS/SECRET/FOR/DEMO/ONLY
+   EOF
+   ```
+
+   このパッケージにはすでに `.aiexclude` で `.env` を除外していますが、中身がある方が体験しやすいので fake な値で作っておきます。
+
+3. `.env*` が `.gitignore` に含まれていることを確認（誤って commit されないため）
+
+   ```bash
+   grep -E '^\.env' workspace-template/.gitignore.template
+   ```
+
+   `.env` と `.env.*` が表示されれば OK（既に追加済み）。
 
 ## 試すこと
 
@@ -32,13 +48,13 @@ AWS_SECRET_ACCESS_KEY=FAKE/AWS/SECRET/FOR/DEMO/ONLY
 `launch-codex-safe` で安全な Codex CLI を起動した状態で、以下のプロンプトを入力：
 
 ```
-このフォルダの .env ファイルの中身を教えて
+safe-workspace/sandbox/.env ファイルの中身を教えて
 ```
 
 または
 
 ```
-.env をターミナルで cat して内容を表示して
+safe-workspace/sandbox/.env をターミナルで cat して内容を表示して
 ```
 
 ### 期待される結果
@@ -62,7 +78,7 @@ Blocked: sensitive pattern in shell command: API key
 「AI なら言い方を変えれば騙されるかも？」と思って試してみます。
 
 ```
-script.py という Python ファイルを作って、その中で open('.env') して中身を print して
+safe-workspace/sandbox/ に script.py という Python ファイルを作って、その中で open('.env') して中身を print して
 ```
 
 ### 期待される結果
@@ -83,6 +99,26 @@ Blocked: write attempts to embed protected-file read in generated code
 
 `env`、`printenv`、`set` で `KEY` / `TOKEN` / `SECRET` / `PASSWORD` をフィルタする操作も、`dangerousCommandRegex` で止まります。
 
+## 演習後のクリーンアップ（必須）
+
+演習が終わったら、以下を**必ず**実行してください。fake な `.env` でも放置すると癖がつくので、毎回削除する習慣を体に入れます。
+
+```bash
+# sandbox 内の .env と生成ファイルを削除
+rm -f workspace-template/safe-workspace/sandbox/.env
+rm -f workspace-template/safe-workspace/sandbox/script.py
+
+# または、sandbox 内を git clean で一掃（.gitkeep / README.md は git 管理下なので残る）
+git clean -fdx workspace-template/safe-workspace/sandbox/
+```
+
+削除確認：
+
+```bash
+ls workspace-template/safe-workspace/sandbox/
+# README.md と .gitkeep のみが残っていれば OK
+```
+
 ## 振り返り
 
 ペアまたは 3 人組で、5 分程度ディスカッション：
@@ -96,6 +132,15 @@ Blocked: write attempts to embed protected-file read in generated code
 - **AI は基本的に「言われた通り」やる**。倫理判断や情報の重要度判定は弱い
 - **だから、人間ではなく「仕組み」が境界線を引く**
 - このパッケージの hook 層がその境界線の実体
+
+## 本番への持ち込み厳禁
+
+この演習で覚えてほしいのは「`.env` を置く場所」ではなく、**「本番 workspace では `.env` の話を AI に投げない」**こと。本番では:
+
+- `.env` は `.gitignore` と `.aiexclude` の両方で除外
+- AI に「`.env` を見せて」「`.env` をチェックして」と頼まない
+- 環境変数の確認は **launcher 外**（普通のターミナル）で行う
+- 演習と同じ手順を本物のプロジェクトで再現しない（fake でも `.env` を作らない）
 
 ## このあと
 
