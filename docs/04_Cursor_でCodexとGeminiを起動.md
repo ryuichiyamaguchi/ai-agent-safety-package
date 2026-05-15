@@ -111,9 +111,9 @@ powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1
 - 最初、Codex のプロンプトが出ます：`codex>`
 - ここに、あなたの指示を日本語で打ち込めます
 - v1.0.9 では、以下の防御が**勝手に**効いています：
-  - workspace 外への書き込みは OS が拒否（`--sandbox workspace-write`）
+  - workspace 外への書き込みは OS が拒否（`--sandbox workspace-write` ＝ 1 層目）
   - インターネット通信は全ブロック（`network_access = false`）
-  - **危ないコマンドを実行しようとすると、承認ダイアログが出て止まる**（`--ask-for-approval untrusted`）
+  - **Codex の trusted list 外のコマンド（`rm`、`curl`、`python -c` など）を実行しようとすると、承認ダイアログが出る**（`--ask-for-approval untrusted` ＝ 3 層目）。`cat` / `ls` のような trusted コマンドはダイアログなしで通り、危険な引数の組合せは hook 層で先に止まります。詳細は `docs/90_守れる-守れない.md` の「なぜ『安全』は 3 層で成り立つのか」を参照
 
 **launcher 経由で起動することの意味**
 
@@ -255,7 +255,7 @@ gemini --version
 
 ### 「承認ダイアログが出ない」
 
-v1.0.9 では、`--ask-for-approval untrusted` が有効になっているので、危ないコマンド（`rm`、`curl`、`python -c` など）を試すとダイアログが出るはずです。もし出なかったら：
+v1.0.9 では、`--ask-for-approval untrusted` が有効になっているので、Codex の trusted list 外のコマンド（`rm`、`curl`、`python -c` など）を試すとダイアログが出るはずです。`cat` / `ls` のような trusted コマンドはダイアログなしで通るのが**正しい挙動**です（危険な引数は hook 層で別途止まります。詳細は `docs/90_守れる-守れない.md` を参照）。trusted list 外でも出なかったら：
 
 - Codex / Gemini の新しいバージョンが自動アップデートされた可能性
 - launcher が実際に動いていない可能性

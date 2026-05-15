@@ -89,9 +89,9 @@ powershell -File ".ai-safety\hooks\windows\launch-claude-safe.ps1"
 
 launcher が次の防御を自動で有効にします。
 
-- `--sandbox workspace-write`：workspace の外への書き込みを OS レベルで拒否
-- `network_access = false`：外部通信を全遮断
-- `--ask-for-approval untrusted`：`cat`、`ls` などの安全コマンド以外は実行前に承認プロンプト
+- `--sandbox workspace-write`：workspace の外への書き込みを OS レベルで拒否（1 層目）
+- `network_access = false`：外部通信を全遮断（hook 層 + サンドボックス）
+- `--ask-for-approval untrusted`：Codex の trusted list（`cat`、`ls` などの安全コマンド）以外が来たときに、実行前に承認プロンプトを出す（3 層目）。`cat ~/.ssh/id_rsa` のような trusted コマンド + 危険な引数の組合せは approval をスキップするので、hook 層（`policy/safety-policy.json`）が代わりに止めます。**3 層のどこかで止まれば安全**というモデル。詳細は [docs/90_守れる-守れない.md](90_守れる-守れない.md) の「なぜ『安全』は 3 層で成り立つのか」を参照
 - `shell_environment_policy.exclude`：`OPENAI_API_KEY` などのシークレット環境変数を AI に渡さない
 
 ## ステップ 5：動作確認（重要）

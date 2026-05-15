@@ -22,9 +22,11 @@ AI が暴走したり、騙されたりしても、以下のような事故が**
 1. **OS サンドボックス**：macOS Seatbelt / Windows native の `workspace-write` モード（workspace 外への書き込みを OS が拒否）
 2. **ネットワーク遮断**：`network_access = false`（curl / wget / 外部送信を全ブロック）
 3. **環境変数の除外**：`OPENAI_API_KEY` 等のシークレット環境変数を AI に渡さない
-4. **承認ポリシー untrusted**：`cat` / `ls` / `sed` 等の安全コマンド以外は、実行前に必ず承認ダイアログを出す
+4. **承認ポリシー untrusted**：Codex の trusted list（`cat` / `ls` / `sed` 等の安全コマンド）以外が来たときに、実行前に承認ダイアログを出す（3 層目）
 
-特に 4 の `approval_policy = "untrusted"` は v1.0.9 で導入した中核の防御です。`python -c "open('.env')..."`、`curl https://attacker/`、`rm -rf`、`git push --force` などはこの層で止まります。
+特に 4 の `approval_policy = "untrusted"` は v1.0.9 で導入した中核の防御ですが、これは「全部止まる」スイッチではありません。`python -c "open('.env')..."`、`curl https://attacker/`、`rm -rf`、`git push --force` のような **trusted list 外**のコマンドが来たときに確認ダイアログを出します。一方、`cat ~/.ssh/id_rsa` のように trusted コマンド（`cat`）+ 危険な引数の組合せでは approval は出ず、2 層目（hook / policy.json）や 1 層目（OS サンドボックス）が止めます。**3 層のどこかで止まれば安全**というモデルです。
+
+> 詳細は [docs/90_守れる-守れない.md](docs/90_守れる-守れない.md) の「なぜ『安全』は 3 層で成り立つのか」を参照してください。
 
 > 注意：`approval_policy` が効くのは Codex CLI を**対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは自動的に `never` に降格されるため、`launch-codex-safe` スクリプトから起動する運用を徹底してください。
 
