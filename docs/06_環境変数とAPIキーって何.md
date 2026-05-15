@@ -313,3 +313,37 @@ const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_K
 
 docs/90 と docs/92 で「守れること・守れないこと」「隔離の仕組み」をさらに詳しく説明していますので、興味があれば読んでください。
 
+---
+
+## workspace を Git に上げるときの注意
+
+launcher（`launch-codex-safe.*` / `launch-claude-safe.*`）は、AI 認証情報を workspace 内に持ち込みます:
+
+- `.codex/auth.json` — Codex の OpenAI auth トークン
+- `.claude/` — Claude の設定
+- `.gemini/` — Gemini の認証情報
+
+**workspace をそのまま `git init` して `git add .` すると、これらが Git 履歴に混入します**。バックアップサービス（iCloud Drive / OneDrive / Google Drive / Dropbox）でも同様にクラウド側に上がります。
+
+### 対策
+
+workspace 直下に必ず以下を配置してください:
+
+```bash
+# workspace-template/.gitignore.template を workspace/.gitignore にコピー
+cp workspace-template/.gitignore.template /path/to/workspace/.gitignore
+
+# AI に読ませない除外設定（Gemini / Codex 共通）
+cp workspace-template/aiexclude.template /path/to/workspace/.aiexclude
+```
+
+`.gitignore` と `.aiexclude` の両方に **`.codex/` `.claude/` `.gemini/` `.ai-safety/logs/`** が含まれていることを確認してから `git init` / `git add` してください。
+
+すでに add してしまった場合の対処:
+
+```bash
+git rm -r --cached .codex .claude .gemini .ai-safety/logs
+git commit -m "remove leaked AI credentials"
+# 既に push 済みなら auth.json を必ずローテーション
+```
+

@@ -2,3 +2,13 @@ node_modules/
 dist/
 build/
 coverage/
+
+# AI エージェント認証情報を Git/AI コンテキストから除外
+# AI エージェント認証情報・状態
+.codex/
+.claude/
+.gemini/
+
+# 安全パッケージのログ
+.ai-safety/logs/
+.ai-safety/cache/

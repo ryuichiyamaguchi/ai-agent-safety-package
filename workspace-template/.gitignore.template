@@ -1,0 +1,34 @@
+# OS メタファイル
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# 依存
+node_modules/
+__pycache__/
+.venv/
+
+# ビルド
+dist/
+build/
+coverage/
+
+# AI エージェント認証情報・状態（必須）
+.codex/
+.claude/
+.gemini/
+
+# 安全パッケージのログ
+.ai-safety/logs/
+.ai-safety/cache/
+
+# 機密
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*
