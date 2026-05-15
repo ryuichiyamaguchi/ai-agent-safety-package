@@ -30,12 +30,11 @@ try {
         Block-Action $inputObj "webfetch" ("local/private network URL is blocked: " + $hostName) $text $policy
     }
 
-    $allowed = $false
-    foreach ($domain in $policy.allowedDomains) {
-        $d = ([string]$domain).ToLowerInvariant()
-        if ($hostName -eq $d -or $hostName.EndsWith("." + $d)) { $allowed = $true; break }
+    if (Test-IsBlockedDomain $hostName $policy) {
+        Block-Action $inputObj "webfetch" ("domain is block-listed: " + $hostName) $text $policy
     }
-    if (-not $allowed) {
+
+    if (-not (Test-IsAllowedDomain $hostName $policy)) {
         Block-Action $inputObj "webfetch" ("domain is not allow-listed: " + $hostName) $text $policy
     }
 
