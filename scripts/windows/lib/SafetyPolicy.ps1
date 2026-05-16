@@ -167,6 +167,31 @@ function ConvertTo-RedactedText([string]$Text, [object]$Policy) {
     return $out
 }
 
+function Set-AuditLogAcl([string]$Path) {
+    # M4: マルチユーザー環境で他ユーザーから監査ログが読まれないよう、
+    # ACL を継承解除して CurrentUser のみ FullControl に絞る。失敗しても本処理は継続。
+    try {
+        $acl = Get-Acl -LiteralPath $Path
+        $acl.SetAccessRuleProtection($true, $false)
+        # 既存の継承ルールを完全に取り除く
+        $existing = @($acl.Access)
+        foreach ($r in $existing) {
+            [void]$acl.RemoveAccessRule($r)
+        }
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $identity,
+            'FullControl',
+            'Allow'
+        )
+        $acl.SetAccessRule($rule)
+        Set-Acl -LiteralPath $Path -AclObject $acl
+    } catch {
+        # ACL 設定失敗は致命ではない（ログ出力は継続させる）
+        [Console]::Error.WriteLine("warn: failed to harden ACL on " + $Path + ": " + $_.Exception.Message)
+    }
+}
+
 function Write-AuditLog([object]$HookInput, [string]$Mode, [string]$Decision, [string]$Reason, [string]$ObservedText, [object]$Policy) {
     $logDir = $env:AI_SAFE_LOG_DIR
     if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
@@ -175,6 +200,11 @@ function Write-AuditLog([object]$HookInput, [string]$Mode, [string]$Decision, [s
     }
     $day = Get-Date -Format "yyyy-MM-dd"
     $path = Join-Path $logDir ("events-" + $day + ".jsonl")
+    $isNew = -not (Test-Path -LiteralPath $path)
+    if ($isNew) {
+        $null = New-Item -ItemType File -Force -Path $path
+        Set-AuditLogAcl $path
+    }
     $entry = [PSCustomObject]@{
         ts = (Get-Date).ToString("o")
         user = $env:USERNAME

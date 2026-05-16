@@ -131,7 +131,41 @@ Copy-WithBackup (Join-Path $packageRoot "configs\gemini\policies\safety.toml") (
 Copy-WithBackup (Join-Path $packageRoot "workspace-template\aiexclude.template") (Join-Path $Workspace ".aiexclude")
 
 if ($InstallGlobalClaudeSettings) {
-    Copy-WithBackup (Join-Path $packageRoot "configs\claude\settings.windows.json") (Join-Path $HOME ".claude\settings.json")
+    $globalSrc = Join-Path $packageRoot "configs\claude\settings.windows.json"
+    $globalTarget = Join-Path $HOME ".claude\settings.json"
+    # M16: 既存の global Claude 設定は他プロジェクトでも使われている可能性が高い。
+    # バックアップは取るが、上書き前に必ず diff を見せて y/n 確認する。
+    if (Test-Path -LiteralPath $globalTarget) {
+        $srcHash = (Get-FileHash -LiteralPath $globalSrc -Algorithm SHA256).Hash
+        $dstHash = (Get-FileHash -LiteralPath $globalTarget -Algorithm SHA256).Hash
+        if ($srcHash -eq $dstHash) {
+            Write-Host "Global Claude settings.json already matches package version; skipping."
+        } else {
+            Write-Host ("Existing global Claude settings found: " + $globalTarget)
+            Write-Host "----- diff (current -> package) -----"
+            $diff = Compare-Object `
+                -ReferenceObject (Get-Content -LiteralPath $globalTarget) `
+                -DifferenceObject (Get-Content -LiteralPath $globalSrc)
+            if ($diff) { $diff | Format-Table -AutoSize | Out-Host }
+            Write-Host "-------------------------------------"
+            $canPrompt = [Environment]::UserInteractive -and $Host.UI -and $Host.UI.RawUI
+            if ($canPrompt) {
+                $yn = Read-Host "Overwrite global ~/.claude/settings.json? [y/N]"
+                if ($yn -match '^[yY]$') {
+                    Copy-WithBackup $globalSrc $globalTarget
+                } else {
+                    Write-Host "Skipped global Claude settings install."
+                }
+            } else {
+                Write-Warning "Non-interactive shell: skipped global Claude settings install (set AI_SAFETY_STRICT=1 to force overwrite)."
+                if ($env:AI_SAFETY_STRICT -eq '1') {
+                    Copy-WithBackup $globalSrc $globalTarget
+                }
+            }
+        }
+    } else {
+        Copy-WithBackup $globalSrc $globalTarget
+    }
 }
 
 Write-Host "AI Safety package installed."

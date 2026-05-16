@@ -160,7 +160,35 @@ copy_with_backup "$package_root/configs/gemini/policies/safety.toml" "$workspace
 copy_with_backup "$package_root/workspace-template/aiexclude.template" "$workspace/.aiexclude"
 
 if [ "$install_global_claude" = "--global-claude" ]; then
-  copy_with_backup "$package_root/configs/claude/settings.mac.json" "$HOME/.claude/settings.json"
+  global_target="$HOME/.claude/settings.json"
+  global_src="$package_root/configs/claude/settings.mac.json"
+  # M16: 既存の global Claude 設定は他プロジェクトでも使われている可能性が高い。
+  # バックアップは取るが、上書き前に必ず diff を見せて y/n 確認する。
+  if [ -f "$global_target" ]; then
+    if cmp -s "$global_target" "$global_src"; then
+      echo "Global Claude settings.json already matches package version; skipping."
+    else
+      echo "Existing global Claude settings found: $global_target"
+      echo "----- diff (current -> package) -----"
+      diff -u "$global_target" "$global_src" || true
+      echo "-------------------------------------"
+      if [ -t 0 ]; then
+        printf "Overwrite global ~/.claude/settings.json? [y/N] "
+        read -r yn
+        case "$yn" in
+          y|Y) copy_with_backup "$global_src" "$global_target" ;;
+          *)   echo "Skipped global Claude settings install." ;;
+        esac
+      else
+        echo "Non-interactive shell: skipped global Claude settings install (set AI_SAFETY_STRICT=1 to force overwrite)." >&2
+        if [ "${AI_SAFETY_STRICT:-0}" = "1" ]; then
+          copy_with_backup "$global_src" "$global_target"
+        fi
+      fi
+    fi
+  else
+    copy_with_backup "$global_src" "$global_target"
+  fi
 fi
 
 echo "AI Safety package installed."

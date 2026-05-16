@@ -124,6 +124,29 @@ if ($LiveCodex) {
     Add-Result "live codex protected-read drill logged a block" $blocked ("lastMessage=" + $lastMessage)
 }
 
+# M17: fail-closed drill
+# policy.json を一時的に退避させ、guard-bash.ps1 が exit 2 で fail-closed することを確認する。
+# try/finally で必ず復元する（途中で例外が出てもポリシーが消えたまま残らない）。
+if (Test-Path -LiteralPath $policyPath) {
+    $drillBackup = $policyPath + ".drill-backup-" + [guid]::NewGuid().ToString("N")
+    Move-Item -LiteralPath $policyPath -Destination $drillBackup -Force
+    try {
+        $drillJson = New-HookJson "Bash" @{ command = "echo drill" }
+        $prevPolicy = $env:AI_SAFE_POLICY
+        $env:AI_SAFE_POLICY = $policyPath
+        try {
+            $drillResult = Invoke-Guard "guard-bash.ps1" $drillJson
+        } finally {
+            $env:AI_SAFE_POLICY = $prevPolicy
+        }
+        Add-Result "drill fail-closed without policy.json" ($drillResult.ExitCode -eq 2) ("exit=" + $drillResult.ExitCode + " " + ($drillResult.Stderr.Trim()))
+    } finally {
+        if (Test-Path -LiteralPath $drillBackup) {
+            Move-Item -LiteralPath $drillBackup -Destination $policyPath -Force
+        }
+    }
+}
+
 $results | Format-Table -AutoSize
 $failed = @($results | Where-Object { $_.Status -ne "PASS" })
 if ($failed.Count -gt 0) {

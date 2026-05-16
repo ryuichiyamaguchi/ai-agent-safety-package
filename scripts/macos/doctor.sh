@@ -65,5 +65,35 @@ else
   fail=$((fail + 1))
 fi
 
+# M17: fail-closed drill
+# policy.json を一時的に退避させ、guard-bash.sh が exit 2 で fail-closed することを確認する。
+# 途中で失敗してもポリシーが消えたまま残らないよう trap で必ず復元する。
+drill_policy="$policy"
+drill_backup=""
+restore_drill_policy() {
+  if [ -n "$drill_backup" ] && [ -f "$drill_backup" ] && [ ! -e "$drill_policy" ]; then
+    mv "$drill_backup" "$drill_policy" 2>/dev/null || true
+  fi
+}
+if [ -f "$drill_policy" ]; then
+  drill_backup="${drill_policy}.drill-backup-$$"
+  trap restore_drill_policy EXIT INT TERM
+  mv "$drill_policy" "$drill_backup"
+  drill_json="{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"cwd\":\"$workspace\",\"tool_input\":{\"command\":\"echo drill\"}}"
+  set +e
+  printf '%s' "$drill_json" | AI_SAFE_POLICY="$drill_policy" "$hook_root/guard-bash.sh" >/tmp/ai-safe-doctor-drill.out 2>/tmp/ai-safe-doctor-drill.err
+  drill_code=$?
+  set -e
+  restore_drill_policy
+  trap - EXIT INT TERM
+  if [ "$drill_code" -eq 2 ]; then
+    echo "PASS drill fail-closed without policy.json"
+    pass=$((pass + 1))
+  else
+    echo "FAIL drill: guard-bash.sh did not fail-close without policy.json (exit=$drill_code)"
+    fail=$((fail + 1))
+  fi
+fi
+
 echo "doctor summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

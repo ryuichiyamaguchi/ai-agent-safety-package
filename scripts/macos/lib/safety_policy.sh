@@ -40,13 +40,24 @@ audit_log() {
   observed="$(redact_text "$RAW_INPUT")"
   local dir path ts user cwd
   dir="$(log_dir)"
+  # M4: 監査ログはマルチユーザー環境で他ユーザーから見られないよう、
+  # 作成時に umask 077 を一時適用してパーミッションを所有者のみに制限する。
+  local prev_umask
+  prev_umask="$(umask)"
+  umask 077
   mkdir -p "$dir"
+  # 既存ディレクトリの mode は変えない（再作成時のみ 700 で作る）
   path="$dir/events-$(date +%F).jsonl"
   ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   user="${USER:-unknown}"
   cwd="$(pwd)"
   printf '{"ts":"%s","user":"%s","mode":"%s","decision":"%s","reason":"%s","cwd":"%s","observed":"%s"}\n' \
     "$ts" "$(json_escape "$user")" "$(json_escape "$MODE")" "$(json_escape "$decision")" "$(json_escape "$reason")" "$(json_escape "$cwd")" "$(json_escape "$observed")" >> "$path"
+  # 既存ファイル（過去日に 644 で作られたもの）も自分の所有なら 600 に締め直す。
+  if [ -f "$path" ] && [ -O "$path" ]; then
+    chmod 600 "$path" 2>/dev/null || true
+  fi
+  umask "$prev_umask"
 }
 
 block() {

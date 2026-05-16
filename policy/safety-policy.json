@@ -60,6 +60,7 @@
     { "name": "Private key block", "pattern": "-----BEGIN (RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----" },
     { "name": "Generic sensitive assignment", "pattern": "(?i)(api[_-]?key|secret|token|password|passwd|pwd)\\s*[:=]\\s*['\\\"]?[A-Za-z0-9_\\.\\-\\/+=]{12,}" }
   ],
+  "_comment_dangerousCommand": "curl/wget/Invoke-WebRequest/nc 等は引数なしでも一律 deny する。man curl のような閲覧目的でも止まるが、これは仕様（launcher 配下では学習者がポリシーを迂回できないようにあえて広めに deny する）。閲覧したい場合は launcher 外（通常のターミナル）で実行すること。POST/通信実行系だけに絞らないのは、curl example.com のような GET でも外部 exfil の足がかりになるため。詳細は docs/90_守れる-守れない.md の dangerousCommandRegex 解説を参照。",
   "dangerousCommandRegex": [
     "(?i)\\b(cat|type|Get-Content|gc|more|less)\\b.*(^|\\s|[\\\\/])[.]env([.].*)?(\\s|$)",
     "(?i)\\bpython(3)?\\b.*open\\s*\\(\\s*['\\\"][^'\\\"]*[.]env",
