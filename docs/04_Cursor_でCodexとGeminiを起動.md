@@ -331,5 +331,5 @@ powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1
 ## もっと知りたい人へ
 
 - **どう守られているのか、何が守られていないのか**：`docs/90_守れる-守れない.md`
-- **VM とサンドボックスの違い、Windows と Mac での防御の差**：`docs/92_AIの仕込みと隔離技術.md`
+- **VM とサンドボックスの違い、Windows と Mac での防御の差**：`docs/92_AIの仕組みと隔離技術.md`
 - **トラブルシューティング・謎フォルダ FAQ**：`docs/99_known_issues.md`

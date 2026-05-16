@@ -119,6 +119,8 @@ Codex / Claude / Gemini CLI が hook の仕様を変更した場合に発生す�
 AIツールをインストールすると、気づかないうちに大きなフォルダが増えていることがあります。
 見慣れないフォルダ・ファイルを見つけたときの判断材料をまとめました。
 
+> **注意**: 以下の整理手順は **PC 上で自分（人間）が** 実行するものです。**AI エージェント（Codex / Claude / Gemini）に「このコマンドを実行して」と投げないでください**。AI に削除コマンドを任せると、判断ミスで重要なファイルまで巻き込まれる事故が起きえます（policy 層で `rm -rf` 系はブロックする設計ですが、運用上 AI に任せない方針です）。また、生 `rm -rf` の代わりに `mv ... ~/.Trash/`（Mac）/「ごみ箱に移動」（Windows エクスプローラ）を使えば、誤削除しても復元できます。
+
 ### Q1: `~/.claude/` や `~/.codex/` というフォルダがある。マルウェア？
 
 **A: 正常です。削除不要。**
@@ -158,10 +160,12 @@ Claude・Codex・その他の Mac アプリが自動更新に使うフレーム�
 # Finder で開いて確認してから削除する場合（安全）
 open ~/Library/Caches/
 
-# ターミナルで直接削除する場合（上記フォルダの中身を確認してから実行）
-rm -rf ~/Library/Caches/com.anthropic.claudefordesktop/Sparkle
-rm -rf ~/Library/Caches/com.openai.Codex/Sparkle
+# ターミナルで直接整理する場合（Trash 経由なら誤削除時に復元できる）
+mv ~/Library/Caches/com.anthropic.claudefordesktop/Sparkle ~/.Trash/
+mv ~/Library/Caches/com.openai.Codex/Sparkle ~/.Trash/
 ```
+
+> 上のコマンドは `rm -rf` ではなく `mv ... ~/.Trash/`（ゴミ箱への移動）にしています。間違えても Finder のゴミ箱から戻せます。完全に削除したくなったら、最後にゴミ箱を空にしてください。
 
 ---
 
@@ -214,7 +218,7 @@ du -sh ~/Library/Caches/com.anthropic.claudefordesktop 2>/dev/null
 3. **Claude デスクトップの VM**（Cowork を使っていない場合のみ）→ Q2 の手順で削除
 4. **`~/.claude/`・`~/.codex/`** → CLI をアンインストールする場合のみ削除。使い続けるなら残す
 
-> 注意: `rm -rf` コマンドは**元に戻せません**。実行前に `du -sh` で対象フォルダを必ず確認してください。
+> 注意: `rm -rf` コマンドは**元に戻せません**。本ドキュメントの手順は `mv ... ~/.Trash/`（ゴミ箱経由）で書いてありますが、ネット記事などで `rm -rf` を見かけたら一度立ち止まり、`du -sh` で対象フォルダの中身とサイズを確認してから実行してください。そして、繰り返しになりますが、**AI エージェントに `rm -rf` 系のコマンドを投げない**こと。
 
 ---
 

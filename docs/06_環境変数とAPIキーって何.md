@@ -52,9 +52,9 @@ OpenAI（ChatGPT の会社）や Anthropic（Claude の会社）、Google（Gemi
 
 API キーは、OpenAI・Anthropic・Google から個人に発行される**長い文字列**です。
 
-例：
+例（以下は本物ではなく、説明用のデモ文字列です。実物はもっと長いランダムな英数字です）：
 ```
-sk-proj-AbCd1234EfGh5678ijKl9mNoPqRstUvWxYz
+sk-proj-EXAMPLE-NOT-REAL
 ```
 
 このキーを持っていると、その AI 会社のサービスを「あなたとして」呼び出せます。
@@ -83,9 +83,9 @@ sk-proj-AbCd1234EfGh5678ijKl9mNoPqRstUvWxYz
 ```
 .env ファイルの中身
 ---
-OPENAI_API_KEY=sk-proj-AbCd...
-ANTHROPIC_API_KEY=sk-ant-...
-GEMINI_API_KEY=abcd1234...
+OPENAI_API_KEY=sk-proj-EXAMPLE-NOT-REAL
+ANTHROPIC_API_KEY=sk-ant-EXAMPLE-NOT-REAL
+GEMINI_API_KEY=EXAMPLE-NOT-REAL
 DATABASE_URL=postgresql://user:pass@localhost
 ```
 
@@ -139,7 +139,7 @@ AI が .env ファイルを読もうとしています。
 ```
 × 悪い例
 ChatGPT のチャットに「このコード直してください」と言いながら、
-チャット欄に sk-proj-AbCd... をコピペする
+チャット欄に sk-proj-EXAMPLE-NOT-REAL... をコピペする
 ```
 
 Codex / Claude / ChatGPT の入力欄に直接 API キーを貼ると、その瞬間にこれらのサービスのサーバーに送信されます。
@@ -173,6 +173,8 @@ M  example.py
 ```
 
 このファイルを削除してから push してください。
+
+> ⚠️ 本パッケージの `policy/safety-policy.json` は `git push` を **deny** します。受講者は **launcher を抜けた素のターミナル**（Cursor の別ターミナルや、macOS の Terminal.app / Windows の PowerShell 直接起動など、`launch-codex-safe` / `launch-claude-safe` を経由しないセッション）で push してください。launcher 内（AI エージェントのセッション内）で `git push` を実行しようとすると hook 層で block されます。これは「AI 自身がうっかり / 悪意あるプロンプトに従って push してしまう」事故を防ぐためで、人間が自分の判断で push する経路は別に確保されています。
 
 ---
 
@@ -222,7 +224,7 @@ my-project/
 ### ❌ レベル 0：絶対 NG — コードに直接書く
 
 ```python
-client = OpenAI(api_key="sk-proj-AbCd...")  # ← 絶対NG
+client = OpenAI(api_key="sk-proj-EXAMPLE-NOT-REAL")  # ← 絶対NG
 ```
 
 GitHub に push した瞬間に世界中に公開されます。 bot が秒単位でスキャンしているので、数分で誰かに使われ始めます（過去に何度も事故が起きています）。

@@ -183,8 +183,34 @@ npm install -g @anthropic-ai/claude-code
 が失敗する場合：
 
 - Node.js が最新か確認（`node --version`）
-- 権限エラーが出た場合は：`npm install -g @anthropic-ai/claude-code --force`
 - Windows では管理者権限で PowerShell を実行
+
+#### 権限エラーが出た場合（推奨：ローカルインストール）
+
+`EACCES` などの権限エラーが出るのは、`npm` がシステム領域（`/usr/local/lib` 等）にグローバルインストールしようとするためです。**まずは権限が要らない方法から**試してください。
+
+1. **`nvm` を使って node 自体をユーザー領域に置く**（一番おすすめ）
+   - macOS: `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash`
+   - Windows: [nvm-windows](https://github.com/coreybutler/nvm-windows) を使う
+   - nvm 経由で入れた node は `~/.nvm/versions/node/...` 配下にあるので、グローバルインストールにも sudo / 管理者権限が要りません
+
+2. **`npm` の prefix をユーザー領域に変更する**（nvm を入れずに済ます方法）
+   ```bash
+   mkdir -p ~/.npm-global
+   npm config set prefix ~/.npm-global
+   # PATH に ~/.npm-global/bin を追加（~/.zshrc 等に export PATH=~/.npm-global/bin:$PATH）
+   npm install -g @anthropic-ai/claude-code
+   ```
+
+#### 最終手段：`--force`（非推奨）
+
+上の方法が使えない / うまく動かない場合の**最後の手段**としてのみ：
+
+```bash
+npm install -g @anthropic-ai/claude-code --force
+```
+
+`--force` は依存関係の解決エラーや権限関連の警告を **黙らせる** ためのフラグです。本来は「原因を調べて直すべきエラー」まで通してしまうので、極力使わないでください。使った場合は「なぜそれが必要だったのか」を後で講師に共有して、根本原因を残さないようにすること。
 
 ### ログイン画面が出ない
 
