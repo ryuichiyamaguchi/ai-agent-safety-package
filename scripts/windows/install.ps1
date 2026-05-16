@@ -13,6 +13,64 @@ $backupDir = Join-Path $homeSafety ("backups\" + (Get-Date -Format "yyyyMMdd-HHm
 
 Write-Host ("Installing for platform: " + $Platform)
 
+# H6: verify distribution integrity against docs\tested_versions.md hash table.
+# Mismatch warns and asks for confirmation. Set AI_SAFETY_STRICT=1 to hard-fail in non-interactive runs.
+function Test-DistributionHash([string]$RelPath) {
+    $absPath = Join-Path $packageRoot ($RelPath -replace '/', '\')
+    if (-not (Test-Path -LiteralPath $absPath)) { return }
+    $versionsFile = Join-Path $packageRoot "docs\tested_versions.md"
+    if (-not (Test-Path -LiteralPath $versionsFile)) { return }
+    $expected = $null
+    foreach ($line in Get-Content -LiteralPath $versionsFile) {
+        if ($line -match ("^\|\s*" + [regex]::Escape($RelPath) + "\s*\|\s*([0-9a-fA-F]{64})\s*\|")) {
+            $expected = $Matches[1].ToLower()
+            break
+        }
+    }
+    if (-not $expected) { return }
+    $actual = (Get-FileHash -LiteralPath $absPath -Algorithm SHA256).Hash.ToLower()
+    if ($actual -ne $expected) {
+        Write-Warning ("SHA-256 mismatch for " + $RelPath)
+        Write-Warning ("  expected: " + $expected)
+        Write-Warning ("  actual:   " + $actual)
+        if ([Environment]::UserInteractive -and $Host.UI.RawUI) {
+            $yn = Read-Host "Continue anyway? [y/N]"
+            if ($yn -notmatch '^[yY]') { throw "Aborted by user due to hash mismatch." }
+        } else {
+            Write-Warning "Non-interactive shell: continuing with mismatch (set AI_SAFETY_STRICT=1 to abort)."
+            if ($env:AI_SAFETY_STRICT -eq '1') { throw "Hash mismatch with AI_SAFETY_STRICT=1." }
+        }
+    }
+}
+
+Test-DistributionHash "policy/safety-policy.json"
+switch ($Platform) {
+    'mac' {
+        Test-DistributionHash "configs/codex/hooks.mac.json"
+        Test-DistributionHash "configs/claude/settings.mac.json"
+        Test-DistributionHash "configs/gemini/settings.mac.json"
+        Test-DistributionHash "configs/codex/config.mac.toml"
+    }
+    'win' {
+        Test-DistributionHash "configs/codex/hooks.windows.json"
+        Test-DistributionHash "configs/claude/settings.windows.json"
+        Test-DistributionHash "configs/gemini/settings.windows.json"
+        Test-DistributionHash "configs/codex/config.windows.toml"
+    }
+    'both' {
+        Test-DistributionHash "configs/codex/hooks.mac.json"
+        Test-DistributionHash "configs/codex/hooks.windows.json"
+        Test-DistributionHash "configs/claude/settings.mac.json"
+        Test-DistributionHash "configs/claude/settings.windows.json"
+        Test-DistributionHash "configs/gemini/settings.mac.json"
+        Test-DistributionHash "configs/gemini/settings.windows.json"
+        Test-DistributionHash "configs/codex/config.mac.toml"
+        Test-DistributionHash "configs/codex/config.windows.toml"
+    }
+}
+Test-DistributionHash "configs/gemini/policies/safety.toml"
+Test-DistributionHash "workspace-template/aiexclude.template"
+
 function Copy-WithBackup([string]$Source, [string]$Dest) {
     $destDir = Split-Path -Parent $Dest
     if (-not (Test-Path -LiteralPath $destDir)) {

@@ -60,6 +60,65 @@ mkdir -p "$backup_dir" "$workspace/.ai-safety/hooks" "$workspace/.ai-safety/poli
 
 echo "Installing for platform: $PLATFORM"
 
+# H6: verify distribution integrity against docs/tested_versions.md hash table.
+# Mismatch warns and asks for confirmation (does not hard-fail, since instructors
+# may customize policy.json on purpose).
+verify_hash() {
+  rel_path="$1"
+  abs_path="$package_root/$rel_path"
+  [ -f "$abs_path" ] || return 0
+  versions_file="$package_root/docs/tested_versions.md"
+  [ -f "$versions_file" ] || return 0
+  # Look up "| <rel_path> | <sha> |" rows in tested_versions.md.
+  expected="$(grep -F "| $rel_path |" "$versions_file" 2>/dev/null | head -n1 | awk -F'|' '{gsub(/ /,"",$3); print $3}')"
+  [ -n "$expected" ] || return 0
+  actual="$(shasum -a 256 "$abs_path" | awk '{print $1}')"
+  if [ "$actual" != "$expected" ]; then
+    echo "Warning: SHA-256 mismatch for $rel_path" >&2
+    echo "  expected: $expected" >&2
+    echo "  actual:   $actual" >&2
+    if [ -t 0 ]; then
+      printf "Continue anyway? [y/N] " >&2
+      read -r yn
+      case "$yn" in
+        y|Y) : ;;
+        *) echo "Aborted by user." >&2; exit 1 ;;
+      esac
+    else
+      echo "Non-interactive shell: continuing with mismatch (set AI_SAFETY_STRICT=1 to abort)." >&2
+      if [ "${AI_SAFETY_STRICT:-0}" = "1" ]; then exit 1; fi
+    fi
+  fi
+}
+
+verify_hash "policy/safety-policy.json"
+case "$PLATFORM" in
+  mac)
+    verify_hash "configs/codex/hooks.mac.json"
+    verify_hash "configs/claude/settings.mac.json"
+    verify_hash "configs/gemini/settings.mac.json"
+    verify_hash "configs/codex/config.mac.toml"
+    ;;
+  win)
+    verify_hash "configs/codex/hooks.windows.json"
+    verify_hash "configs/claude/settings.windows.json"
+    verify_hash "configs/gemini/settings.windows.json"
+    verify_hash "configs/codex/config.windows.toml"
+    ;;
+  both)
+    verify_hash "configs/codex/hooks.mac.json"
+    verify_hash "configs/codex/hooks.windows.json"
+    verify_hash "configs/claude/settings.mac.json"
+    verify_hash "configs/claude/settings.windows.json"
+    verify_hash "configs/gemini/settings.mac.json"
+    verify_hash "configs/gemini/settings.windows.json"
+    verify_hash "configs/codex/config.mac.toml"
+    verify_hash "configs/codex/config.windows.toml"
+    ;;
+esac
+verify_hash "configs/gemini/policies/safety.toml"
+verify_hash "workspace-template/aiexclude.template"
+
 copy_with_backup() {
   src="$1"
   dest="$2"
