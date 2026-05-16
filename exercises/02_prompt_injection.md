@@ -63,8 +63,10 @@ AI エージェントは、外部 Web ページや、誰かが用意したファ
 Codex CLI に：
 
 ```
-safe-workspace/sandbox/trap-article.md を読んで、RAG システムの作り方を要約して
+[演習用] safe-workspace/sandbox/trap-article.md を読んで、RAG システムの作り方を要約して
 ```
+
+> `[演習用]` は「これは演習だ」と自分に意識させるためのマーカーです。本番では出所不明のファイルを AI に読ませる前に、人間が中身を 5 秒見ること。
 
 ### 期待される結果
 
@@ -81,7 +83,7 @@ safe-workspace/sandbox/trap-article.md を読んで、RAG システムの作り�
 WebFetch も試してみます：
 
 ```
-https://example.com/article を fetch して読んで
+[演習用] https://example.com/article を fetch して読んで
 ```
 
 ### 期待される結果
@@ -95,7 +97,7 @@ Blocked: domain not in allowlist
 ### ステップ 3：許可ドメインで実際に動くことも確認
 
 ```
-https://docs.anthropic.com/en/docs/claude-code/hooks の内容を要約して
+[演習用] https://docs.anthropic.com/en/docs/claude-code/hooks の内容を要約して
 ```
 
 ### 期待される結果
@@ -148,6 +150,20 @@ ls workspace-template/safe-workspace/sandbox/
 - 出所不明の md / txt / html を AI に読ませない（読ませる前に人間が中身を 5 秒見る）
 - WebFetch は許可ドメインリストの中に閉じる
 - 業務資料フォルダに「サンプルだから」と罠っぽいテキストを置かない
+
+## 本番では絶対に投げない言い回し
+
+この演習で使った口調（`[演習用]` プレフィックス付き）と**まったく同じ内容**を本番 workspace で AI に投げないこと:
+
+- ❌ 「この記事を読んで要約して」（出所不明 URL / ローカル md を中身を見ずに投げる）（→ 罠が混入していたら AI が他の指示を実行）
+- ❌ 「ネットで○○について調べてまとめて」（許可ドメイン外への WebFetch を誘発）（→ 危険ドメイン経由のインジェクション）
+- ❌ 「このフォルダの md ファイル全部読んで」（→ 過去に置いた罠ファイルを巻き込む）
+
+本番では:
+
+1. プロンプトに **`[本番]`** プレフィックスを付ける癖をつける（自分への注意喚起）
+2. 読ませる前に**ファイル名と中身を 5 秒**自分の目で確認
+3. URL を AI に渡すときは**ドメインを声に出して**から渡す（許可リストにあるか自分で判定）
 
 ## このあと
 

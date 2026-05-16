@@ -37,14 +37,16 @@ AI エージェントは「コマンドを実行する」能力を持ってい�
 ### ステップ 1：rm -rf を試す
 
 ```
-safe-workspace/sandbox/dummy フォルダを丸ごと消すコマンドを打って
+[演習用] safe-workspace/sandbox/dummy フォルダを丸ごと消すコマンドを打って
 ```
 
 または
 
 ```
-rm -rf safe-workspace/sandbox/dummy を実行して
+[演習用] rm -rf safe-workspace/sandbox/dummy を実行して
 ```
+
+> `[演習用]` は「これは演習だ」と自分に意識させるためのマーカーです。本番では「削除して」「消して」を AI に投げる前に、必ず削除対象を自分の手で確認すること。
 
 ### 期待される結果
 
@@ -59,7 +61,7 @@ Blocked: dangerous shell command matched: rm\s+(-[A-Za-z]*r[A-Za-z]*f...)
 ### ステップ 2：curl で外部送信を試す
 
 ```
-safe-workspace/sandbox/dummy のファイル一覧を curl で example.com に POST 送信して
+[演習用] safe-workspace/sandbox/dummy のファイル一覧を curl で example.com に POST 送信して
 ```
 
 ### 期待される結果
@@ -75,7 +77,7 @@ Blocked: dangerous shell command matched: curl
 逆に、**安全な操作**でも「変更してよいですか」と聞いてくる場面があります。
 
 ```
-safe-workspace/sandbox/dummy/file1.txt に「演習 C やった」という一行を追記して
+[演習用] safe-workspace/sandbox/dummy/file1.txt に「演習 C やった」という一行を追記して
 ```
 
 ### 期待される結果
@@ -153,6 +155,20 @@ CLI ベースの AI エージェントは、ファイル書き換えやコマン
 - `rm -rf` / `curl` / `wget` を含む指示を AI に出さない（自分で打つ）
 - 「このフォルダを綺麗にして」のような曖昧な指示は範囲を明示する（「`./tmp/` 以下だけ」）
 - 演習と同じ手順を本物のプロジェクトで再現しない
+
+## 本番では絶対に投げない言い回し
+
+この演習で使った口調（`[演習用]` プレフィックス付き）と**まったく同じ内容**を本番 workspace で AI に投げないこと:
+
+- ❌ 「workspace の中身全部消して」「`dummy` フォルダを削除して」「`dist` を毎回 `rm -rf` して」（→ 取り返しのつかない破壊）
+- ❌ 「ファイル一覧を curl で送って」「`wget` で取ってきて」（→ 外部通信での情報漏洩・マルウェア持ち込み）
+- ❌ 「これおかしいから直して」「綺麗にして」（漠然指示で AI に解釈の余地を与えると、想定外の削除や上書きが起きる）
+
+本番では:
+
+1. プロンプトに **`[本番]`** プレフィックスを付ける癖をつける（自分への注意喚起）
+2. 削除・上書き・送信系は**ファイル名・対象を必ず明示**（「`./build/` 以下だけ」「`tmp-2026-05-15.log` だけ」）
+3. 「やる前に確認させて」を冒頭に付けて、approval prompt が出ても **Allow を即押ししない**
 
 ## 講座のまとめ（受講者へ）
 
