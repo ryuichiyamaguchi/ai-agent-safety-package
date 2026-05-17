@@ -87,8 +87,19 @@ function Copy-WithBackup([string]$Source, [string]$Dest) {
 New-Item -ItemType Directory -Force -Path $homeSafety | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Workspace ".ai-safety\hooks") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Workspace ".ai-safety\policy") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $Workspace ".ai-safety\cards") | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $packageRoot "policy\safety-policy.json") -Destination (Join-Path $Workspace ".ai-safety\policy\safety-policy.json") -Force
+
+# agent-monitor 解説カード一式を .ai-safety\cards\ に配置する。
+$cardsSrc = Join-Path $packageRoot "configs\safety\cards"
+$cardsDest = Join-Path $Workspace ".ai-safety\cards"
+if (Test-Path -LiteralPath $cardsSrc) {
+    if (Test-Path -LiteralPath $cardsDest) {
+        Remove-Item -LiteralPath $cardsDest -Recurse -Force
+    }
+    Copy-Item -LiteralPath $cardsSrc -Destination $cardsDest -Recurse -Force
+}
 
 if ($Platform -in 'win','both') {
     Copy-Item -LiteralPath (Join-Path $packageRoot "scripts\windows") -Destination (Join-Path $Workspace ".ai-safety\hooks") -Recurse -Force

@@ -56,7 +56,7 @@ workspace="$(cd "$workspace" && pwd)"
 package_root="$(cd "$(dirname "$0")/../.." && pwd)"
 stamp="$(date +%Y%m%d-%H%M%S)"
 backup_dir="$HOME/.ai-safety/backups/$stamp"
-mkdir -p "$backup_dir" "$workspace/.ai-safety/hooks" "$workspace/.ai-safety/policy"
+mkdir -p "$backup_dir" "$workspace/.ai-safety/hooks" "$workspace/.ai-safety/policy" "$workspace/.ai-safety/cards"
 
 echo "Installing for platform: $PLATFORM"
 
@@ -131,6 +131,12 @@ copy_with_backup() {
 }
 
 cp "$package_root/policy/safety-policy.json" "$workspace/.ai-safety/policy/safety-policy.json"
+
+# agent-monitor 解説カード一式を .ai-safety/cards/ に配置する。
+if [ -d "$package_root/configs/safety/cards" ]; then
+  rm -rf "$workspace/.ai-safety/cards"
+  cp -R "$package_root/configs/safety/cards" "$workspace/.ai-safety/cards"
+fi
 
 if [[ "$PLATFORM" == "mac" || "$PLATFORM" == "both" ]]; then
   cp -R "$package_root/scripts/macos" "$workspace/.ai-safety/hooks/"
