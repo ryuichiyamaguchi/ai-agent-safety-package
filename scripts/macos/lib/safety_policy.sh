@@ -20,7 +20,8 @@ log_dir() {
 }
 
 json_escape() {
-  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/$/\\n/' | tr -d '\n'
+  # 入力中の実改行のみ \n リテラルに変換し、末尾には余計な \n を付けない。
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk 'BEGIN{ORS=""} NR>1{printf "\\n"} {print}'
 }
 
 redact_text() {
