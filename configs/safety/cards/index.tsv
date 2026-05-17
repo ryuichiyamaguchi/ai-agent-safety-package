@@ -1,0 +1,27 @@
+# agent-monitor 解説カード索引
+# columns: tool<TAB>pattern_regex<TAB>risk<TAB>card_id
+# 上から評価し、最初にヒットした行のカードを採用する。
+# pattern_regex は以下に対してマッチ:
+#   bash         → 実行コマンド文字列
+#   write        → 書き込み先ファイルパス
+#   webfetch     → URL のホスト名（小文字化済み）
+#   prompt       → ユーザー入力の生テキスト
+#   post-output  → ツール/AI 出力の生テキスト
+# 末尾の default-<tool> は必ず最後に置く（必ずヒットするフォールバック）
+
+bash	\brm[[:space:]]+-([A-Za-z]*r[A-Za-z]*f|rf|fr)\b	high	bash-rm-recursive
+bash	(curl|wget|Invoke-WebRequest|iwr)[^|]*\|[[:space:]]*(bash|sh|zsh|pwsh|powershell)	high	bash-curl-pipe-shell
+bash	\bsudo\b	high	bash-sudo
+bash	\bchmod\b[[:space:]]+(777|666|a\+w)	medium	bash-chmod-permissive
+bash	\b(curl|wget|nc|ncat|netcat|Invoke-WebRequest|iwr|Invoke-RestMethod|irm)\b	medium	bash-network-exfil
+write	([.]env([.][A-Za-z0-9_-]+)?)([[:space:]"'/\\]|$)	high	write-dotenv
+write	([.]ssh/|id_rsa|id_ed25519|[.]aws/|[.]gnupg/|[.]kube/|[.]npmrc|[.]pypirc)	high	write-auth-files
+webfetch	^(localhost|127[.]|10[.]|172[.](1[6-9]|2[0-9]|3[0-1])[.]|192[.]168[.]|::1)	high	webfetch-private-network
+webfetch	^(gist[.]github[.]com|.+[.]pages[.]dev|.+[.]workers[.]dev|pastebin[.]com|hastebin[.]com|0x0[.]st|transfer[.]sh|file[.]io|anonfiles[.]com)$	medium	webfetch-not-allowlisted
+prompt	(sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{25,}|gh[pousr]_[A-Za-z0-9_]{36,255}|xox[baprs]-)	high	secret-detected
+post-output	(sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{25,}|gh[pousr]_[A-Za-z0-9_]{36,255}|xox[baprs]-)	high	secret-detected
+bash	.	low	default-bash
+write	.	low	default-write
+webfetch	.	low	default-webfetch
+prompt	.	low	default-prompt
+post-output	.	low	default-post-output
