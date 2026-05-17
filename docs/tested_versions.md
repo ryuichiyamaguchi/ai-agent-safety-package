@@ -62,6 +62,21 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 このハッシュは配布元と受講者で一致することを確認してください:
 `shasum -a 256 ai-agent-safety-package-v1.1.0.zip` (mac) / `Get-FileHash ai-agent-safety-package-v1.1.0.zip` (win)
 
+## v1.2.0 配布 zip 全体
+
+v1.2.0 では agent-monitor（承認時の解説カードと監視ビューア）を追加。
+個別ファイル（policy/safety-policy.json 等）の SHA-256 は v1.1.0 から変更なし。
+新規ファイル群（`configs/safety/cards/`, `scripts/{macos,windows}/monitor.{sh,ps1}`,
+`scripts/{macos,windows}/lib/{explainer.sh,Explainer.ps1}`）はパッケージ zip 全体
+のハッシュで検証する。
+
+| ファイル | SHA-256 |
+|---------|---------|
+| ai-agent-safety-package-v1.2.0.zip | b7e5417d372c2ed4c60b12ed5c8603ea17b08bcdb68976ae24756eaaf3fb8281 |
+
+このハッシュは配布元と受講者で一致することを確認してください:
+`shasum -a 256 ai-agent-safety-package-v1.2.0.zip` (mac) / `Get-FileHash ai-agent-safety-package-v1.2.0.zip` (win)
+
 ## バックアップ整合性検証（H7: zip-slip / 改ざん）
 
 `backup.sh` / `backup.ps1` は zip 作成時に同名の `.sha256` ファイルを出力する。
