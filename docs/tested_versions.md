@@ -41,17 +41,26 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 
 | ファイル | SHA-256 |
 |---------|---------|
-| policy/safety-policy.json | 0b0b008cb0ccf1e08ca92bca4cf935ed6e9e64924ac985c7a5d05aa25021f13a |
+| policy/safety-policy.json | 6d4b9b3a2f7f37572d63f0a3c877b02072b38d91056234d3655a48935c1d73d5 |
 | configs/codex/hooks.mac.json | 6f03deee71871c40dd81d098867a4860284700f98135fbb05730936738a729ca |
 | configs/codex/hooks.windows.json | 9e7292426dd844ebe4d6ffa20f92f2283e9c1f6e704412bb1321117d4eb62d6a |
 | configs/claude/settings.mac.json | 03c7d38c28529afc4866ed500254ca8178426ae16f065b5248d662d7a156231f |
 | configs/claude/settings.windows.json | 460045ffb8d55636e98c529647fba93ea3bcd970a36b05af9bf673ee3f479444 |
 | configs/gemini/settings.mac.json | b9f45bac5583930c6b44a07a2351c6bd21722503de82983e63cd5f38db2a6213 |
 | configs/gemini/settings.windows.json | f061d04699ce366887ae829d0f6fd78ac8d597c9bbaac80bb985332f32d1f012 |
-| configs/codex/config.mac.toml | c97a0cfb1367fcb0478c6be5f1d31f8b05c6bf5a6e9510c0023d0b4308363a56 |
-| configs/codex/config.windows.toml | 00b0b20431e7c5eea6092bd27b91a62343d57052da224583f30bffda35abd30d |
+| configs/codex/config.mac.toml | 0261597fa7cc1b4ba057d40e0b8dd05a0da0234e308efa42fcfb952d79d1b295 |
+| configs/codex/config.windows.toml | 6deb434337bb80bc4d0ed97c4b430ff844599bca27b90f1fc90310cce0340e00 |
 | configs/gemini/policies/safety.toml | d63830fc7548c9987a1d84b7ec0212b6527f639a6af808ee29d00427ceb87f3c |
 | workspace-template/aiexclude.template | 9fee69aa1fa5dc7253ebb1419bc1f28b4ca24c8c794f5c6fcc011a1c4a2e444b |
+
+## v1.1.0 配布 zip 全体
+
+| ファイル | SHA-256 |
+|---------|---------|
+| ai-agent-safety-package-v1.1.0.zip | d906e3f025f95d7cf9fc1e9066eb1bcdef088bd561fd07947fd002a88b0299bf |
+
+このハッシュは配布元と受講者で一致することを確認してください:
+`shasum -a 256 ai-agent-safety-package-v1.1.0.zip` (mac) / `Get-FileHash ai-agent-safety-package-v1.1.0.zip` (win)
 
 ## バックアップ整合性検証（H7: zip-slip / 改ざん）
 
