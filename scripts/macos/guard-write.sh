@@ -3,6 +3,8 @@ set -u
 AI_SAFE_MODE="write"
 . "$(dirname "$0")/lib/safety_policy.sh"
 read_hook_input
+. "$(dirname "$0")/lib/explainer.sh"
+explain
 has_sensitive_text && block "sensitive pattern in generated file"
 has_protected_path && block "protected path referenced in generated file"
 has_generated_code_risk && block "generated code contains blocked read or exfil pattern"

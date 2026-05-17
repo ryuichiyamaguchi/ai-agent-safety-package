@@ -3,6 +3,8 @@ set -u
 AI_SAFE_MODE="webfetch"
 . "$(dirname "$0")/lib/safety_policy.sh"
 read_hook_input
+. "$(dirname "$0")/lib/explainer.sh"
+explain
 has_sensitive_text && block "sensitive pattern in WebFetch input"
 url="$(extract_url)"
 [ -z "$url" ] && block "WebFetch URL is missing"

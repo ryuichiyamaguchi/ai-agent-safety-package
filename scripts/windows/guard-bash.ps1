@@ -2,8 +2,10 @@ param()
 
 try {
     . (Join-Path $PSScriptRoot "lib\SafetyPolicy.ps1")
+    . (Join-Path $PSScriptRoot "lib\Explainer.ps1")
     $policy = Get-SafetyPolicy
     $inputObj = Read-HookInput
+    Invoke-Explain -HookInput $inputObj -Mode "bash" -Policy $policy
     $cmd = Get-CommandText $inputObj
 
     if ([string]::IsNullOrWhiteSpace($cmd)) {

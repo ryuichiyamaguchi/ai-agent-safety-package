@@ -2,8 +2,10 @@ param()
 
 try {
     . (Join-Path $PSScriptRoot "lib\SafetyPolicy.ps1")
+    . (Join-Path $PSScriptRoot "lib\Explainer.ps1")
     $policy = Get-SafetyPolicy
     $inputObj = Read-HookInput
+    Invoke-Explain -HookInput $inputObj -Mode "prompt" -Policy $policy
     $prompt = Get-PromptText $inputObj
 
     $secret = Find-SecretMatch $prompt $policy
