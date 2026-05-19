@@ -1,4 +1,4 @@
-# agent-monitor: 承認解説カードのロード/表示ライブラリ (Windows)
+﻿# agent-monitor: 承認解説カードのロード/表示ライブラリ (Windows)
 # SafetyPolicy.ps1 が source 済みであることを前提とする。
 # 公開関数: Invoke-Explain（フェイルセーフ。失敗してもポリシー判定を阻害しない）
 

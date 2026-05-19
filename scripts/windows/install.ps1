@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet('mac','win','both')]
     [string]$Platform = 'win',
     [string]$Workspace = (Get-Location).Path,

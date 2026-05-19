@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Workspace = (Get-Location).Path,
     [switch]$LiveCodex
 )

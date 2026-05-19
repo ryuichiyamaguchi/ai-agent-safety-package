@@ -1,4 +1,4 @@
-# agent-monitor: 別タブ/別ペインで起動する簡易ビューア
+﻿# agent-monitor: 別タブ/別ペインで起動する簡易ビューア
 #
 # 上に「いま AI がやろうとしていること」（now.md）
 # 下に「直近の出来事」（events-YYYY-MM-DD.jsonl の整形）
