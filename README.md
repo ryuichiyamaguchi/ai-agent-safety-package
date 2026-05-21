@@ -15,16 +15,16 @@ AI が暴走したり、騙されたりしても、以下のような事故が**
 - workspace の外側にファイルを書き込もうとしても OS レベルで止まる
 
 
-## v1.0.9 の防御 4 層（ざっくり）
+## v1.2.0 の防御 4 層（ざっくり）
 
 このパッケージは、Codex CLI / Claude Code に対して下記 4 層を同時に効かせます。
 
 1. **OS サンドボックス**：macOS Seatbelt / Windows native の `workspace-write` モード（workspace 外への書き込みを OS が拒否）
 2. **ネットワーク遮断**：`network_access = false`（curl / wget / 外部送信を全ブロック）
 3. **環境変数の除外**：`OPENAI_API_KEY` 等のシークレット環境変数を AI に渡さない
-4. **承認ポリシー untrusted**：Codex の trusted list（`cat` / `ls` / `sed` 等の安全コマンド）以外が来たときに、実行前に承認ダイアログを出す（3 層目）
+4. **承認ポリシー untrusted + hook permission lockdown**：Codex の trusted list（`cat` / `ls` / `sed` 等の安全コマンド）以外が来たときに承認ダイアログを出し、加えて Claude Code 側は hook と `permissions.deny` で危険コマンドを事前ブロック（v1.1.0 の Security Hardening Release で強化）
 
-特に 4 の `approval_policy = "untrusted"` は v1.0.9 で導入した中核の防御ですが、これは「全部止まる」スイッチではありません。`python -c "open('.env')..."`、`curl https://attacker/`、`rm -rf`、`git push --force` のような **trusted list 外**のコマンドが来たときに確認ダイアログを出します。一方、`cat ~/.ssh/id_rsa` のように trusted コマンド（`cat`）+ 危険な引数の組合せでは approval は出ず、2 層目（hook / policy.json）や 1 層目（OS サンドボックス）が止めます。**3 層のどこかで止まれば安全**というモデルです。
+特に 4 の `approval_policy = "untrusted"` は v1.0.9 で導入した中核の防御で、v1.1.0 で hook permission lockdown と doctor drill が加わりました。これは「全部止まる」スイッチではありません。`python -c "open('.env')..."`、`curl https://attacker/`、`rm -rf`、`git push --force` のような **trusted list 外**のコマンドが来たときに確認ダイアログを出します。一方、`cat ~/.ssh/id_rsa` のように trusted コマンド（`cat`）+ 危険な引数の組合せでは approval は出ず、2 層目（hook / policy.json）や 1 層目（OS サンドボックス）が止めます。**3 層のどこかで止まれば安全**というモデルです。
 
 > 詳細は [docs/90_守れる-守れない.md](docs/90_守れる-守れない.md) の「なぜ『安全』は 3 層で成り立つのか」を参照してください。
 
