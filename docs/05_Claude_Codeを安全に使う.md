@@ -1,6 +1,6 @@
 # Claude Code を安全に使う（個人利用向け）
 
-v1.0.9
+v1.2.1
 
 ## このドキュメントは誰のものか
 
@@ -93,6 +93,20 @@ launcher が次の防御を自動で有効にします。
 - `network_access = false`：外部通信を全遮断（hook 層 + サンドボックス）
 - `--ask-for-approval untrusted`：Codex の trusted list（`cat`、`ls` などの安全コマンド）以外が来たときに、実行前に承認プロンプトを出す（3 層目）。`cat ~/.ssh/id_rsa` のような trusted コマンド + 危険な引数の組合せは approval をスキップするので、hook 層（`policy/safety-policy.json`）が代わりに止めます。**3 層のどこかで止まれば安全**というモデル。詳細は [docs/90_守れる-守れない.md](90_守れる-守れない.md) の「なぜ『安全』は 3 層で成り立つのか」を参照
 - `shell_environment_policy.exclude`：`OPENAI_API_KEY` などのシークレット環境変数を AI に渡さない
+
+### v1.2.1 で追加：Claude Code 内部ツールの deny
+
+Day3 の実機検証で「Codex CLI が**内部 WebFetch でサイト読み取り** + **内部 Write でデスクトップに HTML 生成**」を素通りさせたことが判明しました。AI CLI には**シェル経由ツール**（OS サンドボックス・network_access・承認ダイアログが効く）と、**内部ツール**（CLI 本体が直接 OS API を呼ぶので上記の防御を素通りする）の 2 種類があり、AI は便利な内部ツールを選びがちです。
+
+Claude Code は `.claude/settings.json` の `permissions.deny` に**内部ツール単位の deny** を書けるため、v1.2.1 から次を deny に追加しました（`configs/claude/settings.{mac,windows}.json`）。
+
+- **WebFetch (exfil ドメイン)**：`gist.github.com` / `gist.githubusercontent.com` / `pastebin.com` / `hastebin.com` / `0x0.st` / `transfer.sh` / `file.io` / `anonfiles.com` — プロンプトインジェクション経由のデータ流出経路を塞ぐ
+- **Write / Edit (シークレット)**：`.env` / `.env.*` / `.ssh/**` — AI が `.env` や SSH 鍵を書き換えられない
+- **Read (シークレット)**：`.env` / `.env.*` / `.ssh/**` / `.aws/**` / `.azure/**` / `.kube/**` / `.config/gcloud/**` / `.docker/config.json` / `.npmrc` / `.pypirc` — AI が API キー・クラウド認証ファイルを読み取れない（**API キー漏洩防止の最重要層**）
+
+Desktop / Documents 配下への Write/Edit は deny **しません**（受講者の通常作業を阻害しないため）。代わりに「シークレットを直接保護する」方向で守ります。
+
+> Codex CLI 側にはツール単位 deny が現状（v0.130 系）存在しないため、これは **Claude Code 利用者のみが受ける恩恵**です。Codex は引き続き approval ダイアログと OS サンドボックスで守ります。
 
 ## ステップ 5：動作確認（重要）
 

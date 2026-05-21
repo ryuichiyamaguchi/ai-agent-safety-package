@@ -1,4 +1,4 @@
-# AI エージェント安全運用パッケージ v1.2.0
+# AI エージェント安全運用パッケージ v1.2.1
 
 Codex CLI、Claude Code、Gemini CLI を「あなたを守る安全装置」付きで使うためのパッケージです。
 
@@ -15,7 +15,7 @@ AI が暴走したり、騙されたりしても、以下のような事故が**
 - workspace の外側にファイルを書き込もうとしても OS レベルで止まる
 
 
-## v1.2.0 の防御 4 層（ざっくり）
+## v1.2.1 の防御 4 層（ざっくり）
 
 このパッケージは、Codex CLI / Claude Code に対して下記 4 層を同時に効かせます。
 
@@ -39,6 +39,16 @@ AI が暴走したり、騙されたりしても、以下のような事故が**
 3. **アップデート時は `doctor` スクリプトを必ず走らせる**
 
 この 3 点を守れば、AI を本気で使い倒せます。
+
+## v1.2.1 で追加：Claude Code 内部ツールの deny
+
+Day3 の実機検証で「AI が内部 WebFetch / Write を選ぶとシェル経由の防御を素通り」する事実が判明。v1.2.1 で **Claude Code の `permissions.deny` に内部ツール単位の deny** を追加し、次を止めます（`configs/claude/settings.{mac,windows}.json`）。
+
+- **WebFetch** の **exfil 危険ドメイン** (`gist.github.com` / `pastebin.com` / `transfer.sh` / `0x0.st` 等 8 ドメイン)
+- **Write / Edit** の **`.env` / `.ssh/**`** 書き換え
+- **Read** の **`.env` / `.ssh/**` / `.aws/**` / `.azure/**` / `.kube/**` / `.config/gcloud/**` / `.docker/config.json` / `.npmrc` / `.pypirc`** 読み取り
+
+「Desktop / Documents への Write/Edit は許可」のまま据え置き（受講者の通常作業を阻害しないため）。**API キー漏洩防止**が最重要なので、シークレット系を直接守る方針です。Codex CLI 側にはツール単位 deny が現状存在しないため、これは Claude Code 利用者のみが受ける恩恵です。詳細は [docs/05_Claude_Codeを安全に使う.md](docs/05_Claude_Codeを安全に使う.md) を参照。
 
 ## v1.2.0 で追加：agent-monitor（動きを横で見る）
 
