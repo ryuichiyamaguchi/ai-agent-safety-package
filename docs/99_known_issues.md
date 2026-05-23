@@ -2,6 +2,61 @@
 
 v1.0 時点で把握している既知の問題と回避策。
 
+## ⚠ Gemini CLI → Antigravity CLI 移行への対応（v1.2.2 追記）
+
+Google から **Gemini CLI を 2026-06-18 で廃止し、後継の Antigravity CLI（`agy`）へ移行する**と発表されました（Pro / Ultra / 無料ティアが対象。Enterprise / Workspace は対象外）。本パッケージ v1.2.2 時点では、**従来の Gemini CLI 0.41.2 を引き続き利用する設計** です。`agy` の CLI フラグが破壊的に変更されており（`--approval-mode` / `--policy` が消失）、現状の `launch-gemini-safe.{sh,ps1}` では `agy` を起動できません。
+
+### Q: `agy` をインストールしてしまった。どう戻す？
+
+**A: `agy` バイナリを削除し、Gemini CLI を再導入してください。**
+
+agy バイナリの場所と削除手順:
+
+```bash
+# Mac / Linux
+ls -la ~/.local/bin/agy
+rm ~/.local/bin/agy
+
+# Windows (PowerShell)
+Get-Item "$env:LOCALAPPDATA\Antigravity\agy.exe"
+Remove-Item "$env:LOCALAPPDATA\Antigravity\agy.exe"
+```
+
+Gemini CLI 0.41.2 を再インストール:
+
+```bash
+npm install -g @google/gemini-cli@0.41.2
+gemini --version    # 0.41.2 と出れば OK
+```
+
+`agy install` でシェル設定（`~/.bashrc` / `~/.zshrc` / `$PROFILE`）に PATH 追加されている場合、エディタで該当行を削除してください（`# antigravity-cli` 等のコメント付きで挿入されています）。
+
+### Q: 設定ファイルやログが残っているのが気になる
+
+agy は `~/.gemini/antigravity-cli/` 配下に conversations / cache / settings を作ります。Gemini CLI のレガシー設定（`~/.gemini/settings.json` など）は**触りません**。気になる場合は agy のサブツリーだけを削除して構いません:
+
+```bash
+rm -rf ~/.gemini/antigravity-cli/    # agy 専用領域
+# ~/.gemini/settings.json は残す（Gemini CLI が使う）
+```
+
+### Q: 廃止期限（2026-06-18）以降はどうなる？
+
+本パッケージ v1.3 で Antigravity CLI 正式対応版をリリース予定です。v1.3 では:
+
+- `launch-agy-safe.{sh,ps1}` を新規追加（`--sandbox` フラグ + プラグイン構成）
+- `configs/agy/` ディレクトリで settings / hooks を配布
+- agy の hook API（旧 Gemini CLI の `BeforeAgent` / `BeforeTool` が互換動作するか実機再検証）
+- 廃止期限直前の v1.2.x ホットフィックスで、講座 Day3 時点では Gemini CLI のまま継続できることを確認します
+
+リリーススケジュール案: v1.3.0 は 2026-06 中旬 GA を目標（**6/18 廃止に間に合わせる**）。詳細は `HANDOVER_v1.2.2.md` を参照。
+
+### Q: 「自分は Enterprise / Workspace ティアだから廃止対象外」と聞いた。本パッケージは引き続き使えるか？
+
+A: 使えます。ただし v1.3 以降は agy 前提で安全装置を再構築するため、Gemini CLI のサポート（既存 `launch-gemini-safe.*`）は段階的に縮小されます。Enterprise ティアでも v1.3 公開後は agy ベースの運用に揃える方が安全度が上がります（agy のサンドボックス / Secure Mode を活用可能）。
+
+---
+
 ## Windows
 
 ### ExecutionPolicy の変更が許可されない端末（学校 PC など）

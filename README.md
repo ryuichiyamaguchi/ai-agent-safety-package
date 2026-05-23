@@ -1,4 +1,4 @@
-# AI エージェント安全運用パッケージ v1.2.1
+# AI エージェント安全運用パッケージ v1.2.2
 
 Codex CLI、Claude Code、Gemini CLI を「あなたを守る安全装置」付きで使うためのパッケージです。
 
@@ -15,7 +15,17 @@ AI が暴走したり、騙されたりしても、以下のような事故が**
 - workspace の外側にファイルを書き込もうとしても OS レベルで止まる
 
 
-## v1.2.1 の防御 4 層（ざっくり）
+## ⚠ Gemini CLI の廃止アラート（2026-06-18）
+
+Google から「**Gemini CLI は 2026-06-18 で Pro / Ultra / 無料ティアの提供を終了し、後継の Antigravity CLI（`agy`）に移行する**」とアナウンスがありました（Enterprise / Workspace ティアは対象外）。
+
+本パッケージ v1.2.2 時点では、**従来の Gemini CLI 0.41.2 を引き続き使う設計**になっています（`launch-gemini-safe.{sh,ps1}` は `gemini --approval-mode default --policy ...` を前提）。Antigravity CLI は CLI フラグが破壊的に変更されており（`--approval-mode` / `--policy` が消失）、現状の launcher では起動できません。
+
+- **講座 Day3 までに自分の手で `agy` をインストールしないでください**。インストールしてしまった場合の戻し方は [docs/99_known_issues.md](docs/99_known_issues.md) の「Gemini CLI → Antigravity CLI 移行への対応」を参照
+- 本パッケージは **v1.3 で Antigravity CLI に正式対応予定**（実機 hook 検証後）
+- 廃止期限以降の運用判断（agy へ移行 / Enterprise ティア利用 / Gemini CLI 利用停止）は **v1.3 のリリースノートで案内**
+
+## v1.2.2 の防御 4 層（ざっくり）
 
 このパッケージは、Codex CLI / Claude Code に対して下記 4 層を同時に効かせます。
 
@@ -40,7 +50,7 @@ AI が暴走したり、騙されたりしても、以下のような事故が**
 
 この 3 点を守れば、AI を本気で使い倒せます。
 
-## v1.2.1 で追加：Claude Code 内部ツールの deny
+## v1.2.1 で追加：Claude Code 内部ツールの deny（v1.2.2 でも継続）
 
 Day3 の実機検証で「AI が内部 WebFetch / Write を選ぶとシェル経由の防御を素通り」する事実が判明。v1.2.1 で **Claude Code の `permissions.deny` に内部ツール単位の deny** を追加し、次を止めます（`configs/claude/settings.{mac,windows}.json`）。
 

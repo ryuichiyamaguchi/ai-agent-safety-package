@@ -7,8 +7,33 @@ v1.0 リリース時点（2026-05-12）で動作確認した CLI のバージョ
 | ツール | 確認済みバージョン | 備考 |
 |---|---|---|
 | Codex CLI | 0.130.0 | 主たる対象 |
-| Claude Code | 2.1.139 | hook 仕様準拠 |
-| Gemini CLI | 0.41.2 | BeforeAgent / BeforeTool / AfterModel / AfterAgent hook |
+| Claude Code | 2.1.139 | hook 仕様準拠（v1.2.1 から `permissions.deny` 内部ツール対応） |
+| Gemini CLI | **0.41.2（凍結版）** | BeforeAgent / BeforeTool / AfterModel / AfterAgent hook。**2026-06-18 で公式廃止**（後継: Antigravity CLI） |
+
+## ⚠ Gemini CLI → Antigravity CLI 移行ステータス（v1.2.2 時点）
+
+| 項目 | 状態 |
+|---|---|
+| Gemini CLI 公式廃止期限 | **2026-06-18**（Pro / Ultra / 無料ティア。Enterprise / Workspace は対象外） |
+| Antigravity CLI 実機検証 | **完了**（agy 1.0.0 を yamaguchi 開発機で確認） |
+| 本パッケージの agy 対応 | **未対応**。v1.3 で正式対応予定 |
+
+### agy 1.0.0 実機検証で判明した破壊的変更
+
+- **CLI フラグ消失**: `--approval-mode` / `--policy` が agy には**存在しない**。現存フラグは `--add-dir` / `--sandbox` / `--dangerously-skip-permissions` / `--print` / `--prompt-interactive` のみ
+- **設定パス**: `~/.gemini/antigravity-cli/settings.json`（互換ディレクトリ）
+- **トップレベルキー**: `colorScheme` / `enableTelemetry` / `trustedWorkspaces` を確認。**`permissions.deny` 相当の glob deny スキーマは未確認**
+- **MCP**: `url` フィールドが `serverUrl` に rename（破壊的）
+- **Plugin import**: `agy plugin import gemini` で旧拡張を変換可能
+
+### 講座運用での当面の方針（v1.2.2）
+
+1. **Day3 の Gemini CLI 起動は従来通り**（`launch-gemini-safe.{sh,ps1}` を使う）
+2. 受講者には「Gemini CLI を `agy` に手動で差し替えない」と伝える
+3. agy をインストールしてしまった場合の戻し方は [99_known_issues.md](99_known_issues.md) の「Gemini CLI → Antigravity CLI 移行への対応」セクション
+4. 2026-06-18 以降は v1.3（agy 正式対応版）に切り替える運用へ移行
+
+## OS
 
 ## OS
 
