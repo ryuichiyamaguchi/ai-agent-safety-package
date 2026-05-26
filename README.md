@@ -1,4 +1,4 @@
-# AI エージェント安全運用パッケージ v1.3.0
+# AI エージェント安全運用パッケージ v1.4.0
 
 Codex CLI、Claude Code、Gemini CLI を「あなたを守る安全装置」付きで使うためのパッケージです。
 
@@ -33,7 +33,7 @@ Google から「Gemini CLI は **2026-06-18** で Pro / Ultra / 無料ティア�
 
 詳しくは [docs/99_known_issues.md](docs/99_known_issues.md) の「Gemini CLI → Antigravity CLI 並立対応」セクション。
 
-## v1.3.0 の防御 4 層（ざっくり）
+## v1.4.0 の防御 4 層（ざっくり）
 
 このパッケージは、Codex CLI / Claude Code に対して下記 4 層を同時に効かせます。
 
@@ -57,6 +57,29 @@ Google から「Gemini CLI は **2026-06-18** で Pro / Ultra / 無料ティア�
 3. **アップデート時は `doctor` スクリプトを必ず走らせる**
 
 この 3 点を守れば、AI を本気で使い倒せます。
+
+## v1.4.0 で追加：外部 LLM 用 機微情報スキャナ
+
+DeepSeek 等の **外部 / 中国系 LLM** を使うときの「プロンプトに API キーや顧客情報をうっかり混ぜて送信してしまう事故」を防ぐためのツールを追加しました。これは本パッケージの 4 層防御とは別軸（「ローカル PC で何をするか」ではなく「プロンプトに何を書いて外に送るか」）の補助層です。
+
+### 提供ツール
+
+- `secret-scan` — プロンプト本文を `[MASKED:type]` に置換するスキャナ（OpenAI / Anthropic / Google / AWS / GitHub / Slack / JWT / 秘密鍵 / 一般パターン）
+- `safe-paste` — クリップボードをスキャン + マスキング + 書き戻しするワンライナー
+- `deepseek-safe` — DeepSeek を使う前の念押しゲート（赤い警告 + `yes/no` 確認）
+
+### 推奨ワークフロー
+
+```
+1. deepseek-safe                # 念押し確認
+2. プロンプトを書いて ⌘C
+3. safe-paste                   # クリップボード内をマスキング
+4. DeepSeek の Web UI に ⌘V
+```
+
+詳細は [docs/08_外部LLMを安全に使う.md](docs/08_外部LLMを安全に使う.md) を参照。
+
+監査ログ: `~/.ai-safety/logs/secret-scan-events.jsonl`（本物の値は記録されず、タイプ別件数のみ）
 
 ## v1.3.0 で追加：Antigravity CLI launcher（並立対応）
 
