@@ -1,0 +1,11 @@
+{
+  "_comment_1": "Antigravity CLI 用 推奨セキュリティ設定。launcher 経由起動だけでなく、agy /settings UI で受講者が同じ値に手動で揃えてください。配置パス: ~/.gemini/antigravity-cli/settings.json (macOS/Linux), %USERPROFILE%\\.gemini\\antigravity-cli\\settings.json (Windows)。",
+  "_comment_2": "v1.3.0 時点のキーは agy 1.0.0/1.0.1 のバイナリから抽出した推定値。'allow_access_gitignore' / 'allow_edit_gitignore' / 'allow_auto_run_commands' は有効性が未確認 (--print モードでのインタラクティブ承認テストが困難なため、v1.3.1 で実機受講者環境にて再検証予定)。書いて無視されても害はないため、ここで先行して入れる。",
+  "_comment_3": "上記キーが効かない場合の防御は launcher 強制の --sandbox フラグ (terminal restriction) と agy 1.0.1 の proceed-in-sandbox tool permission mode に依存。",
+  "enableTelemetry": false,
+  "trustedWorkspaces": [],
+  "allow_access_gitignore": false,
+  "allow_edit_gitignore": false,
+  "allow_auto_run_commands": false,
+  "allow_all": false
+}

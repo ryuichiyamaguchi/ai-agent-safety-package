@@ -2,58 +2,53 @@
 
 v1.0 時点で把握している既知の問題と回避策。
 
-## ⚠ Gemini CLI → Antigravity CLI 移行への対応（v1.2.2 追記）
+## Gemini CLI → Antigravity CLI 並立対応（v1.3.0 時点）
 
-Google から **Gemini CLI を 2026-06-18 で廃止し、後継の Antigravity CLI（`agy`）へ移行する**と発表されました（Pro / Ultra / 無料ティアが対象。Enterprise / Workspace は対象外）。本パッケージ v1.2.2 時点では、**従来の Gemini CLI 0.41.2 を引き続き利用する設計** です。`agy` の CLI フラグが破壊的に変更されており（`--approval-mode` / `--policy` が消失）、現状の `launch-gemini-safe.{sh,ps1}` では `agy` を起動できません。
+Google から **Gemini CLI を 2026-06-18 で廃止し、後継の Antigravity CLI（`agy`）へ移行する**と発表されました（Pro / Ultra / 無料ティアが対象。Enterprise / Workspace は対象外）。
 
-### Q: `agy` をインストールしてしまった。どう戻す？
+**本パッケージ v1.3.0 では Gemini CLI と Antigravity CLI の両方をサポート**します（並立）:
 
-**A: `agy` バイナリを削除し、Gemini CLI を再導入してください。**
+| CLI | launcher | 状態 |
+|---|---|---|
+| Gemini CLI 0.41.2 | `launch-gemini-safe.{sh,ps1}` | 廃止期限 2026-06-18 まで利用可 |
+| Antigravity CLI (`agy`) | `launch-agy-safe.{sh,ps1}` | **v1.3.0 で新規追加** |
 
-agy バイナリの場所と削除手順:
+### Q: どちらを使えばよい？
 
-```bash
-# Mac / Linux
-ls -la ~/.local/bin/agy
-rm ~/.local/bin/agy
+A: **既に `agy` を入れている人は `agy` 用 launcher を、Gemini CLI のままの人は Gemini CLI 用 launcher を使ってください。** 廃止期限まで両方をサポートします。新規受講者は `agy` を推奨します（公式の継続サポート対象）。
 
-# Windows (PowerShell)
-Get-Item "$env:LOCALAPPDATA\Antigravity\agy.exe"
-Remove-Item "$env:LOCALAPPDATA\Antigravity\agy.exe"
-```
+### Q: `agy` の安全装置はどこまで効くか？
 
-Gemini CLI 0.41.2 を再インストール:
+A: 以下は本パッケージ launcher 経由で**確実に効きます**:
 
-```bash
-npm install -g @google/gemini-cli@0.41.2
-gemini --version    # 0.41.2 と出れば OK
-```
+- `--sandbox` フラグによる terminal restriction（OS レベルのファイル書き込み制限）
+- `--add-dir <workspace>` による作業ディレクトリ明示
+- agy 1.0.1 以降の `proceed-in-sandbox` tool permission mode（サンドボックス内のターミナルコマンドのみ自動承認、サンドボックスを抜けようとした時のみ手動承認）
 
-`agy install` でシェル設定（`~/.bashrc` / `~/.zshrc` / `$PROFILE`）に PATH 追加されている場合、エディタで該当行を削除してください（`# antigravity-cli` 等のコメント付きで挿入されています）。
+一方、以下は**受講者が手動設定する必要があります**（agy が user-level の設定ファイルしか持たないため、launcher で強制できない）:
 
-### Q: 設定ファイルやログが残っているのが気になる
+- `allow_access_gitignore` / `allow_edit_gitignore` を `false` に（`.gitignore` 記載ファイルへの AI アクセスをブロック）
+- `allow_auto_run_commands` を `false` に（自動コマンド実行を抑止）
 
-agy は `~/.gemini/antigravity-cli/` 配下に conversations / cache / settings を作ります。Gemini CLI のレガシー設定（`~/.gemini/settings.json` など）は**触りません**。気になる場合は agy のサブツリーだけを削除して構いません:
+→ `configs/agy/recommended-settings.json` に推奨値があります。agy 起動後、画面右下の `/settings` を開いて 1 つずつ ON/OFF を合わせてください。launcher が初回起動時にヒントを表示します。
 
-```bash
-rm -rf ~/.gemini/antigravity-cli/    # agy 専用領域
-# ~/.gemini/settings.json は残す（Gemini CLI が使う）
-```
+### Q: PromptArmor が報告した `cat .env → webhook.site` の経路は防げる？
 
-### Q: 廃止期限（2026-06-18）以降はどうなる？
+A: **本パッケージの推奨設定を完全に適用した場合のみ防げます。** 具体的には:
 
-本パッケージ v1.3 で Antigravity CLI 正式対応版をリリース予定です。v1.3 では:
+1. `launch-agy-safe.*` 経由で起動（`--sandbox` 強制）
+2. `/settings` で `allow_access_gitignore` を `false`、`allow_auto_run_commands` を `false`
+3. agy の **Secure Mode** を **手動で ON**（agy `/settings` 内）
 
-- `launch-agy-safe.{sh,ps1}` を新規追加（`--sandbox` フラグ + プラグイン構成）
-- `configs/agy/` ディレクトリで settings / hooks を配布
-- agy の hook API（旧 Gemini CLI の `BeforeAgent` / `BeforeTool` が互換動作するか実機再検証）
-- 廃止期限直前の v1.2.x ホットフィックスで、講座 Day3 時点では Gemini CLI のまま継続できることを確認します
+これらを全て守らなかった場合、PromptArmor 報告の exfil シナリオは agy のデフォルト設定下では成立します。Secure Mode は最強の防御層なので、講座運用では受講者全員に ON にさせる方針を推奨します。
 
-リリーススケジュール案: v1.3.0 は 2026-06 中旬 GA を目標（**6/18 廃止に間に合わせる**）。詳細は `HANDOVER_v1.2.2.md` を参照。
+### Q: Gemini CLI と Antigravity CLI を同じ PC に入れても OK？
 
-### Q: 「自分は Enterprise / Workspace ティアだから廃止対象外」と聞いた。本パッケージは引き続き使えるか？
+A: 同居可能です。両者は別バイナリ（Gemini CLI は npm 経由、agy は Go バイナリで `~/.local/bin/agy` 等）、設定ディレクトリも分離されています（`~/.gemini/settings.json` vs `~/.gemini/antigravity-cli/settings.json`）。本パッケージの launcher も `launch-gemini-safe.*` と `launch-agy-safe.*` が別ファイルなので衝突しません。
 
-A: 使えます。ただし v1.3 以降は agy 前提で安全装置を再構築するため、Gemini CLI のサポート（既存 `launch-gemini-safe.*`）は段階的に縮小されます。Enterprise ティアでも v1.3 公開後は agy ベースの運用に揃える方が安全度が上がります（agy のサンドボックス / Secure Mode を活用可能）。
+### Q: 廃止期限（2026-06-18）以降はどうする？
+
+A: 本パッケージは v1.3.x の間 Gemini CLI launcher を残しますが、廃止期限後は Google の API 側で Gemini CLI が動かなくなる可能性が高いため、**全員 `agy` に移行する想定**です。v1.4 以降で `launch-gemini-safe.*` を削除する予定（タイミングは v1.3.x のリリースノートで案内）。
 
 ---
 

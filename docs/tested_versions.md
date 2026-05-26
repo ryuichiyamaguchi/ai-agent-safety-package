@@ -9,14 +9,15 @@ v1.0 リリース時点（2026-05-12）で動作確認した CLI のバージョ
 | Codex CLI | 0.130.0 | 主たる対象 |
 | Claude Code | 2.1.139 | hook 仕様準拠（v1.2.1 から `permissions.deny` 内部ツール対応） |
 | Gemini CLI | **0.41.2（凍結版）** | BeforeAgent / BeforeTool / AfterModel / AfterAgent hook。**2026-06-18 で公式廃止**（後継: Antigravity CLI） |
+| Antigravity CLI (`agy`) | **1.0.0 / 1.0.1** | v1.3.0 で `launch-agy-safe.{sh,ps1}` を追加し並立対応。`--sandbox` 強制起動 + `proceed-in-sandbox` permission mode で防御。設定ファイル経由の deny キー有効性は未確認（v1.3.1 で実機受講者環境にて再検証） |
 
-## ⚠ Gemini CLI → Antigravity CLI 移行ステータス（v1.2.2 時点）
+## ⚠ Gemini CLI → Antigravity CLI 移行ステータス（v1.3.0 時点）
 
 | 項目 | 状態 |
 |---|---|
 | Gemini CLI 公式廃止期限 | **2026-06-18**（Pro / Ultra / 無料ティア。Enterprise / Workspace は対象外） |
-| Antigravity CLI 実機検証 | **完了**（agy 1.0.0 を yamaguchi 開発機で確認） |
-| 本パッケージの agy 対応 | **未対応**。v1.3 で正式対応予定 |
+| Antigravity CLI 実機検証 | **完了**（agy 1.0.0 / 1.0.1 を yamaguchi 開発機で確認） |
+| 本パッケージの agy 対応 | **v1.3.0 で並立対応**（Gemini CLI launcher と agy launcher の両方を提供） |
 
 ### agy 1.0.0 実機検証で判明した破壊的変更
 
@@ -26,12 +27,13 @@ v1.0 リリース時点（2026-05-12）で動作確認した CLI のバージョ
 - **MCP**: `url` フィールドが `serverUrl` に rename（破壊的）
 - **Plugin import**: `agy plugin import gemini` で旧拡張を変換可能
 
-### 講座運用での当面の方針（v1.2.2）
+### 講座運用での当面の方針（v1.3.0）
 
-1. **Day3 の Gemini CLI 起動は従来通り**（`launch-gemini-safe.{sh,ps1}` を使う）
-2. 受講者には「Gemini CLI を `agy` に手動で差し替えない」と伝える
-3. agy をインストールしてしまった場合の戻し方は [99_known_issues.md](99_known_issues.md) の「Gemini CLI → Antigravity CLI 移行への対応」セクション
-4. 2026-06-18 以降は v1.3（agy 正式対応版）に切り替える運用へ移行
+1. **Gemini CLI 利用者は引き続き `launch-gemini-safe.{sh,ps1}` を使う**（廃止期限 2026-06-18 まで）
+2. **agy 利用者は `launch-agy-safe.{sh,ps1}` を使う**（v1.3.0 で新規追加）
+3. 受講者が agy / Gemini CLI のどちらを入れていても、本パッケージの launcher 経由なら最低限の防御が効く
+4. agy 起動後は `/settings` UI を開いて `configs/agy/recommended-settings.json` の値に揃えるよう案内
+5. 2026-06-18 以降は Gemini CLI launcher を段階的に deprecate（v1.3.x で削除予定）
 
 ## OS
 

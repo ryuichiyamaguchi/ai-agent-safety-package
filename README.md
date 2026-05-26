@@ -1,4 +1,4 @@
-# AI エージェント安全運用パッケージ v1.2.2
+# AI エージェント安全運用パッケージ v1.3.0
 
 Codex CLI、Claude Code、Gemini CLI を「あなたを守る安全装置」付きで使うためのパッケージです。
 
@@ -15,17 +15,25 @@ AI が暴走したり、騙されたりしても、以下のような事故が**
 - workspace の外側にファイルを書き込もうとしても OS レベルで止まる
 
 
-## ⚠ Gemini CLI の廃止アラート（2026-06-18）
+## Gemini CLI / Antigravity CLI 並立対応（v1.3.0〜）
 
-Google から「**Gemini CLI は 2026-06-18 で Pro / Ultra / 無料ティアの提供を終了し、後継の Antigravity CLI（`agy`）に移行する**」とアナウンスがありました（Enterprise / Workspace ティアは対象外）。
+Google から「Gemini CLI は **2026-06-18** で Pro / Ultra / 無料ティアの提供を終了し、後継の **Antigravity CLI（`agy`）** に移行する」と発表されました（Enterprise / Workspace ティアは対象外）。
 
-本パッケージ v1.2.2 時点では、**従来の Gemini CLI 0.41.2 を引き続き使う設計**になっています（`launch-gemini-safe.{sh,ps1}` は `gemini --approval-mode default --policy ...` を前提）。Antigravity CLI は CLI フラグが破壊的に変更されており（`--approval-mode` / `--policy` が消失）、現状の launcher では起動できません。
+本パッケージ v1.3.0 は **両方の CLI を並立サポート** します:
 
-- **講座 Day3 までに自分の手で `agy` をインストールしないでください**。インストールしてしまった場合の戻し方は [docs/99_known_issues.md](docs/99_known_issues.md) の「Gemini CLI → Antigravity CLI 移行への対応」を参照
-- 本パッケージは **v1.3 で Antigravity CLI に正式対応予定**（実機 hook 検証後）
-- 廃止期限以降の運用判断（agy へ移行 / Enterprise ティア利用 / Gemini CLI 利用停止）は **v1.3 のリリースノートで案内**
+| CLI | launcher | 状態 |
+|---|---|---|
+| Gemini CLI 0.41.2 | `launch-gemini-safe.{sh,ps1}` | 廃止期限 2026-06-18 まで利用可 |
+| Antigravity CLI (`agy`) | `launch-agy-safe.{sh,ps1}` | **v1.3.0 で新規追加** |
 
-## v1.2.2 の防御 4 層（ざっくり）
+- agy を入れている人は `launch-agy-safe.*` を、Gemini CLI のままの人は `launch-gemini-safe.*` を使ってください
+- **新規受講者は agy を推奨**します（公式の継続サポート対象）
+- agy 起動後は `/settings` UI を開いて `configs/agy/recommended-settings.json` の値に揃えてください（特に `allow_access_gitignore: false` と Secure Mode 推奨）
+- 廃止期限 2026-06-18 以降の運用は v1.3.x のリリースノートで案内予定
+
+詳しくは [docs/99_known_issues.md](docs/99_known_issues.md) の「Gemini CLI → Antigravity CLI 並立対応」セクション。
+
+## v1.3.0 の防御 4 層（ざっくり）
 
 このパッケージは、Codex CLI / Claude Code に対して下記 4 層を同時に効かせます。
 
@@ -50,7 +58,25 @@ Google から「**Gemini CLI は 2026-06-18 で Pro / Ultra / 無料ティアの
 
 この 3 点を守れば、AI を本気で使い倒せます。
 
-## v1.2.1 で追加：Claude Code 内部ツールの deny（v1.2.2 でも継続）
+## v1.3.0 で追加：Antigravity CLI launcher（並立対応）
+
+Gemini CLI の後継 **Antigravity CLI (`agy`)** 用に、`scripts/{macos,windows}/launch-agy-safe.{sh,ps1}` を新規追加しました。`launch-codex-safe.*` / `launch-gemini-safe.*` と同じ流れで使えます。
+
+- 起動時に `--sandbox` フラグを**強制付与** → agy のターミナル制限サンドボックスが必ず効く
+- `--add-dir <workspace>` で作業ディレクトリを明示し、workspace 外への混入を抑制
+- agy 1.0.1 以降の `proceed-in-sandbox` permission mode と組み合わせて、サンドボックス内のターミナルコマンドのみ自動承認、サンドボックスを抜けようとした時のみ手動承認
+- 初回起動時に「推奨セキュリティ設定があります」というヒントを表示（`configs/agy/recommended-settings.json` の値を `/settings` UI で揃える案内）
+
+受講者が `/settings` UI で OFF にすべき項目（agy はユーザー単位の設定ファイルしか持たないため launcher で強制不可、UI 設定が必要）:
+
+- `allow_access_gitignore` → `false`（`.gitignore` 記載ファイル＝`.env` 等への AI 読み取りをブロック）
+- `allow_edit_gitignore` → `false`
+- `allow_auto_run_commands` → `false`
+- agy の **Secure Mode** を ON（最強の防御層、強く推奨）
+
+これらを完全に守らない場合、PromptArmor が報告した `cat .env → webhook.site` 系の exfil シナリオは agy デフォルト設定下で成立します。詳細は [docs/99_known_issues.md](docs/99_known_issues.md) と `configs/agy/README.md` を参照。
+
+## v1.2.1 で追加：Claude Code 内部ツールの deny（v1.3.0 でも継続）
 
 Day3 の実機検証で「AI が内部 WebFetch / Write を選ぶとシェル経由の防御を素通り」する事実が判明。v1.2.1 で **Claude Code の `permissions.deny` に内部ツール単位の deny** を追加し、次を止めます（`configs/claude/settings.{mac,windows}.json`）。
 

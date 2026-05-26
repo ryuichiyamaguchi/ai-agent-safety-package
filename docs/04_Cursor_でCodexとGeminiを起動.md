@@ -20,9 +20,56 @@ Day3 は「Cursor を開いて、Codex と Gemini を実際に動かす」ハン
 
 ここに書いてあることだけやってください。奥の深い「なぜ安全なのか」という話は、別のドキュメントに書きました（困った時や興味が出た時に読んでください）。
 
-> **バージョン対応**：このドキュメントは v1.0.9 以降（最新は v1.2.2）向けです。v1.0.7 をお使いの場合は `docs/01_学校PCで使う.md` を参照してください。
+> **バージョン対応**：このドキュメントは v1.0.9 以降（最新は v1.3.0）向けです。v1.0.7 をお使いの場合は `docs/01_学校PCで使う.md` を参照してください。
 >
-> **⚠ Gemini CLI の廃止アラート**：Google から「Gemini CLI は 2026-06-18 で廃止し、後継の Antigravity CLI（`agy`）へ移行する」と発表されました。**Day3 では従来通り Gemini CLI 0.41.2 を使います**。受講者は自分の手で `agy` をインストールしないでください。既に入れてしまった場合は [docs/99_known_issues.md](99_known_issues.md) の「Gemini CLI → Antigravity CLI 移行への対応」を参照してください。本パッケージ v1.3 で agy 正式対応版を出す予定です。
+> **Gemini CLI と Antigravity CLI（agy）の並立対応**（v1.3.0〜）：Google から Gemini CLI を 2026-06-18 で廃止し、後継の Antigravity CLI（`agy`）に移行する旨が発表されました。本パッケージ v1.3.0 は**両方をサポート**します。
+>
+> - **Gemini CLI を使っている人**: `launch-gemini-safe.{sh,ps1}` を使う（廃止期限まで）
+> - **agy を使っている人**: `launch-agy-safe.{sh,ps1}` を使う（v1.3.0 で新規追加）
+>
+> 新規受講者は `agy` を推奨します（公式の継続サポート対象）。詳しくは [docs/99_known_issues.md](99_known_issues.md) の「Gemini CLI → Antigravity CLI 並立対応」セクション。
+
+---
+
+## Antigravity CLI（agy）を使う場合
+
+agy を入れている人は、Gemini CLI の代わりに以下を使ってください。**Codex CLI と同じ流れ**（launcher を経由する）です。
+
+### Mac
+
+```bash
+bash .ai-safety/hooks/macos/launch-agy-safe.sh
+```
+
+### Windows
+
+```powershell
+powershell -File .ai-safety\hooks\windows\launch-agy-safe.ps1
+```
+
+### 何が起こるか
+
+- `--sandbox` フラグが**自動的に付与**されるので、ターミナル制限サンドボックスが有効化される
+- `--add-dir <workspace>` で作業ディレクトリを明示し、workspace 外への混入を抑制
+- 初回起動時に「推奨セキュリティ設定があります」というヒントが出る（次回からは出ない）
+- agy 起動後、`/settings` を開いて以下を **OFF** にしてください:
+  - `allow_access_gitignore`（`.gitignore` 記載ファイル＝`.env` 等への AI アクセスを禁止）
+  - `allow_edit_gitignore`（同上の書き換え禁止）
+  - `allow_auto_run_commands`（自動コマンド実行を禁止）
+- さらに agy の **Secure Mode** を ON にすることを強く推奨（agy `/settings` 内）
+
+詳細な推奨値は配布パッケージ内の `configs/agy/recommended-settings.json` を参照してください。
+
+### Codex / Gemini CLI / agy のどれを使うか迷う場合
+
+| 状況 | 推奨 |
+|---|---|
+| 既に Gemini CLI 0.41.2 が入っている | そのまま `launch-gemini-safe.*` を使う（廃止期限 2026-06-18 まで） |
+| 既に agy が入っている | `launch-agy-safe.*` を使う |
+| 何も入れていない・これから入れる | agy を推奨（公式継続サポート対象） |
+| Codex CLI も使いたい | 上記とは別ターミナルで `launch-codex-safe.*` を起動 |
+
+---
 
 ---
 
