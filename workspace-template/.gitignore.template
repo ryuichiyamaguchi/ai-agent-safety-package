@@ -17,9 +17,13 @@ build/
 coverage/
 
 # AI エージェント認証情報・状態（必須）
+# A-1: auth.json 単体も明示 ignore。.codex/ 配下への物理コピーが残った場合も漏洩を防ぐ。
+auth.json
+*.codex.auth*
 .codex/
 .claude/
 .gemini/
+.codex-safe/
 
 # 安全パッケージのログ
 .ai-safety/logs/

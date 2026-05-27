@@ -7,7 +7,7 @@ Usage: $0 [--platform mac|win|both] [--global-claude] [workspace]
   --platform: install hooks for which OS (default: mac)
               "both" installs both mac and win hooks (win hooks become read-only)
   --global-claude: also install Claude settings to \$HOME/.claude/
-  workspace: target workspace directory (default: current directory)
+  workspace: target workspace directory (default: \$HOME/Documents/my-ai-workspace)
 EOF
 }
 
@@ -51,9 +51,27 @@ case "$PLATFORM" in
   *) echo "Error: --platform must be mac, win, or both" >&2; exit 1 ;;
 esac
 
-workspace="${workspace:-$(pwd)}"
-workspace="$(cd "$workspace" && pwd)"
 package_root="$(cd "$(dirname "$0")/../.." && pwd)"
+
+# B-3: workspace 未指定時は安全なデフォルト ($HOME/Documents/my-ai-workspace) を使用。
+# CWD がパッケージフォルダ自身の場合も同様に安全デフォルトへ。
+if [ -z "$workspace" ]; then
+  workspace="$HOME/Documents/my-ai-workspace"
+  echo "INFO: workspace not specified. Using default: $workspace"
+fi
+
+# 相対パスを絶対パスに変換（mkdir -p 後に cd で正規化）
+# B-2: 親ディレクトリが存在しなくても mkdir -p で自動作成。
+mkdir -p "$workspace"
+workspace="$(cd "$workspace" && pwd)"
+
+# B-3: ZIP 展開フォルダ自身を workspace に指定した場合は安全停止。
+if [ "$workspace" = "$package_root" ]; then
+  echo "エラー: workspace にパッケージフォルダ自身を指定しないでください。" >&2
+  echo "例: bash scripts/macos/install.sh \$HOME/Documents/my-ai-workspace" >&2
+  exit 1
+fi
+
 stamp="$(date +%Y%m%d-%H%M%S)"
 backup_dir="$HOME/.ai-safety/backups/$stamp"
 mkdir -p "$backup_dir" "$workspace/.ai-safety/hooks" "$workspace/.ai-safety/policy" "$workspace/.ai-safety/cards"

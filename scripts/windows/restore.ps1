@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory=$true)]
     [string]$BackupZip,
     [string]$Workspace = (Get-Location).Path

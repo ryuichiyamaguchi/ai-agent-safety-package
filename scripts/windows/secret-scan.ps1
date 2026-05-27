@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Position=0)]
     [string]$InputFile = "",
 
@@ -64,9 +64,9 @@ $patterns = @{
 $counts = @{}
 $total = 0
 foreach ($key in $patterns.Keys) {
-    $matches = [regex]::Matches($raw, $patterns[$key], 'IgnoreCase')
-    $counts[$key] = $matches.Count
-    $total += $matches.Count
+    $mList = [regex]::Matches($raw, $patterns[$key], 'IgnoreCase')
+    $counts[$key] = $mList.Count
+    $total += $mList.Count
 }
 
 # 警告出力（stderr）
@@ -118,10 +118,10 @@ $masked = [regex]::Replace($masked, '-----BEGIN (RSA |DSA |EC |OPENSSH |PGP )?PR
 $masked = [regex]::Replace($masked, '-----END (RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----',   '[MASKED:private_key_end]')
 $masked = [regex]::Replace($masked, $patterns.generic, {
     param($m)
-    $prefix = $m.Groups[1].Value
     # キー名と区切り文字を残し、値だけマスク
-    if ($m.Value -match '^(.+?)([:=]\s*[''"]?)([A-Za-z0-9_.+/=-]{12,})([''"]?)$') {
-        return "$($Matches[1])$($Matches[2])[MASKED:generic]$($Matches[4])"
+    $innerMatch = [regex]::Match($m.Value, '^(.+?)([:=]\s*[''"]?)([A-Za-z0-9_.+/=-]{12,})([''"]?)$')
+    if ($innerMatch.Success) {
+        return "$($innerMatch.Groups[1].Value)$($innerMatch.Groups[2].Value)[MASKED:generic]$($innerMatch.Groups[4].Value)"
     }
     return '[MASKED:generic]'
 }, 'IgnoreCase')

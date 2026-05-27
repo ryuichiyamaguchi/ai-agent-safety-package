@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Workspace = (Get-Location).Path,
     [string]$Prompt = ""
 )
@@ -63,7 +63,8 @@ if ((Test-Path -LiteralPath $Recommended) -and (-not (Test-Path -LiteralPath $Hi
     if (-not (Test-Path -LiteralPath $hintDir)) {
         New-Item -ItemType Directory -Path $hintDir -Force | Out-Null
     }
-    Write-Host @"
+    # C-4: here-string 終端行に引数を付けられないため変数に格納してから Write-Host
+    $hintMsg = @"
 [初回ヒント] agy の推奨セキュリティ設定があります:
   $Recommended
 
@@ -73,7 +74,8 @@ allow_auto_run_commands は OFF 推奨）。
 
 このヒントは次回以降は表示されません（再表示する場合は次のファイルを削除:
   $HintFlag）
-"@ -ForegroundColor Yellow
+"@
+    Write-Host $hintMsg -ForegroundColor Yellow
     Set-Content -LiteralPath $HintFlag -Value (Get-Date -Format "o") -ErrorAction SilentlyContinue
 }
 

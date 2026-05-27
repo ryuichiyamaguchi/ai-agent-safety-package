@@ -31,19 +31,35 @@ v1.4.0 で追加。Claude / OpenAI / Anthropic 以外の **外部 LLM**（DeepSe
 
 プロンプト本文を入力すると、API キー・パスワード・JWT・秘密鍵などを `[MASKED:type]` に置換します。
 
+> `secret-scan` はコマンドとしてそのまま使えるように PATH に登録されていません。以下のようにスクリプトファイルを直接指定して実行してください。
+
+**Windows（PowerShell）：**
+
+```powershell
+# 標準入力
+echo "ここに本文" | powershell -File ".ai-safety\hooks\windows\secret-scan.ps1"
+
+# ファイルを直接スキャン
+powershell -File ".ai-safety\hooks\windows\secret-scan.ps1" prompt.txt
+
+# 検出件数だけ確認（マスキングなし、検出時は終了）
+echo "ここに本文" | powershell -File ".ai-safety\hooks\windows\secret-scan.ps1" --check
+```
+
+**Mac（ターミナル）：**
+
 ```bash
 # 標準入力
-echo "ここに本文" | secret-scan
+echo "ここに本文" | bash .ai-safety/hooks/macos/secret-scan.sh
 
-# ファイル
-secret-scan prompt.txt
+# ファイルを直接スキャン
+bash .ai-safety/hooks/macos/secret-scan.sh prompt.txt
 
 # 検出件数だけ確認（マスキングなし、検出時は exit 1）
-echo "ここに本文" | secret-scan --check
-
-# 警告を抑制（監査ログには記録）
-echo "ここに本文" | secret-scan --quiet
+echo "ここに本文" | bash .ai-safety/hooks/macos/secret-scan.sh --check
 ```
+
+> これらのコマンドはワークスペースフォルダ（例：`Desktop\my-project`）を開いたターミナルで実行してください。
 
 検出されるタイプ:
 
@@ -59,39 +75,89 @@ echo "ここに本文" | secret-scan --quiet
 
 ### `safe-paste`（クリップボード経由のワンライナー）
 
-最も簡単な使い方。プロンプトを書いて ⌘C → `safe-paste` → DeepSeek に ⌘V。
+最も簡単な使い方。プロンプトを書いてコピー → `safe-paste` → DeepSeek に貼り付け。
+
+**Windows（PowerShell）：**
+
+```powershell
+# クリップボードをスキャン + マスキング + 書き戻し
+powershell -File ".ai-safety\hooks\windows\clipboard-safe-paste.ps1"
+
+# マスキングせず検出件数だけ確認
+powershell -File ".ai-safety\hooks\windows\clipboard-safe-paste.ps1" --check
+```
+
+**Mac（ターミナル）：**
 
 ```bash
 # クリップボードをスキャン + マスキング + 書き戻し
-safe-paste
+bash .ai-safety/hooks/macos/clipboard-safe-paste.sh
 
 # マスキングせず検出件数だけ確認
-safe-paste --check
+bash .ai-safety/hooks/macos/clipboard-safe-paste.sh --check
 ```
 
 ### `deepseek-safe`（起動ゲート）
 
 DeepSeek を使う前の念押し画面。`yes` と打つまで続行しません。
 
+**Windows（PowerShell）：**
+
+```powershell
+powershell -File ".ai-safety\hooks\windows\launch-deepseek-safe.ps1"
+```
+
+**Mac（ターミナル）：**
+
 ```bash
-deepseek-safe
+bash .ai-safety/hooks/macos/launch-deepseek-safe.sh
 ```
 
 起動すると赤い警告ボックスが出て、「絶対に流出しても問題ないことだけ扱いますか？」と聞かれます。`yes` で続行、それ以外で中断。続行後は推奨ワークフローと `safe-paste` の使い方が表示されます。
 
 ## 推奨ワークフロー
 
-1. **`deepseek-safe`** を実行 → 念押し確認に `yes`
-2. **DeepSeek の Web UI（chat.deepseek.com）または公式 CLI を別画面で開く**
+### Windows の場合
+
+1. ワークスペースフォルダ（例：`Desktop\my-project`）を開いたターミナルで以下を実行 → 念押し確認に `yes`
+   ```powershell
+   powershell -File ".ai-safety\hooks\windows\launch-deepseek-safe.ps1"
+   ```
+2. **DeepSeek の Web UI（chat.deepseek.com）を別のブラウザタブで開く**
+3. **プロンプトを書く** → Ctrl+C でコピー
+4. ターミナルで以下を実行 → クリップボード内容がマスキングされる
+   ```powershell
+   powershell -File ".ai-safety\hooks\windows\clipboard-safe-paste.ps1"
+   ```
+5. **DeepSeek に Ctrl+V** で貼り付け
+6. 応答が返ってきたら、応答の中身も**機微情報が混じっていないか目視で確認**してから使う
+7. セッションが終わったら監査ログをセルフチェック:
+   ```powershell
+   Get-Content ".ai-safety\logs\secret-scan-events.jsonl" | Select-Object -Last 10
+   ```
+
+### Mac の場合
+
+1. ワークスペースフォルダを開いたターミナルで以下を実行 → 念押し確認に `yes`
+   ```bash
+   bash .ai-safety/hooks/macos/launch-deepseek-safe.sh
+   ```
+2. **DeepSeek の Web UI（chat.deepseek.com）を別のブラウザタブで開く**
 3. **プロンプトを書く** → ⌘C でコピー
-4. **ターミナルで `safe-paste`** → クリップボード内容がマスキングされる
+4. ターミナルで以下を実行 → クリップボード内容がマスキングされる
+   ```bash
+   bash .ai-safety/hooks/macos/clipboard-safe-paste.sh
+   ```
 5. **DeepSeek に ⌘V** で貼り付け
 6. 応答が返ってきたら、応答の中身も**機微情報が混じっていないか目視で確認**してから使う
-7. セッションが終わったら **監査ログをセルフチェック**: `cat ~/.ai-safety/logs/secret-scan-events.jsonl | tail`
+7. セッションが終わったら監査ログをセルフチェック:
+   ```bash
+   tail .ai-safety/logs/secret-scan-events.jsonl
+   ```
 
 ## 監査ログ
 
-`~/.ai-safety/logs/secret-scan-events.jsonl` に「いつ・どんな種類の機微情報を・何件マスキングしたか」が記録されます。**本物の値は記録されません**（タイプと件数のみ）。
+ワークスペースの `.ai-safety/logs/secret-scan-events.jsonl` に「いつ・どんな種類の機微情報を・何件マスキングしたか」が記録されます。**本物の値は記録されません**（タイプと件数のみ）。
 
 ```json
 {"ts":"2026-05-27T03:31:22Z","user":"ryuichi","mode":"mask","cwd":"/Users/ryuichi/...","total":3,"counts":{"openai":1,"anthropic":0,"google":1,"aws":1,"github":0,"slack":0,"jwt":0,"private_key":0,"generic":0}}
@@ -117,6 +183,46 @@ A: 多くの場合は理解できます（`[MASKED:openai]` は「ここに Open
 ### Q: secret-scan の検出パターンに引っかからない秘密情報は？
 
 A: あります。たとえば「顧客の名前」「社内コードネーム」「特定の URL パターン」などは regex で網羅できません。**最終確認は目視**で行ってください。secret-scan は「うっかり貼り付けた API キーをブロックする最後の砦」であって、「すべての機微情報を完璧に検出するツール」ではありません。
+
+## コマンドを短くしたい場合（エイリアス設定）
+
+毎回長いパスを打つのが面倒な場合は、エイリアス（ショートカット）を設定できます。一度設定すれば、短いコマンド名で呼び出せるようになります。
+
+### Mac（~/.zshrc に追加）
+
+ターミナルで以下を実行してください（1 回だけでOK）：
+
+```bash
+echo 'alias secret-scan="bash ~/Documents/my-ai-workspace/.ai-safety/hooks/macos/secret-scan.sh"' >> ~/.zshrc
+echo 'alias safe-paste="bash ~/Documents/my-ai-workspace/.ai-safety/hooks/macos/clipboard-safe-paste.sh"' >> ~/.zshrc
+echo 'alias deepseek-safe="bash ~/Documents/my-ai-workspace/.ai-safety/hooks/macos/launch-deepseek-safe.sh"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+設定後は `secret-scan`、`safe-paste`、`deepseek-safe` とだけ入力すれば動きます。
+
+> `my-ai-workspace` はインストール時に指定したワークスペースフォルダ名に読み替えてください。
+
+### Windows（PowerShell $PROFILE に追加）
+
+PowerShell ウィンドウで以下を実行してください（1 回だけでOK）：
+
+```powershell
+# $PROFILE ファイルがなければ作成
+if (!(Test-Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force }
+
+# エイリアスを追加
+Add-Content $PROFILE 'function secret-scan { powershell -File "$env:USERPROFILE\Desktop\my-project\.ai-safety\hooks\windows\secret-scan.ps1" @args }'
+Add-Content $PROFILE 'function safe-paste { powershell -File "$env:USERPROFILE\Desktop\my-project\.ai-safety\hooks\windows\clipboard-safe-paste.ps1" @args }'
+Add-Content $PROFILE 'function deepseek-safe { powershell -File "$env:USERPROFILE\Desktop\my-project\.ai-safety\hooks\windows\launch-deepseek-safe.ps1" }'
+
+# 反映（現在のセッション）
+. $PROFILE
+```
+
+設定後は `secret-scan`、`safe-paste`、`deepseek-safe` とだけ入力すれば動きます。
+
+> `Desktop\my-project` はインストール時に指定したワークスペースフォルダのパスに読み替えてください。
 
 ## 関連ドキュメント
 

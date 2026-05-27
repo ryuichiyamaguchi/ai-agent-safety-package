@@ -1,4 +1,4 @@
-param()
+﻿param()
 
 try {
     . (Join-Path $PSScriptRoot "lib\SafetyPolicy.ps1")

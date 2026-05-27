@@ -1,6 +1,6 @@
 # 自宅 Windows で使う
 
-自分の Windows PC で AI エージェント安全運用パッケージ v1.0.9 を使う手順です。
+自分の Windows PC で AI エージェント安全運用パッケージ v1.4.1 を使う手順です。
 
 ## 前提
 
@@ -39,7 +39,7 @@ codex login
 
 ## ステップ 1：パッケージのダウンロード
 
-GitHub の Release ページから v1.0.9 の ZIP をダウンロードします。
+GitHub の Release ページから v1.4.1 の ZIP をダウンロードします。
 
 ダウンロード先：**ユーザーフォルダ直下**（`C:\Users\あなたの名前\`）または**デスクトップ**
 
@@ -84,16 +84,16 @@ powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1
 
 これで Codex CLI が**対話モード（TUI）**で安全装置付きに起動します。
 
-v1.0.9 の launcher は次の構成を強制します。
+v1.4.1 の launcher は次の構成を強制します。
 
 - `--sandbox workspace-write`：workspace 外への書き込みを OS が拒否（1 層目）
-- `network_access = false`：外部通信を全遮断（hook 層 + サンドボックス）
-- `--ask-for-approval untrusted`：Codex 内部の trusted list（`cat` / `ls` / `sed` などの安全コマンド）以外が来たときに、**実行前に承認ダイアログ**を出す（3 層目）
-- `shell_environment_policy.exclude`：`OPENAI_API_KEY` などのシークレット環境変数を AI に渡さない
+- `network_access = false`：外部通信を全遮断（2 層目）
+- `shell_environment_policy.exclude`：`OPENAI_API_KEY` などのシークレット環境変数を AI に渡さない（3 層目）
+- `--ask-for-approval untrusted`：Codex 内部の trusted list（`cat` / `ls` / `sed` などの安全コマンド）以外が来たときに、**実行前に承認ダイアログ**を出す（4 層目）
 
-`python -c "open('.env')..."` や `curl`、`rm -rf`、`git push --force` のような trusted list 外の操作は、承認ダイアログが出る（そこで「いいえ」を押せば実行されない）か、または hook 層（`policy/safety-policy.json`）で**先に**拒否されます。`cat ~/.ssh/id_rsa` のように trusted コマンド + 危険な引数の組合せでは approval は出ませんが、hook 層と OS サンドボックスが止めます。**3 層のどこかで止まれば安全**というモデルです。詳細は `docs\90_守れる-守れない.md` の「なぜ『安全』は 3 層で成り立つのか」を参照。
+`python -c "open('.env')..."` や `curl`、`rm -rf`、`git push --force` のような trusted list 外の操作は、承認ダイアログが出る（そこで「いいえ」を押せば実行されない）か、または hook 層（`policy/safety-policy.json`）で**先に**拒否されます。`cat ~/.ssh/id_rsa` のように trusted コマンド + 危険な引数の組合せでは approval は出ませんが、hook 層と OS サンドボックスが止めます。**4 層のどこかで止まれば安全**というモデルです。詳細は `docs\90_守れる-守れない.md` の「なぜ『安全』は 4 層で成り立つのか」を参照。
 
-> 注意：v1.0.9 の `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
+> 注意：v1.4.1 の `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
 
 Claude Code を使う場合：
 

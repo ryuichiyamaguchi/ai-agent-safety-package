@@ -85,13 +85,15 @@ cd "$env:USERPROFILE\Documents\my-ai-workspace"
 powershell -File ".ai-safety\hooks\windows\launch-claude-safe.ps1"
 ```
 
+> ※ `my-ai-workspace` の部分は、インストール時に自分でつけたフォルダ名に読み替えてください（例：`Desktop\my-project` など）。
+
 ※ 事前に `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` を実行済みであることが前提です（docs/01 / docs/02 のステップ 0 参照）。
 
 launcher が次の防御を自動で有効にします。
 
 - `--sandbox workspace-write`：workspace の外への書き込みを OS レベルで拒否（1 層目）
 - `network_access = false`：外部通信を全遮断（hook 層 + サンドボックス）
-- `--ask-for-approval untrusted`：Codex の trusted list（`cat`、`ls` などの安全コマンド）以外が来たときに、実行前に承認プロンプトを出す（3 層目）。`cat ~/.ssh/id_rsa` のような trusted コマンド + 危険な引数の組合せは approval をスキップするので、hook 層（`policy/safety-policy.json`）が代わりに止めます。**3 層のどこかで止まれば安全**というモデル。詳細は [docs/90_守れる-守れない.md](90_守れる-守れない.md) の「なぜ『安全』は 3 層で成り立つのか」を参照
+- `--ask-for-approval untrusted`：Codex の trusted list（`cat`、`ls` などの安全コマンド）以外が来たときに、実行前に承認プロンプトを出す（4 層目）。`cat ~/.ssh/id_rsa` のような trusted コマンド + 危険な引数の組合せは approval をスキップするので、hook 層（`policy/safety-policy.json`）が代わりに止めます。**4 層のどこかで止まれば安全**というモデル。詳細は [docs/90_守れる-守れない.md](90_守れる-守れない.md) の「なぜ『安全』は 4 層で成り立つのか」を参照
 - `shell_environment_policy.exclude`：`OPENAI_API_KEY` などのシークレット環境変数を AI に渡さない
 
 ### v1.2.1 で追加：Claude Code 内部ツールの deny
@@ -241,8 +243,10 @@ Launcher スクリプト（`launch-claude-safe.sh` または `.ps1`）が実行�
 
 **Mac**：
 ```bash
-chmod +x ~/.ai-safety/hooks/macos/launch-claude-safe.sh
+chmod +x ~/Documents/my-ai-workspace/.ai-safety/hooks/macos/launch-claude-safe.sh
 ```
+
+> `my-ai-workspace` はインストール時に指定したワークスペースフォルダ名に読み替えてください。
 
 **Windows**：PowerShell のExecutionPolicy を確認
 ```powershell

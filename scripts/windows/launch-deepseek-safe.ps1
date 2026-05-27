@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$SkipWarning = $false
 )
 
@@ -8,9 +8,9 @@ param(
 # 機微情報スキャナのワンストップ ラッパー（v1.4.0 で新規追加）。
 
 $ErrorActionPreference = "Stop"
-$PkgRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$SecretScan = Join-Path $PkgRoot "scripts\windows\secret-scan.ps1"
-$SafePaste = Join-Path $PkgRoot "scripts\windows\clipboard-safe-paste.ps1"
+# C-3: $PSScriptRoot で同ディレクトリのスクリプトを直接参照（二重階層パス不要）
+$SecretScan = Join-Path $PSScriptRoot "secret-scan.ps1"
+$SafePaste  = Join-Path $PSScriptRoot "clipboard-safe-paste.ps1"
 
 if (-not $SkipWarning) {
     Write-Host ""

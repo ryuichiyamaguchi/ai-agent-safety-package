@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Workspace = (Get-Location).Path,
     [string]$PackageRoot = ([System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..")))
 )

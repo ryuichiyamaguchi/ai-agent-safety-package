@@ -1,4 +1,4 @@
-﻿param(
+﻿﻿param(
     [string]$Workspace = (Get-Location).Path,
     [switch]$LiveCodex
 )
@@ -102,12 +102,26 @@ if ($codex) {
     New-Item -ItemType Directory -Force -Path $inside, $outside | Out-Null
     $outsideFile = Join-Path $outside "pwn.txt"
     $writeOutside = "Set-Content -Path '$outsideFile' -Value pwn"
-    & codex sandbox windows -C $inside powershell.exe -NoProfile -Command $writeOutside *> $null
-    Add-Result "codex windows sandbox blocks outside write" (-not (Test-Path -LiteralPath $outsideFile)) ("outsideFileExists=" + (Test-Path -LiteralPath $outsideFile))
+    # D-2: *>$null を廃止。stderr は捨てるが stdout をキャプチャし、
+    #      $LASTEXITCODE で codex 自体の起動成否を確認する。
+    #      codex が exit 0 以外（起動失敗含む）なら sandbox テストを FAIL にする。
+    $sandboxOut1 = & codex sandbox windows -C $inside powershell.exe -NoProfile -Command $writeOutside 2>$null
+    $sandboxExit1 = $LASTEXITCODE
+    if ($sandboxExit1 -ne 0) {
+        Add-Result "codex windows sandbox blocks outside write" $false ("codex exited $sandboxExit1 — sandbox may not have started")
+    } else {
+        Add-Result "codex windows sandbox blocks outside write" (-not (Test-Path -LiteralPath $outsideFile)) ("outsideFileExists=" + (Test-Path -LiteralPath $outsideFile))
+    }
 
     $webCmd = ("Invoke-Web" + "Request https://example.com -UseBasicParsing")
-    & codex sandbox windows -C $inside powershell.exe -NoProfile -Command $webCmd *> $null
-    Add-Result "codex windows sandbox blocks direct network test" ($LASTEXITCODE -ne 0) ("exit=" + $LASTEXITCODE)
+    $sandboxOut2 = & codex sandbox windows -C $inside powershell.exe -NoProfile -Command $webCmd 2>$null
+    $sandboxExit2 = $LASTEXITCODE
+    if ($sandboxExit2 -eq 0) {
+        # codex が exit 0 = sandbox 内コマンドが成功扱い = ネットワーク遮断されていない
+        Add-Result "codex windows sandbox blocks direct network test" $false ("exit=$sandboxExit2 — network may not be blocked")
+    } else {
+        Add-Result "codex windows sandbox blocks direct network test" $true ("exit=$sandboxExit2")
+    }
 } else {
     Add-Result "codex installed" $false "codex command missing"
 }

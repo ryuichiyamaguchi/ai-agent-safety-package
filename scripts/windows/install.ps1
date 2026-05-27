@@ -1,13 +1,37 @@
 ﻿param(
     [ValidateSet('mac','win','both')]
     [string]$Platform = 'win',
-    [string]$Workspace = (Get-Location).Path,
+    [string]$Workspace = '',
     [switch]$InstallGlobalClaudeSettings
 )
 
 $ErrorActionPreference = "Stop"
-$Workspace = [System.IO.Path]::GetFullPath($Workspace)
+
+# B-3: workspace 既定値を安全なデフォルトに。空・相対パスは $env:USERPROFILE\Documents\my-ai-workspace へ。
+# CWD が ZIP 展開直後のパッケージフォルダ ($PSScriptRoot の 2 階層上) だった場合も同様に安全デフォルトへ。
 $packageRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+
+if ([string]::IsNullOrWhiteSpace($Workspace)) {
+    $Workspace = Join-Path $env:USERPROFILE "Documents\my-ai-workspace"
+    Write-Host "INFO: -Workspace not specified. Using default: $Workspace"
+} else {
+    # 相対パスを絶対パスに展開（CWD 基準）
+    if (-not [System.IO.Path]::IsPathRooted($Workspace)) {
+        $Workspace = [System.IO.Path]::GetFullPath((Join-Path (Get-Location).Path $Workspace))
+    }
+}
+
+$Workspace = [System.IO.Path]::GetFullPath($Workspace)
+
+# B-3: ZIP 展開フォルダ自身 (= packageRoot) を workspace に指定した場合は安全停止。
+if ($Workspace -eq $packageRoot) {
+    throw "エラー: workspace にパッケージフォルダ自身を指定しないでください。" +
+          "`n例: powershell -File scripts\windows\install.ps1 -Workspace `"$env:USERPROFILE\Documents\my-ai-workspace`""
+}
+
+# B-2: workspace の親ディレクトリが存在しない場合でも自動作成する。
+New-Item -ItemType Directory -Force -Path $Workspace | Out-Null
+
 $homeSafety = Join-Path $HOME ".ai-safety"
 $backupDir = Join-Path $homeSafety ("backups\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 
@@ -102,11 +126,24 @@ if (Test-Path -LiteralPath $cardsSrc) {
 }
 
 if ($Platform -in 'win','both') {
-    Copy-Item -LiteralPath (Join-Path $packageRoot "scripts\windows") -Destination (Join-Path $Workspace ".ai-safety\hooks") -Recurse -Force
+    # B-4: PS 5.1 と 7 で Copy-Item -Recurse の挙動差を回避。
+    # 宛先フォルダを先に削除して作り直し、中身 (*) を明示コピーする。
+    $winDest = Join-Path $Workspace ".ai-safety\hooks\windows"
+    if (Test-Path -LiteralPath $winDest) {
+        Remove-Item -LiteralPath $winDest -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $winDest | Out-Null
+    Copy-Item -Path (Join-Path $packageRoot "scripts\windows\*") -Destination $winDest -Recurse -Force
 }
 
 if ($Platform -in 'mac','both') {
-    Copy-Item -LiteralPath (Join-Path $packageRoot "scripts\macos") -Destination (Join-Path $Workspace ".ai-safety\hooks") -Recurse -Force
+    # B-4: mac 側も同様に明示コピー。
+    $macDest = Join-Path $Workspace ".ai-safety\hooks\macos"
+    if (Test-Path -LiteralPath $macDest) {
+        Remove-Item -LiteralPath $macDest -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $macDest | Out-Null
+    Copy-Item -Path (Join-Path $packageRoot "scripts\macos\*") -Destination $macDest -Recurse -Force
     # Foreign-OS hooks become read-only to shrink attack surface (H3).
     $aclPath = Join-Path $Workspace ".ai-safety\hooks\macos"
     if (Test-Path -LiteralPath $aclPath) {
@@ -140,6 +177,27 @@ Copy-WithBackup (Join-Path $packageRoot "configs\codex\hooks.windows.json") (Joi
 Copy-WithBackup (Join-Path $packageRoot "configs\gemini\settings.windows.json") (Join-Path $Workspace ".gemini\settings.json")
 Copy-WithBackup (Join-Path $packageRoot "configs\gemini\policies\safety.toml") (Join-Path $Workspace ".gemini\policies\safety.toml")
 Copy-WithBackup (Join-Path $packageRoot "workspace-template\aiexclude.template") (Join-Path $Workspace ".aiexclude")
+
+# A-1: .gitignore.template を workspace ルートに .gitignore としてコピーする。
+# 既存の .gitignore は上書きせず、auth.json / .codex / .claude 等の必須エントリを追記する。
+$gitignoreTemplate = Join-Path $packageRoot "workspace-template\.gitignore.template"
+$gitignoreDest = Join-Path $Workspace ".gitignore"
+if (Test-Path -LiteralPath $gitignoreTemplate) {
+    if (Test-Path -LiteralPath $gitignoreDest) {
+        # 既存 .gitignore に必須エントリが欠落していれば追記する
+        $existing = Get-Content -LiteralPath $gitignoreDest -Raw
+        $required = @("auth.json", "*.codex.auth*", ".codex/", ".claude/", ".codex-safe/")
+        $missingEntries = $required | Where-Object { $existing -notmatch [regex]::Escape($_) }
+        if ($missingEntries.Count -gt 0) {
+            $appendBlock = "`n# AI safety package required entries (A-1 auto-appended by install.ps1)`n" + ($missingEntries -join "`n") + "`n"
+            Add-Content -LiteralPath $gitignoreDest -Value $appendBlock -Encoding UTF8
+            Write-Host ("Appended " + $missingEntries.Count + " missing safety entries to existing .gitignore")
+        }
+    } else {
+        Copy-Item -LiteralPath $gitignoreTemplate -Destination $gitignoreDest -Force
+        Write-Host "Created .gitignore from workspace-template/.gitignore.template"
+    }
+}
 
 if ($InstallGlobalClaudeSettings) {
     $globalSrc = Join-Path $packageRoot "configs\claude\settings.windows.json"

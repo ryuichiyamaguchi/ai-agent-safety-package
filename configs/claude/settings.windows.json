@@ -68,7 +68,15 @@
       "Read(**/.config/gcloud/**)",
       "Read(**/.docker/config.json)",
       "Read(**/.npmrc)",
-      "Read(**/.pypirc)"
+      "Read(**/.pypirc)",
+      "Bash(Get-ChildItem Env:*)",
+      "Bash(gci Env:*)",
+      "Bash(dir Env:*)",
+      "Bash(ls Env:*)",
+      "Bash(printenv*)",
+      "Bash(printenv *)",
+      "Bash(env)",
+      "Bash(set *)"
     ]
   },
   "hooks": {

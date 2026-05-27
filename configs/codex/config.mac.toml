@@ -2,12 +2,10 @@ sandbox_mode = "workspace-write"
 approval_policy = "untrusted"
 model_reasoning_effort = "medium"
 
-# [features] は Codex CLI の旧フラグ機構。本パッケージは hooks 配線を
-# configs/codex/hooks.<platform>.json 経由で行うため、ここでは hooks = false を
-# 明示して旧 features 経路を完全に無効化している。Hook を有効化するには
-# hooks.mac.json / hooks.windows.json を編集する。
+# A-2: hooks = true に変更。guard 系 hook が確実に発火するよう有効化する。
+# launcher (launch-codex-safe.sh) 側でも -c features.hooks=true を渡して二重保証。
 [features]
-hooks = false
+hooks = true
 
 [sandbox_workspace_write]
 network_access = false
