@@ -83,14 +83,14 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 > | [v1.0.x] configs/gemini/policies/safety.toml | d63830fc7548c9987a1d84b7ec0212b6527f639a6af808ee29d00427ceb87f3c |
 > | [v1.0.x] workspace-template/aiexclude.template | 9fee69aa1fa5dc7253ebb1419bc1f28b4ca24c8c794f5c6fcc011a1c4a2e444b |
 
-### v1.4.2（現行 HEAD、ワンクリック導線 + CRLF 改行 hotfix）
+### v1.4.3（現行 HEAD、BOM 二重 hotfix）
 
 > 実測日: 2026-05-28。`shasum -a 256 <file>` (macOS) で計測。
-> v1.4.1 の致命バグ 2 件 (全 .ps1 が BOM+LF で PS 5.1 起動不能 / docs 本編にワンクリック導線なし) を緊急 hotfix。
+> v1.4.2 の追加致命バグ (doctor.ps1 / launch-claude-safe.ps1 に BOM が二重に入っており PS 5.1 起動不能) を緊急 hotfix。v1.4.2 の Release は未公開のままスキップし、v1.4.3 を正規リリースとする。
 
 | ファイル | SHA-256 | 備考 |
 |---------|---------|------|
-| policy/safety-policy.json | 507c868b38c263a83b8444d3a2f33128b0e056f9ab9007b843df1b477fb3c4ea | v1.4.2 で packageVersion を 1.4.2 に bump |
+| policy/safety-policy.json | 92a525342e5bb79e6138f47f8e5189c8bdc6a76bb7d2953d716bc9696abc737a | v1.4.3 で packageVersion を 1.4.3 に bump |
 | configs/codex/hooks.mac.json | 6f03deee71871c40dd81d098867a4860284700f98135fbb05730936738a729ca | v1.0.x から変更なし |
 | configs/codex/hooks.windows.json | 9e7292426dd844ebe4d6ffa20f92f2283e9c1f6e704412bb1321117d4eb62d6a | v1.0.x から変更なし |
 | configs/claude/settings.mac.json | 38b720bbe14be938574c7411913ad7c01313bfb4c8ebefd02d0f5d8d6b4740d6 | v1.4.1 で env exfil deny 追加 |
