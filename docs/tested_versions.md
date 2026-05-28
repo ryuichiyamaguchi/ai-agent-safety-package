@@ -83,7 +83,28 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 > | [v1.0.x] configs/gemini/policies/safety.toml | d63830fc7548c9987a1d84b7ec0212b6527f639a6af808ee29d00427ceb87f3c |
 > | [v1.0.x] workspace-template/aiexclude.template | 9fee69aa1fa5dc7253ebb1419bc1f28b4ca24c8c794f5c6fcc011a1c4a2e444b |
 
-### v1.4.3（現行 HEAD、BOM 二重 hotfix）
+### v1.4.4（現行 HEAD、Version SSOT 統一 + release-version-check.sh 新規）
+
+> 実測日: 2026-05-28。`shasum -a 256 <file>` (macOS) で計測。
+> v1.4.3 からの変更: `policy/safety-policy.json` の packageVersion を 1.4.4 に bump。
+> 全 active docs / installer / workspace-template の version 表記を v1.4.4 に統一。
+> `scripts/release-version-check.sh` 新規作成（SSOT drift 検出スクリプト）。
+
+| ファイル | SHA-256 | 備考 |
+|---------|---------|------|
+| policy/safety-policy.json | 435f745b0ad4f80549c1762a12c8962e9419a266f9697f20b4b6a019d89472dd | v1.4.4 で packageVersion を 1.4.4 に bump |
+| configs/codex/hooks.mac.json | 6f03deee71871c40dd81d098867a4860284700f98135fbb05730936738a729ca | v1.0.x から変更なし |
+| configs/codex/hooks.windows.json | 9e7292426dd844ebe4d6ffa20f92f2283e9c1f6e704412bb1321117d4eb62d6a | v1.0.x から変更なし |
+| configs/claude/settings.mac.json | 38b720bbe14be938574c7411913ad7c01313bfb4c8ebefd02d0f5d8d6b4740d6 | v1.4.1 で env exfil deny 追加（変更なし） |
+| configs/claude/settings.windows.json | 2886773553d02d868cb01501a1ce3683891bea2dc88e803654f4d8c24dc79661 | v1.4.1 で env exfil deny 追加（変更なし） |
+| configs/gemini/settings.mac.json | b9f45bac5583930c6b44a07a2351c6bd21722503de82983e63cd5f38db2a6213 | v1.0.x から変更なし |
+| configs/gemini/settings.windows.json | f061d04699ce366887ae829d0f6fd78ac8d597c9bbaac80bb985332f32d1f012 | v1.0.x から変更なし |
+| configs/codex/config.mac.toml | ba8c3ec6603ae2812918683a8f46c828a79cc432f22323ea9c218672aa029791 | v1.4.1 で `features.hooks=true` 修正（変更なし） |
+| configs/codex/config.windows.toml | 005fbee210b77482cb68912610b551a124608a192992346956a57cc724388537 | v1.4.1 で `features.hooks=true` 修正（変更なし） |
+| configs/gemini/policies/safety.toml | d63830fc7548c9987a1d84b7ec0212b6527f639a6af808ee29d00427ceb87f3c | v1.0.x から変更なし |
+| workspace-template/aiexclude.template | 9fee69aa1fa5dc7253ebb1419bc1f28b4ca24c8c794f5c6fcc011a1c4a2e444b | v1.0.x から変更なし |
+
+### v1.4.3（BOM 二重 hotfix）
 
 > 実測日: 2026-05-28。`shasum -a 256 <file>` (macOS) で計測。
 > v1.4.2 の追加致命バグ (doctor.ps1 / launch-claude-safe.ps1 に BOM が二重に入っており PS 5.1 起動不能) を緊急 hotfix。v1.4.2 の Release は未公開のままスキップし、v1.4.3 を正規リリースとする。

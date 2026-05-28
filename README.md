@@ -1,4 +1,4 @@
-# AI エージェント安全運用パッケージ v1.4.1
+# AI エージェント安全運用パッケージ v1.4.4
 
 Codex CLI、Claude Code、Gemini CLI を「あなたを守る安全装置」付きで使うためのパッケージです。
 
@@ -33,7 +33,7 @@ Google から「Gemini CLI は **2026-06-18** で Pro / Ultra / 無料ティア�
 
 詳しくは [docs/99_known_issues.md](docs/99_known_issues.md) の「Gemini CLI → Antigravity CLI 並立対応」セクション。
 
-## v1.4.1 の防御 4 層（ざっくり）
+## v1.4.4 の防御 4 層（ざっくり）
 
 このパッケージは、Codex CLI / Claude Code に対して下記 4 層を同時に効かせます。
 

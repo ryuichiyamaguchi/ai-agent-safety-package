@@ -95,5 +95,70 @@ if [ -f "$drill_policy" ]; then
   fi
 fi
 
+# M17b: fail-closed drill — broken JSON policy
+# policy.json を壊れた JSON に置換し、guard-bash.sh が exit 2 で fail-closed することを確認。
+# trap で必ず復元する。
+if [ -f "$drill_policy" ]; then
+  drill_backup2="${drill_policy}.drill-backup2-$$"
+  restore_drill_policy2() {
+    if [ -n "$drill_backup2" ] && [ -f "$drill_backup2" ]; then
+      mv "$drill_backup2" "$drill_policy" 2>/dev/null || true
+    fi
+  }
+  cp "$drill_policy" "$drill_backup2"
+  trap restore_drill_policy2 EXIT INT TERM
+  printf '{broken json' > "$drill_policy"
+  drill_json2="{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"cwd\":\"$workspace\",\"tool_input\":{\"command\":\"echo drill2\"}}"
+  set +e
+  printf '%s' "$drill_json2" | AI_SAFE_POLICY="$drill_policy" "$hook_root/guard-bash.sh" >/tmp/ai-safe-doctor-drill2.out 2>/tmp/ai-safe-doctor-drill2.err
+  drill_code2=$?
+  set -e
+  restore_drill_policy2
+  trap - EXIT INT TERM
+  if [ "$drill_code2" -eq 2 ]; then
+    echo "PASS drill fail-closed with broken policy JSON"
+    pass=$((pass + 1))
+  else
+    echo "FAIL drill: guard-bash.sh did not fail-close with broken policy JSON (exit=$drill_code2)"
+    fail=$((fail + 1))
+  fi
+fi
+
+# M17c: fail-closed drill — required key missing from policy
+# policy.json から secretRegex キーを削除し、guard-bash.sh が exit 2 で fail-closed することを確認。
+if [ -f "$drill_policy" ]; then
+  drill_backup3="${drill_policy}.drill-backup3-$$"
+  restore_drill_policy3() {
+    if [ -n "$drill_backup3" ] && [ -f "$drill_backup3" ]; then
+      mv "$drill_backup3" "$drill_policy" 2>/dev/null || true
+    fi
+  }
+  cp "$drill_policy" "$drill_backup3"
+  trap restore_drill_policy3 EXIT INT TERM
+  # secretRegex キーを除外した JSON を生成 (python3 は macOS 標準)
+  python3 -c "
+import json, sys
+with open('$drill_policy') as f:
+    d = json.load(f)
+d.pop('secretRegex', None)
+with open('$drill_policy', 'w') as f:
+    json.dump(d, f)
+"
+  drill_json3="{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"cwd\":\"$workspace\",\"tool_input\":{\"command\":\"echo drill3\"}}"
+  set +e
+  printf '%s' "$drill_json3" | AI_SAFE_POLICY="$drill_policy" "$hook_root/guard-bash.sh" >/tmp/ai-safe-doctor-drill3.out 2>/tmp/ai-safe-doctor-drill3.err
+  drill_code3=$?
+  set -e
+  restore_drill_policy3
+  trap - EXIT INT TERM
+  if [ "$drill_code3" -eq 2 ]; then
+    echo "PASS drill fail-closed with missing required key (secretRegex)"
+    pass=$((pass + 1))
+  else
+    echo "FAIL drill: guard-bash.sh did not fail-close with missing required key (exit=$drill_code3)"
+    fail=$((fail + 1))
+  fi
+fi
+
 echo "doctor summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

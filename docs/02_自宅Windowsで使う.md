@@ -1,6 +1,6 @@
 # 自宅 Windows で使う
 
-自分の Windows PC で AI エージェント安全運用パッケージ v1.4.2 を使う手順です。
+自分の Windows PC で AI エージェント安全運用パッケージ v1.4.4 を使う手順です。
 
 > ## 🚀 まず [00_クイックスタート.md](00_クイックスタート.md) を試してください
 >
@@ -43,7 +43,7 @@ codex login
 
 ## ステップ 1：パッケージのダウンロード
 
-GitHub の Release ページから v1.4.1 の ZIP をダウンロードします。
+GitHub の Release ページから v1.4.4 の ZIP をダウンロードします。
 
 ダウンロード先：**ユーザーフォルダ直下**（`C:\Users\あなたの名前\`）または**デスクトップ**
 
@@ -88,7 +88,7 @@ powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1
 
 これで Codex CLI が**対話モード（TUI）**で安全装置付きに起動します。
 
-v1.4.1 の launcher は次の構成を強制します。
+v1.4.4 の launcher は次の構成を強制します。
 
 - `--sandbox workspace-write`：workspace 外への書き込みを OS が拒否（1 層目）
 - `network_access = false`：外部通信を全遮断（2 層目）
@@ -97,7 +97,7 @@ v1.4.1 の launcher は次の構成を強制します。
 
 `python -c "open('.env')..."` や `curl`、`rm -rf`、`git push --force` のような trusted list 外の操作は、承認ダイアログが出る（そこで「いいえ」を押せば実行されない）か、または hook 層（`policy/safety-policy.json`）で**先に**拒否されます。`cat ~/.ssh/id_rsa` のように trusted コマンド + 危険な引数の組合せでは approval は出ませんが、hook 層と OS サンドボックスが止めます。**4 層のどこかで止まれば安全**というモデルです。詳細は `docs\90_守れる-守れない.md` の「なぜ『安全』は 4 層で成り立つのか」を参照。
 
-> 注意：v1.4.1 の `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
+> 注意：v1.4.4 の `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
 
 Claude Code を使う場合：
 

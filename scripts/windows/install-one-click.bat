@@ -9,7 +9,7 @@ setlocal EnableDelayedExpansion
 
 echo.
 echo ============================================================
-echo   AI エージェント安全パッケージ  インストーラー v1.4.1
+echo   AI エージェント安全パッケージ  インストーラー v1.4.4
 echo ============================================================
 echo.
 echo 【Windows の警告が出た場合】
@@ -98,12 +98,25 @@ echo.
 echo   workspace の場所:
 echo     %WORKSPACE%
 echo.
-echo   【次にやること (Day3)】
-echo     1. Codex CLI を起動する  （コマンド: codex）
-echo     2. workspace フォルダの中で作業する
-echo     3. AI の動きを確認したい場合は monitor.ps1 を使う
+echo   ============================================================
+echo   【毎回この手順で起動してください】
+echo   ============================================================
+echo.
+echo   1. ターミナルで workspace フォルダに移動:
+echo      cd %USERPROFILE%\Documents\my-ai-workspace
+echo.
+echo   2. 安全起動コマンドを実行:
+echo      powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1
+echo.
+echo   ★ 重要: 素の "codex" コマンドを直接打たないでください。
+echo      launch-codex-safe を使わない場合、このパッケージの
+echo      launcher 経由の保護は効きません。
+echo.
+echo   3. AI の動きを確認したい場合は別ターミナルで:
+echo      powershell -File .ai-safety\hooks\windows\monitor.ps1
 echo.
 echo   詳しい使い方は docs\00_クイックスタート.md を参照してください。
 echo.
 pause
 endlocal
+
