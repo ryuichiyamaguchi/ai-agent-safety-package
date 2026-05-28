@@ -83,14 +83,14 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 > | [v1.0.x] configs/gemini/policies/safety.toml | d63830fc7548c9987a1d84b7ec0212b6527f639a6af808ee29d00427ceb87f3c |
 > | [v1.0.x] workspace-template/aiexclude.template | 9fee69aa1fa5dc7253ebb1419bc1f28b4ca24c8c794f5c6fcc011a1c4a2e444b |
 
-### v1.4.1（現行 HEAD、Phase C QA 通過済）
+### v1.4.2（現行 HEAD、ワンクリック導線 + CRLF 改行 hotfix）
 
-> 実測日: 2026-05-27。`shasum -a 256 <file>` (macOS) で計測。
-> Lane 4 (Security Core) の env exfil deny 追加・Codex `features.hooks=true` 反映 + `packageVersion` 1.4.1 bump 後の最終値。
+> 実測日: 2026-05-28。`shasum -a 256 <file>` (macOS) で計測。
+> v1.4.1 の致命バグ 2 件 (全 .ps1 が BOM+LF で PS 5.1 起動不能 / docs 本編にワンクリック導線なし) を緊急 hotfix。
 
 | ファイル | SHA-256 | 備考 |
 |---------|---------|------|
-| policy/safety-policy.json | e8446a229d602ab693fdacdf66706ba1a0c6601882f4f29236462da4108dc421 | v1.4.1 で packageVersion を 1.4.1 に bump |
+| policy/safety-policy.json | 507c868b38c263a83b8444d3a2f33128b0e056f9ab9007b843df1b477fb3c4ea | v1.4.2 で packageVersion を 1.4.2 に bump |
 | configs/codex/hooks.mac.json | 6f03deee71871c40dd81d098867a4860284700f98135fbb05730936738a729ca | v1.0.x から変更なし |
 | configs/codex/hooks.windows.json | 9e7292426dd844ebe4d6ffa20f92f2283e9c1f6e704412bb1321117d4eb62d6a | v1.0.x から変更なし |
 | configs/claude/settings.mac.json | 38b720bbe14be938574c7411913ad7c01313bfb4c8ebefd02d0f5d8d6b4740d6 | v1.4.1 で env exfil deny 追加 |
