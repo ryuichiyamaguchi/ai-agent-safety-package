@@ -1,5 +1,9 @@
 ﻿param(
-    [switch]$SkipWarning = $false
+    [switch]$SkipWarning = $false,
+    # ConsentOnly: 赤枠警告 + yes/no 同意確認までで終了し、Web UI 用の
+    # 推奨ワークフロー / safe-paste 案内は実行しない。起動-Claude-DeepSeek
+    # （Claude Code on DeepSeek 文脈）から呼ぶ。未指定なら従来動作を完全維持。
+    [switch]$ConsentOnly = $false
 )
 
 # launch-deepseek-safe.ps1
@@ -38,6 +42,12 @@ if (-not $SkipWarning) {
         Write-Host "キャンセルしました。" -ForegroundColor Green
         exit 1
     }
+}
+
+# ConsentOnly: 同意確認だけ取って終了（Claude Code on DeepSeek 文脈では
+# クリップボード貼り付けが発生しないため、以降の Web UI 用案内は出さない）。
+if ($ConsentOnly) {
+    exit 0
 }
 
 Write-Host ""
