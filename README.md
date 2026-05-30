@@ -1,4 +1,4 @@
-# AI エージェント安全運用パッケージ v1.4.4
+# AI エージェント安全運用パッケージ v1.5.0
 
 Codex CLI、Claude Code、Gemini CLI を「あなたを守る安全装置」付きで使うためのパッケージです。
 
@@ -33,7 +33,7 @@ Google から「Gemini CLI は **2026-06-18** で Pro / Ultra / 無料ティア�
 
 詳しくは [docs/99_known_issues.md](docs/99_known_issues.md) の「Gemini CLI → Antigravity CLI 並立対応」セクション。
 
-## v1.4.4 の防御 4 層（ざっくり）
+## v1.5.0 の防御 4 層（ざっくり）
 
 このパッケージは、Codex CLI / Claude Code に対して下記 4 層を同時に効かせます。
 
@@ -57,6 +57,13 @@ Google から「Gemini CLI は **2026-06-18** で Pro / Ultra / 無料ティア�
 3. **アップデート時は `doctor` スクリプトを必ず走らせる**
 
 この 3 点を守れば、AI を本気で使い倒せます。
+
+## v1.5.0 で追加：DeepSeek 版ランチャー・集約インストール doc・stdin 修正
+
+- **DeepSeek バックエンド版 Claude Code ランチャー** — Claude Code の UI のまま推論バックエンドを DeepSeek に切り替えて起動するラッパー。本パッケージの 4 層防御・ガードはそのまま効きます。
+- **各 AI 集約インストール doc** — Codex / Claude / Gemini / DeepSeek の導入手順を 1 か所にまとめた集約ドキュメントを追加。
+- **ガード / secret-scan の UTF-8 stdin 修正** — 日本語等のマルチバイト入力を stdin 経由で渡したときの文字化け・誤判定を修正。
+- **doctor の Continue 化** — `doctor` を 1 件 FAIL で停止せず、全 drill を走り切ってからまとめて結果表示するように変更（問題の全体像を一度に把握できる）。
 
 ## v1.4.0／v1.4.1 で追加：外部 LLM 用 機微情報スキャナ
 

@@ -1,5 +1,5 @@
 {
-  "packageVersion": "1.4.4",
+  "packageVersion": "1.5.0",
   "hookApiVersion": "1",
   "defaultWorkspaceName": "safe-workspace",
   "_comment_blockedDomains": "プロンプトインジェクション経由でのデータ流出を防ぐため、匿名アップロード系・gist 系をブロック。blockedDomains は allowedDomains より優先される。WebFetch は GET 専用・読み取り目的のみ想定。",

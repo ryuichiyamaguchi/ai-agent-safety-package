@@ -20,7 +20,7 @@ Day3 は「Cursor を開いて、Codex と Gemini を実際に動かす」ハン
 
 ここに書いてあることだけやってください。奥の深い「なぜ安全なのか」という話は、別のドキュメントに書きました（困った時や興味が出た時に読んでください）。
 
-> **バージョン対応**：このドキュメントは v1.4.4 向けです。古いバージョンをお使いの場合は `docs/01_学校PCで使う.md` を参照してください。
+> **バージョン対応**：このドキュメントは v1.5.0 向けです。古いバージョンをお使いの場合は `docs/01_学校PCで使う.md` を参照してください。
 >
 > **Gemini CLI と Antigravity CLI（agy）の並立対応**（v1.3.0〜）：Google から Gemini CLI を 2026-06-18 で廃止し、後継の Antigravity CLI（`agy`）に移行する旨が発表されました。本パッケージ v1.3.0 は**両方をサポート**します。
 >
@@ -77,7 +77,7 @@ powershell -File .ai-safety\hooks\windows\launch-agy-safe.ps1
 
 このページは、**Day3 の講義で実際にターミナルに打つコマンド集**です。
 
-v1.4.4 の安全なパッケージは既に Desktop（または Documents）に展開済み、インストールも完了している前提です。
+v1.5.0 の安全なパッケージは既に Desktop（または Documents）に展開済み、インストールも完了している前提です。
 
 > 参考：インストール手順は `docs/01_学校PCで使う.md` を見てください。
 
@@ -159,7 +159,7 @@ powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1
 
 - 最初、Codex のプロンプトが出ます：`codex>`
 - ここに、あなたの指示を日本語で打ち込めます
-- v1.4.4 では、以下の防御が**勝手に**効いています：
+- v1.5.0 では、以下の防御が**勝手に**効いています：
   - workspace 外への書き込みは OS が拒否（`--sandbox workspace-write` ＝ 1 層目）
   - インターネット通信は全ブロック（`network_access = false` ＝ 2 層目）
   - シークレット環境変数を AI に渡さない（`shell_environment_policy.exclude` ＝ 3 層目）
@@ -232,7 +232,7 @@ powershell -File .ai-safety\hooks\windows\launch-gemini-safe.ps1
 
 **Codex との違い**
 
-v1.4.4 では、Gemini CLI は **Policy Engine（ポリシー判定）だけ効きます**。承認ダイアログ（hook）はまだ実装されていません。つまり：
+v1.5.0 では、Gemini CLI は **Policy Engine（ポリシー判定）だけ効きます**。承認ダイアログ（hook）はまだ実装されていません。つまり：
 
 - ファイル削除、インターネット送信のような危ないコマンドは、Policy Engine で検査されます
 - ただし「ダイアログで止まる」という体験は、Codex ほど明確ではありません
@@ -305,7 +305,7 @@ gemini --version
 
 ### 「承認ダイアログが出ない」
 
-v1.4.4 では、`--ask-for-approval untrusted` が有効になっているので、Codex の trusted list 外のコマンド（`rm`、`curl`、`python -c` など）を試すとダイアログが出るはずです。`cat` / `ls` のような trusted コマンドはダイアログなしで通るのが**正しい挙動**です（危険な引数は hook 層で別途止まります。詳細は `docs/90_守れる-守れない.md` を参照）。trusted list 外でも出なかったら：
+v1.5.0 では、`--ask-for-approval untrusted` が有効になっているので、Codex の trusted list 外のコマンド（`rm`、`curl`、`python -c` など）を試すとダイアログが出るはずです。`cat` / `ls` のような trusted コマンドはダイアログなしで通るのが**正しい挙動**です（危険な引数は hook 層で別途止まります。詳細は `docs/90_守れる-守れない.md` を参照）。trusted list 外でも出なかったら：
 
 - Codex / Gemini の新しいバージョンが自動アップデートされた可能性
 - launcher が実際に動いていない可能性
