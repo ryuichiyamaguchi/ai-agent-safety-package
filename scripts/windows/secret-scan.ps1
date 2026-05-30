@@ -43,7 +43,9 @@ if ($InputFile) {
     }
     $raw = Get-Content -LiteralPath $InputFile -Raw -ErrorAction Stop
 } else {
-    $raw = [Console]::In.ReadToEnd()
+    $stdinStream = [Console]::OpenStandardInput()
+    $stdinReader = New-Object System.IO.StreamReader($stdinStream, [System.Text.Encoding]::UTF8)
+    try { $raw = $stdinReader.ReadToEnd() } finally { $stdinReader.Dispose() }
 }
 
 if ($null -eq $raw) { $raw = "" }
