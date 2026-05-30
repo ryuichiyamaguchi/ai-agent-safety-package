@@ -50,7 +50,7 @@ if exist "%DEEPSEEK_GATE%" (
     echo   見つかりませんでした。会話内容は DeepSeek（中国管轄）に
     echo   送信されます。流出して困る情報は書かないでください。
     echo.
-    set /p AGREE=この点を理解した上で続行しますか？ (yes/no):
+    set /p AGREE=この点を理解した上で続行しますか？ （yes/no）:
     if /i not "!AGREE!"=="yes" (
         echo 起動をキャンセルしました。
         pause
