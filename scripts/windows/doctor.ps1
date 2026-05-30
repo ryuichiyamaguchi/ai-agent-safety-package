@@ -3,7 +3,7 @@
     [switch]$LiveCodex
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"   # v1.5.0: 1 drill のエラー (codex sandbox 等) で全体中断し summary 未出力になる問題を解消。診断は全 drill 走らせ結果を集計する。意図的 fail-closed は throw のままなので影響なし。
 $Workspace = [System.IO.Path]::GetFullPath($Workspace)
 $dot = [char]46
 $targetName = $dot + "env"
