@@ -1,28 +1,28 @@
 @echo off
-chcp 65001 >nul
+chcp 932 >nul 2>&1
 echo =====================================================
-echo   DeepSeek 起動デバッグ（この窓は最後まで閉じません）
+echo   DeepSeek �N���f�o�b�O�i���̑��͍Ō�܂ŕ��܂���j
 echo =====================================================
 echo.
-echo 1) まず環境を表示します:
+echo 1) �܂�����\�����܂�:
 echo    USERPROFILE = %USERPROFILE%
-echo    想定 workspace = %USERPROFILE%\Documents\my-ai-workspace
+echo    �z�� workspace = %USERPROFILE%\Documents\my-ai-workspace
 if exist "%USERPROFILE%\Documents\my-ai-workspace\.ai-safety\hooks\windows\launch-claude-safe.ps1" (
-    echo    [OK] launch-claude-safe.ps1 が見つかりました
+    echo    [OK] launch-claude-safe.ps1 ��������܂���
 ) else (
-    echo    [NG] launch-claude-safe.ps1 が見つかりません ^(workspace のパス違いの可能性^)
+    echo    [NG] launch-claude-safe.ps1 ��������܂��� ^(workspace �̃p�X�Ⴂ�̉\��^)
 )
 echo.
-echo 2) claude コマンドの場所:
-where claude 2>nul || echo    [NG] claude が PATH に見つかりません
+echo 2) claude �R�}���h�̏ꏊ:
+where claude 2>nul || echo    [NG] claude �� PATH �Ɍ�����܂���
 echo.
-echo 3) 起動-Claude-DeepSeek.bat を呼び出します（出力は全てこの窓に残ります）:
+echo 3) �N��-Claude-DeepSeek.bat ���Ăяo���܂��i�o�͂͑S�Ă��̑��Ɏc��܂��j:
 echo -----------------------------------------------------
-call "%~dp0起動-Claude-DeepSeek.bat"
+call "%~dp0�N��-Claude-DeepSeek.bat"
 echo -----------------------------------------------------
 echo.
-echo ===== 呼び出し後の終了コード: %ERRORLEVEL% =====
-echo もし上に「予期しない」「unexpected」「認識されません」「is not recognized」
-echo 等の赤い行や英語エラーが出ていたら、その行をそのまま教えてください。
+echo ===== �Ăяo����̏I���R�[�h: %ERRORLEVEL% =====
+echo ������Ɂu�\�����Ȃ��v�uunexpected�v�u�F������܂���v�uis not recognized�v
+echo ���̐Ԃ��s��p��G���[���o�Ă�����A���̍s�����̂܂܋����Ă��������B
 echo.
 pause

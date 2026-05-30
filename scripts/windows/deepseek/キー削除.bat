@@ -1,23 +1,23 @@
 @echo off
-chcp 65001 >nul
+chcp 932 >nul 2>&1
 :: ============================================================
-:: ã‚­ãƒ¼å‰Šé™¤.bat
-:: æŽˆæ¥­å¾Œã®ãŠç‰‡ä»˜ã‘ç”¨ã€‚PC å´ã«ç™»éŒ²ã—ãŸ DeepSeek ã® API ã‚­ãƒ¼ã‚’æ¶ˆã—ã¾ã™ã€‚
+:: ƒL[íœ.bat
+:: Žö‹ÆŒã‚Ì‚¨•Ð•t‚¯—pBPC ‘¤‚É“o˜^‚µ‚½ DeepSeek ‚Ì API ƒL[‚ðÁ‚µ‚Ü‚·B
 :: ------------------------------------------------------------
-:: ãƒ»ãƒ€ãƒ–ãƒ«ã‚¯ãƒªãƒƒã‚¯1å›žã§ã€Windows ãƒ¦ãƒ¼ã‚¶ãƒ¼é ˜åŸŸã®
-::   ANTHROPIC_AUTH_TOKEN ã‚’å‰Šé™¤ã—ã¾ã™ã€‚
-:: ãƒ»PC å´ã‚’æ¶ˆã™ã ã‘ã§ã¯ä¸ååˆ†ã§ã™ã€‚DeepSeek ã®ç®¡ç†ç”»é¢
-::   ï¼ˆhttps://platform.deepseek.com/ ã® API keysï¼‰ã§ã‚‚ã€
-::   ä½¿ã£ãŸã‚­ãƒ¼ã‚’å¿…ãš Delete ã—ã¦ãã ã•ã„ã€‚
+:: Eƒ_ƒuƒ‹ƒNƒŠƒbƒN1‰ñ‚ÅAWindows ƒ†[ƒU[—Ìˆæ‚Ì
+::   ANTHROPIC_AUTH_TOKEN ‚ðíœ‚µ‚Ü‚·B
+:: EPC ‘¤‚ðÁ‚·‚¾‚¯‚Å‚Í•s\•ª‚Å‚·BDeepSeek ‚ÌŠÇ—‰æ–Ê
+::   ihttps://platform.deepseek.com/ ‚Ì API keysj‚Å‚àA
+::   Žg‚Á‚½ƒL[‚ð•K‚¸ Delete ‚µ‚Ä‚­‚¾‚³‚¢B
 :: ============================================================
 echo.
-echo PC å´ã® DeepSeek ã‚­ãƒ¼ï¼ˆANTHROPIC_AUTH_TOKENï¼‰ã‚’å‰Šé™¤ã—ã¾ã™...
+echo PC ‘¤‚Ì DeepSeek ƒL[iANTHROPIC_AUTH_TOKENj‚ðíœ‚µ‚Ü‚·...
 reg delete HKCU\Environment /v ANTHROPIC_AUTH_TOKEN /f >nul 2>&1
 echo.
-echo PC å´ã®ã‚­ãƒ¼ã‚’å‰Šé™¤ã—ã¾ã—ãŸã€‚
+echo PC ‘¤‚ÌƒL[‚ðíœ‚µ‚Ü‚µ‚½B
 echo.
-echo ã€ã¾ã çµ‚ã‚ã‚Šã§ã¯ã‚ã‚Šã¾ã›ã‚“ã€‘
-echo   DeepSeek ç®¡ç†ç”»é¢ï¼ˆhttps://platform.deepseek.com/ ã® API keysï¼‰ã§ã‚‚
-echo   ä½¿ã£ãŸã‚­ãƒ¼ã‚’ Delete ã—ã¦ãã ã•ã„ã€‚ã“ã‚Œã§æ¼ãˆã„å¯¾ç­–ã¯å®Œäº†ã§ã™ã€‚
+echo y‚Ü‚¾I‚í‚è‚Å‚Í‚ ‚è‚Ü‚¹‚ñz
+echo   DeepSeek ŠÇ—‰æ–Êihttps://platform.deepseek.com/ ‚Ì API keysj‚Å‚à
+echo   Žg‚Á‚½ƒL[‚ð Delete ‚µ‚Ä‚­‚¾‚³‚¢B‚±‚ê‚Å˜R‚¦‚¢‘Îô‚ÍŠ®—¹‚Å‚·B
 echo.
 pause
