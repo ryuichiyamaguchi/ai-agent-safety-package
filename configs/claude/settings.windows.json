@@ -1,7 +1,6 @@
 {
   "env": {
     "AI_SAFE_ENGINE": "claude",
-    "AI_SAFE_LOG_DIR": "${userHome}\\.ai-safety\\logs",
     "CLAUDE_CODE_NO_FLICKER": "1"
   },
   "cleanupPeriodDays": 120,
