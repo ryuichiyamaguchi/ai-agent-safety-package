@@ -40,7 +40,8 @@ WS="$(mktemp -d)"; mkdir -p "$WS/.ai-safety/policy"
 echo '{}' > "$WS/.ai-safety/policy/safety-policy.json"
 STUB_OK="$(mktemp)";  printf '#!/bin/sh\nexit 0\n' > "$STUB_OK";  chmod +x "$STUB_OK"
 STUB_NG="$(mktemp)";  printf '#!/bin/sh\necho "FAIL egress indeterminate"\nexit 1\n' > "$STUB_NG"; chmod +x "$STUB_NG"
-trap 'rm -rf "$WS" "$STUB_OK" "$STUB_NG" 2>/dev/null' EXIT
+NOEXEC=""
+trap 'rm -rf "$WS" "$STUB_OK" "$STUB_NG" "$NOEXEC" 2>/dev/null' EXIT
 
 # green: doctor が exit 0 → on-failure に解放
 out_ok="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_OK" bash "$LAUNCH_C" "$WS" "" --auto 2>/dev/null)"
@@ -56,6 +57,14 @@ printf '%s' "$err_ng" | grep -qi "オートを有効にできません" && ok "c
 # --auto 無し: 従来どおり untrusted(回帰)
 out_def="$(AI_SAFE_DRY_RUN=1 bash "$LAUNCH_C" "$WS" "" 2>/dev/null)"
 printf '%s' "$out_def" | grep -q -- "--ask-for-approval untrusted" && ok "codex no-auto stays untrusted" || ng "codex no-auto stays untrusted"
+
+# codex: doctor 不在 → exec 失敗してもフェイルクローズ(untrusted)。perl exec 失敗が green に漏れないこと。
+out_miss_c="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR=/nonexistent/doctor.sh bash "$LAUNCH_C" "$WS" "" --auto 2>/dev/null)"
+printf '%s' "$out_miss_c" | grep -q -- "--ask-for-approval untrusted" && ok "codex missing-doctor -> untrusted (fail-closed)" || ng "codex missing-doctor LEAKS to on-failure"
+# codex: 実行ビット無しの doctor(zip 配布/chmod 漏れ相当)→ フェイルクローズ。
+NOEXEC="$(mktemp)"; printf '#!/bin/sh\nexit 0\n' > "$NOEXEC"; chmod -x "$NOEXEC"
+out_noexec_c="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$NOEXEC" bash "$LAUNCH_C" "$WS" "" --auto 2>/dev/null)"
+printf '%s' "$out_noexec_c" | grep -q -- "--ask-for-approval untrusted" && ok "codex noexec-doctor -> untrusted (fail-closed)" || ng "codex noexec-doctor LEAKS to on-failure"
 
 # --- Task 5: launch-agy-safe.sh --auto branch ---
 # AGY="$STUB_OK" は agy バイナリ検出を満たすためのダミー(実行はされない=DRY_RUN)。
@@ -80,6 +89,13 @@ printf '%s' "$out_a_ng" | grep -q -- "--dangerously-skip-permissions" && ng "agy
 out_a_def="$(AI_SAFE_DRY_RUN=1 AGY="$STUB_OK" bash "$LAUNCH_A" "$WS" "" 2>/dev/null)"; rc_def=$?
 printf '%s' "$out_a_def" | grep -q -- "--sandbox" && [ "$rc_def" -eq 0 ] && ok "agy no-auto launches (--sandbox only)" || ng "agy no-auto broken"
 printf '%s' "$out_a_def" | grep -q -- "--dangerously-skip-permissions" && ng "agy no-auto must NOT skip-permissions" || ok "agy no-auto has no skip-permissions"
+
+# agy: doctor 不在 → exec 失敗してもフェイルクローズ(skip-permissions 無し)。
+out_miss_a="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR=/nonexistent/doctor.sh AGY="$STUB_OK" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"
+printf '%s' "$out_miss_a" | grep -q -- "--dangerously-skip-permissions" && ng "agy missing-doctor LEAKS skip-permissions" || ok "agy missing-doctor -> no skip-permissions (fail-closed)"
+# agy: 実行ビット無しの doctor → フェイルクローズ。
+out_noexec_a="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$NOEXEC" AGY="$STUB_OK" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"
+printf '%s' "$out_noexec_a" | grep -q -- "--dangerously-skip-permissions" && ng "agy noexec-doctor LEAKS skip-permissions" || ok "agy noexec-doctor -> no skip-permissions (fail-closed)"
 
 # --- Task 6: full doctor includes isolation drills ---
 full_out="$(bash "$HERE/../doctor.sh" "$WS" 2>/dev/null || true)"

@@ -61,8 +61,10 @@ if [ "$auto" -eq 1 ]; then
   # codex sandbox 初期化がハングしても launcher が無限ブロックしないよう上限 60 秒。
   # macOS に timeout コマンドは無いので perl の alarm でラップ(perl は macOS 標準)。
   # alarm で殺された場合 perl は非0で返る → else(フォールバック)に落ちる = フェイルクローズ。
+  # `or exit 127`: exec 失敗(doctor 不在/実行ビット無し/パスがディレクトリ等)時に
+  # perl が exit 0 で抜けて green に倒れる(フェイルオープン)のを防ぐ。失敗時は 127 → else。
   if command -v perl >/dev/null 2>&1; then
-    isolation_ok() { perl -e 'alarm shift; exec @ARGV' 60 "$doctor" --isolation-check codex >/dev/null 2>&1; }
+    isolation_ok() { perl -e 'alarm shift; exec @ARGV or exit 127' 60 "$doctor" --isolation-check codex >/dev/null 2>&1; }
   else
     isolation_ok() { "$doctor" --isolation-check codex >/dev/null 2>&1; }
   fi
