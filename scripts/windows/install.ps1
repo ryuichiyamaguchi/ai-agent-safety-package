@@ -161,6 +161,14 @@ if ($Platform -in 'mac','both') {
     }
 }
 
+# DeepSeek 送信検査 Gateway（クロスプラットフォーム・Node 実装）を配置
+$commonDest = Join-Path $Workspace ".ai-safety\hooks\common"
+if (Test-Path -LiteralPath $commonDest) {
+    Remove-Item -LiteralPath $commonDest -Recurse -Force
+}
+New-Item -ItemType Directory -Force -Path $commonDest | Out-Null
+Copy-Item -Path (Join-Path $packageRoot "scripts\common\*") -Destination $commonDest -Recurse -Force
+
 # Defensive cleanup: remove stale foreign-OS hook dirs on single-platform install.
 if ($Platform -eq 'win') {
     $staleMac = Join-Path $Workspace ".ai-safety\hooks\macos"

@@ -167,6 +167,9 @@ if [[ "$PLATFORM" == "win" || "$PLATFORM" == "both" ]]; then
   find "$workspace/.ai-safety/hooks/windows" -type f -exec chmod 600 {} \;
 fi
 
+# DeepSeek 送信検査 Gateway（クロスプラットフォーム・Node 実装）を配置
+cp -R "$package_root/scripts/common" "$workspace/.ai-safety/hooks/"
+
 # Remove stale foreign-OS hook directories when single-platform install
 # is requested (defensive cleanup on re-install).
 if [[ "$PLATFORM" == "mac" ]] && [ -d "$workspace/.ai-safety/hooks/windows" ]; then
