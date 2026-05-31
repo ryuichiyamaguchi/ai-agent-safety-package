@@ -1,18 +1,11 @@
 #!/usr/bin/env bash
-# launch-agy-safe.sh
-#
-# Antigravity CLI (`agy`) を安全装置付きで起動する macOS 用 launcher。
-# v1.3.0 で新規追加（Gemini CLI から Antigravity CLI への移行対応）。
-#
-# 強制する防御:
-#   - --sandbox          : agy のターミナル制限サンドボックスを必須化
-#   - --add-dir <ws>     : 作業ディレクトリを明示（workspace 外への混入を抑制）
-# 渡さないフラグ:
-#   - --dangerously-skip-permissions（絶対に付けない）
-
+# launch-agy-safe.sh — Antigravity CLI (agy) を安全装置付きで起動。
+# Safe Auto Mode: --auto かつ doctor green のとき auto-run を有効化(--sandbox は維持)。
 set -euo pipefail
 workspace="${1:-$(pwd)}"
 prompt="${2:-}"
+auto=0
+[ "${3:-}" = "--auto" ] && auto=1
 workspace="$(cd "$workspace" && pwd)"
 
 export AI_SAFE_ROOT="$workspace/.ai-safety"
@@ -60,8 +53,33 @@ MSG
   touch "$HINT_FLAG" 2>/dev/null || true
 fi
 
+# Safe Auto Mode 分岐(宣言ベース・option B): doctor green のとき
+# --dangerously-skip-permissions を付与(--sandbox は維持)。実証はしていない旨を必ず表示。
+auto_args=()
+if [ "$auto" -eq 1 ]; then
+  doctor="${AI_SAFE_DOCTOR:-}"
+  if [ -z "$doctor" ]; then
+    doctor="$(cd "$(dirname "$0")" && pwd)/doctor.sh"
+  fi
+  if "$doctor" --isolation-check agy >/dev/null 2>&1; then
+    auto_args=(--dangerously-skip-permissions)
+    echo "ℹ オートを有効化しました(agy)。注意: agy の隔離は --sandbox を信頼するもので、" >&2
+    echo "  Codex のように独立検証(実証・verified)されていません。重要作業では手動承認の利用も検討してください。" >&2
+  else
+    echo "⚠ オートを有効にできません: agy を検出できませんでした。" >&2
+    echo "  → 安全のため通常モード(--sandbox のみ)で起動します。" >&2
+  fi
+fi
+
+cmd=("$AGY" --sandbox --add-dir "$workspace" "${auto_args[@]}")
+
+if [ "${AI_SAFE_DRY_RUN:-}" = "1" ]; then
+  printf '%s ' "${cmd[@]}"; [ -n "$prompt" ] && printf -- '--prompt %q' "$prompt"; printf '\n'
+  exit 0
+fi
+
 if [ -n "$prompt" ]; then
-  "$AGY" --sandbox --add-dir "$workspace" --prompt "$prompt"
+  "${cmd[@]}" --prompt "$prompt"
 else
-  "$AGY" --sandbox --add-dir "$workspace"
+  "${cmd[@]}"
 fi

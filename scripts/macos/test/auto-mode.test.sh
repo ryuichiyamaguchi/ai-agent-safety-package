@@ -56,5 +56,21 @@ printf '%s' "$err_ng" | grep -qi "オートを有効にできません" && ok "c
 out_def="$(AI_SAFE_DRY_RUN=1 bash "$LAUNCH_C" "$WS" "" 2>/dev/null)"
 printf '%s' "$out_def" | grep -q -- "--ask-for-approval untrusted" && ok "codex no-auto stays untrusted" || ng "codex no-auto stays untrusted"
 
+# --- Task 5: launch-agy-safe.sh --auto branch ---
+LAUNCH_A="$HERE/../launch-agy-safe.sh"
+export AGY="$STUB_OK"   # agy バイナリ検出を満たすためのダミー(実行はされない=DRY_RUN)
+# green: doctor 0 → --dangerously-skip-permissions が付く(--sandbox は維持)
+out_a_ok="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_OK" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"
+printf '%s' "$out_a_ok" | grep -q -- "--sandbox" && ok "agy --auto keeps --sandbox" || ng "agy --auto keeps --sandbox"
+printf '%s' "$out_a_ok" | grep -q -- "--dangerously-skip-permissions" && ok "agy green -> skip-permissions" || ng "agy green -> skip-permissions"
+# green でも未実証である旨を stderr に出す(overclaim 回避)
+err_a_ok="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_OK" bash "$LAUNCH_A" "$WS" "" --auto 2>&1 1>/dev/null)"
+printf '%s' "$err_a_ok" | grep -qi "未検証\|未実証\|verified" && ok "agy green shows unverified caveat" || ng "agy green shows unverified caveat"
+# 赤(agy 無し相当): --dangerously-skip-permissions を付けずフォールバック + 理由表示
+err_a_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_A" "$WS" "" --auto 2>&1 1>/dev/null)"
+printf '%s' "$err_a_ng" | grep -qi "オートを有効にできません" && ok "agy red shows reason" || ng "agy red shows reason"
+out_a_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"
+printf '%s' "$out_a_ng" | grep -q -- "--dangerously-skip-permissions" && ng "agy red must NOT skip-permissions" || ok "agy red stays safe (no skip-permissions)"
+
 echo "auto-mode.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]
