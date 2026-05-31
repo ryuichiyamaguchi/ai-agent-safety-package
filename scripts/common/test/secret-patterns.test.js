@@ -104,3 +104,32 @@ test('denylist substring, case-insensitive, reversible', () => {
   assert.strictEqual(r.counts.denylist, 2);
   assert.match(r.masked, /〔R\d+〕/);
 });
+
+test('multi-char context word straddling the window boundary still gates (M1 fix)', () => {
+  // 電話(2文字)+19文字 → phone offset=21, 窓先頭=1 が語の途中。旧 slice 実装は取りこぼしたが重なり判定で near。
+  const r = maskText('電話' + 'x'.repeat(19) + '090-1234-5678', { alloc: (v)=>`〔R1〕`, denylistTerms: [] });
+  assert.ok(!r.masked.includes('090-1234-5678'), '電話 straddling boundary must gate');
+  const far = maskText('電話' + 'x'.repeat(60) + '090-1234-5678', { denylistTerms: [] });
+  assert.ok(far.masked.includes('090-1234-5678'), 'far context word must NOT gate');
+});
+
+test('denylist never matches inside an emitted reversible token (C2)', () => {
+  const seen = new Map(); let n = 0;
+  const alloc = (v) => { if (seen.has(v)) return seen.get(v); const t = `〔R${++n}〕`; seen.set(v, t); return t; };
+  // email→〔R1〕。denylist 'R1' はトークン内部に出現するが保護され二重置換しない。
+  const r = maskText('連絡先 user@example.com', { alloc, denylistTerms: ['R1'] });
+  const tokens = r.masked.match(/〔R\d+〕/g) || [];
+  assert.strictEqual(tokens.length, 1, 'exactly one token (no double-wrap)');
+  assert.ok(!r.masked.includes('〔〔'), 'no nested token corruption');
+  assert.strictEqual(r.counts.denylist, 0, 'denylist must not fire inside token body');
+});
+
+test('email regex is ReDoS-safe on adversarial input', () => {
+  const evil1 = 'a'.repeat(50000) + '@' + 'a'.repeat(50000);
+  const evil2 = 'x@' + 'a.'.repeat(40000);
+  const t0 = process.hrtime.bigint();
+  maskText(evil1, { denylistTerms: [] });
+  maskText(evil2, { denylistTerms: [] });
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.ok(ms < 1000, `email masking must stay fast (was ${ms}ms)`);
+});

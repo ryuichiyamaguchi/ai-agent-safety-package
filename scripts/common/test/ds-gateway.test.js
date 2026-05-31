@@ -285,19 +285,104 @@ test('restores reversible token in SSE response, even split across chunks', asyn
 
 test('JSON-escapes restored value with special chars', async () => {
   const tm = createTokenMap();
-  const token = tm.alloc('a"b\nc', 'denylist');
-  const up = await startUpstream((req,res)=>{ req.resume(); res.writeHead(200,{'content-type':'text/event-stream'}); res.end('data: {"t":"' + token + '"}\n\n'); });
+  const up = await startUpstream((req,res)=>{
+    let b=''; req.on('data',c=>b+=c); req.on('end',()=>{
+      const token = (b.match(/〔R\d+〕/) || ['〔R1〕'])[0];
+      res.writeHead(200,{'content-type':'text/event-stream'});
+      res.end('data: {"t":"' + token + '"}\n\n');
+    });
+  });
   after(()=>up.close());
-  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, tokenMap: tm, denylistTerms: [] });
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, tokenMap: tm, denylistTerms: ['a"b'] });
   const server = await gw.listen(); after(()=>server.close());
   let body='';
   await new Promise((resolve,reject)=>{
-    const data = Buffer.from(JSON.stringify({ messages:[{role:'user',content:'hi'}] }));
+    const data = Buffer.from(JSON.stringify({ messages:[{role:'user',content:'値は a"b です'}] }));
     const r = http.request({host:'127.0.0.1',port:server.address().port,path:'/v1/messages',method:'POST',headers:{'content-type':'application/json','content-length':data.length}},
       (res)=>{ res.on('data',c=>body+=c); res.on('end',resolve); });
     r.on('error',reject); r.end(data);
   });
   const jsonPart = body.split('data: ')[1].trim();
   assert.doesNotThrow(()=>JSON.parse(jsonPart));
-  assert.strictEqual(JSON.parse(jsonPart).t, 'a"b\nc');
+  assert.strictEqual(JSON.parse(jsonPart).t, 'a"b');
+});
+
+test('does not restore tokens not allocated in the current request (RED-A)', async () => {
+  const tm = createTokenMap();
+  const victimToken = tm.alloc('victim@secret.example.com', 'email'); // 別リクエスト相当でプロセス共有 map に残存
+  const up = await startUpstream((req,res)=>{
+    let b=''; req.on('data',c=>b+=c); req.on('end',()=>{
+      const fwdTokens = (b.match(/〔R\d+〕/g) || []);
+      res.writeHead(200,{'content-type':'text/event-stream'});
+      res.end('data: {"text":"' + fwdTokens.join(' ') + '"}\n\n');
+    });
+  });
+  after(()=>up.close());
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, tokenMap: tm, denylistTerms: [] });
+  const server = await gw.listen(); after(()=>server.close());
+  let body='';
+  await new Promise((resolve,reject)=>{
+    // このリクエストは自分の PII(新規 email)＋他リクエストの目印を含む
+    const data = Buffer.from(JSON.stringify({ messages:[{role:'user',content:'私のメール me@here.com と ' + victimToken}] }));
+    const r = http.request({host:'127.0.0.1',port:server.address().port,path:'/v1/messages',method:'POST',headers:{'content-type':'application/json','content-length':data.length}},
+      (res)=>{ res.on('data',c=>body+=c); res.on('end',resolve); });
+    r.on('error',reject); r.end(data);
+  });
+  assert.ok(body.includes('me@here.com'), 'own request PII is restored');
+  assert.ok(!body.includes('victim@secret.example.com'), 'must NOT restore another request PII');
+  assert.ok(body.includes(victimToken), 'foreign token stays literal');
+});
+
+test('restores tokens in non-streaming JSON response without breaking framing (RED-B)', async () => {
+  const tm = createTokenMap();
+  const up = await startUpstream((req,res)=>{
+    let b=''; req.on('data',c=>b+=c); req.on('end',()=>{
+      const token = (b.match(/〔R\d+〕/) || ['〔R1〕'])[0];
+      const payload = JSON.stringify({ content:[{ type:'text', text:'連絡先は ' + token + ' です' }] });
+      res.writeHead(200, { 'content-type':'application/json', 'content-length': Buffer.byteLength(payload) });
+      res.end(payload);
+    });
+  });
+  after(()=>up.close());
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, tokenMap: tm, denylistTerms: [] });
+  const server = await gw.listen(); after(()=>server.close());
+  const res = await postJson(server.address().port, '/v1/messages', { messages:[{role:'user',content:'連絡先 user@example.com'}] });
+  assert.strictEqual(res.status, 200);
+  assert.doesNotThrow(()=>JSON.parse(res.body), 'response body must remain valid JSON (no content-length mismatch)');
+  assert.ok(res.body.includes('user@example.com'), 'token restored');
+  assert.ok(!/〔R\d+〕/.test(res.body), 'no residual token');
+});
+
+test('rejects oversized request body fail-closed (413, not forwarded) (M2)', async () => {
+  let forwarded = false;
+  const up = await startUpstream((req,res)=>{ forwarded = true; req.resume(); res.writeHead(200); res.end('{}'); });
+  after(()=>up.close());
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, maxBody: 1024 });
+  const server = await gw.listen(); after(()=>server.close());
+  const data = Buffer.from(JSON.stringify({ messages:[{ role:'user', content:'x'.repeat(5000) }] }));
+  const res = await new Promise((resolve,reject)=>{
+    const r = http.request({host:'127.0.0.1',port:server.address().port,path:'/v1/messages',method:'POST',headers:{'content-type':'application/json','content-length':data.length}},
+      (rs)=>{ let b=''; rs.on('data',c=>b+=c); rs.on('end',()=>resolve({status:rs.statusCode})); });
+    r.on('error',reject); r.end(data);
+  });
+  assert.strictEqual(res.status, 413);
+  assert.strictEqual(forwarded, false);
+});
+
+test('audit log includes new PII category counts without raw values (§8)', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-pii-'));
+  const prevLogDir = process.env.AI_SAFE_LOG_DIR;
+  process.env.AI_SAFE_LOG_DIR = tmp;
+  after(() => { if (prevLogDir === undefined) delete process.env.AI_SAFE_LOG_DIR; else process.env.AI_SAFE_LOG_DIR = prevLogDir; });
+  const up = await startUpstream((req,res)=>{ req.resume(); res.writeHead(200,{'content-type':'application/json'}); res.end('{}'); });
+  after(()=>up.close());
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, denylistTerms: [] });
+  const server = await gw.listen(); after(()=>server.close());
+  await postJson(server.address().port, '/v1/messages', { messages:[{ role:'user', content:'連絡先 user@example.com' }] });
+  await new Promise(r=>setTimeout(r,30));
+  const logFile = path.join(tmp, 'secret-scan-events.jsonl');
+  const line = fs.readFileSync(logFile, 'utf8').trim().split('\n').pop();
+  const ev = JSON.parse(line);
+  assert.strictEqual(ev.counts.email, 1, 'email count logged');
+  assert.ok(!line.includes('user@example.com'), 'raw PII value must not be logged');
 });
