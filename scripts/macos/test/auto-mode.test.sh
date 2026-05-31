@@ -72,5 +72,9 @@ printf '%s' "$err_a_ng" | grep -qi "オートを有効にできません" && ok 
 out_a_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"
 printf '%s' "$out_a_ng" | grep -q -- "--dangerously-skip-permissions" && ng "agy red must NOT skip-permissions" || ok "agy red stays safe (no skip-permissions)"
 
+# --- Task 6: full doctor includes isolation drills ---
+full_out="$(bash "$HERE/../doctor.sh" "$WS" 2>/dev/null || true)"
+printf '%s' "$full_out" | grep -Eqi "egress|workspace-outside|isolation" && ok "full doctor reports isolation" || ng "full doctor reports isolation"
+
 echo "auto-mode.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

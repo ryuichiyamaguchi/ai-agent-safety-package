@@ -194,5 +194,21 @@ with open('$drill_policy', 'w') as f:
   fi
 fi
 
+# Safe Auto Mode: 隔離ドリルをフル doctor にも組み込む(集計に反映)。
+# codex が無い等で HOLD のときは SKIP 扱い(集計から除外)。
+drills_lib="$(cd "$(dirname "$0")" && pwd)/lib/isolation_drills.sh"
+if [ -f "$drills_lib" ]; then
+  # shellcheck disable=SC1090
+  . "$drills_lib"
+  for d in drill_write_outside drill_network_egress; do
+    set +e; line="$("$d" codex)"; rc=$?; set -e
+    case "$rc" in
+      0)  echo "PASS isolation: $line"; pass=$((pass+1)) ;;
+      10) echo "FAIL isolation: $line"; fail=$((fail+1)) ;;
+      *)  echo "SKIP isolation: $line" ;;
+    esac
+  done
+fi
+
 echo "doctor summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]
