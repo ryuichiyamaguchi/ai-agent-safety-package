@@ -49,3 +49,53 @@ drill_agy_declaration() {
   fi
   echo "PASS agy present (declaration-based, sandbox NOT independently verified)"; return 0
 }
+
+# classify_net_result <result>
+# 接続試行の結果文字列を金庫判定に写像する(テスト容易性のため分離)。
+classify_net_result() {
+  case "$1" in
+    refused)   echo "PASS egress blocked by sandbox"; return 0 ;;
+    connected) echo "FAIL egress connection succeeded"; return 10 ;;
+    *)         echo "HOLD egress result indeterminate (offline?)"; return 20 ;;
+  esac
+}
+
+# _probe_egress <engine> <host> <port>
+# 金庫の中から <host>:<port> へ TCP 接続を試み、結果を
+# "refused" / "connected" / "timeout" のいずれかで echo する。
+# データは送らない(接続確立の可否のみ)。
+_probe_egress() {
+  local engine="$1" host="$2" port="$3"
+  local probe="exec 3<>/dev/tcp/$host/$port"
+  case "$engine" in
+    codex)
+      local out
+      out="$( codex sandbox macos -C "$(mktemp -d)" /bin/sh -lc \
+        "timeout 5 bash -c '$probe' 2>&1; echo EXIT=\$?" 2>&1 )"
+      if printf '%s' "$out" | grep -q "EXIT=0"; then echo connected; return; fi
+      if printf '%s' "$out" | grep -Eqi "operation not permitted|not permitted|denied|refused"; then echo refused; return; fi
+      echo timeout
+      ;;
+    *) echo timeout ;;
+  esac
+}
+
+# drill_network_egress <engine>
+# 許可リストに無い実在ドメインへの送信が遮断されるかを実証する。
+drill_network_egress() {
+  local engine="$1"
+  case "$engine" in
+    codex)
+      command -v codex >/dev/null 2>&1 || { echo "HOLD codex not installed"; return 20; }
+      local result; result="$(_probe_egress codex example.com 443)"
+      classify_net_result "$result"
+      return $?
+      ;;
+    agy)
+      echo "HOLD agy network drill not yet supported"; return 20
+      ;;
+    *)
+      echo "HOLD unknown engine: $engine"; return 20
+      ;;
+  esac
+}
