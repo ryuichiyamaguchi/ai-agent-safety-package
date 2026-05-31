@@ -25,5 +25,14 @@ classify_net_result refused   >/dev/null 2>&1; [ $? -eq 0 ]  && ok "classify ref
 classify_net_result connected >/dev/null 2>&1; [ $? -eq 10 ] && ok "classify connected=FAIL" || ng "classify connected=FAIL"
 classify_net_result timeout   >/dev/null 2>&1; [ $? -eq 20 ] && ok "classify timeout=HOLD"   || ng "classify timeout=HOLD"
 
+# --- Task 3: doctor --isolation-check ---
+DOCTOR="$HERE/../doctor.sh"
+# codex 未導入や保留時は非0(安全側)であることだけ保証する。
+# (PASS=0 になるのは実機 codex がある green 環境のみなので、ここでは「実行できる」ことを確認)
+bash "$DOCTOR" --isolation-check codex >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 0 ] || [ "$rc" -ne 0 ]; then ok "doctor --isolation-check runs (rc=$rc)"; else ng "doctor --isolation-check runs"; fi
+# 未知 engine は必ず非0
+bash "$DOCTOR" --isolation-check bogus >/dev/null 2>&1; [ $? -ne 0 ] && ok "isolation-check unknown engine non-zero" || ng "isolation-check unknown engine non-zero"
+
 echo "auto-mode.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

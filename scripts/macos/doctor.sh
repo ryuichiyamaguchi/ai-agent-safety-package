@@ -1,5 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+# Safe Auto Mode: 軽量隔離チェック。launcher が --auto 起動前に呼ぶ。
+# その engine の workspace外書込遮断 + 外部ネット送信遮断を実証し、
+# 全 PASS のときだけ exit 0。1つでも FAIL/HOLD なら非0(フェイルクローズ)。
+if [ "${1:-}" = "--isolation-check" ]; then
+  engine="${2:-}"
+  drills_lib="$(cd "$(dirname "$0")" && pwd)/lib/isolation-drills.sh"
+  if [ ! -f "$drills_lib" ]; then echo "FAIL isolation-drills.sh missing" >&2; exit 2; fi
+  # shellcheck disable=SC1090
+  . "$drills_lib"
+  rc_total=0
+  case "$engine" in
+    codex)
+      # Codex は実証ドリル①②。
+      # set -e 環境でコマンド置換の非0が伝播するのを防ぐため set +e で囲む。
+      for drill in drill_write_outside drill_network_egress; do
+        set +e; line="$("$drill" "$engine")"; rc=$?; set -e
+        echo "$line"
+        [ "$rc" -ne 0 ] && rc_total=1
+      done
+      ;;
+    agy)
+      # agy は宣言チェック④(実証ではない。spec §4 ④ / option B)。
+      set +e; line="$(drill_agy_declaration "$engine")"; rc=$?; set -e
+      echo "$line"
+      [ "$rc" -ne 0 ] && rc_total=1
+      ;;
+    *)
+      echo "HOLD unknown engine: $engine"; rc_total=1
+      ;;
+  esac
+  exit "$rc_total"
+fi
+
 workspace="${1:-$(pwd)}"
 workspace="$(cd "$workspace" && pwd)"
 hook_root="$workspace/.ai-safety/hooks/macos"
