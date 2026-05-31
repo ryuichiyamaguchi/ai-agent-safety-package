@@ -182,6 +182,13 @@ launch-agy-safe.sh [workspace] [prompt] [--auto]
 - **agy の金庫は実証できない (確定リスク)** → agy のオートは `--sandbox` を信頼する**宣言ベース**。`--sandbox` が実際にネット遮断するかは未検証。ryuichi 判断で許容。**残存リスク**: agy の `--sandbox` がネット遮断を伴わない場合、プロンプトインジェクションされた agy が承認なし (`--dangerously-skip-permissions`) でデータを外部送信しうる。→ 緩和策: (a) docs に「未実証・Codex より弱い」と明記、(b) `--sandbox` を必ず強制、(c) agy が無ければ赤でフォールバック。将来 agy に検証手段が出たら実証へ格上げ。
 - **Codex `on-failure` の妥当性** → OS 金庫で封じ込めた上での `on-failure` は安全と判断するが、`never` との比較はレビューで再検討。
 
+### 既知の問題 / フォローアップ (2026-06-01 実装中に発見)
+
+- **codex sandbox CLI のスキーマ移行 (要対応・別件)**: 実機 codex 0.135.0 では `codex sandbox` の構文が変わっており、(a) 旧 `codex sandbox macos -C ...` の `macos` は実行コマンド扱いになり `execvp() of 'macos' failed` で落ちる、(b) 正しい `codex sandbox --permissions-profile <NAME> --cd <DIR> <CMD>` は新しい `[permissions]` テーブル設定を要求する (`Error: default_permissions requires a [permissions] table`)。パッケージの `configs/codex/config.{mac,windows}.toml` は旧構造 (`sandbox_mode` / `[sandbox_workspace_write]` / `[profiles.safe]`) のまま。
+  - **影響 1**: Safe Auto Mode の Codex green パスは現行 codex では到達不能 (ただし doctor が HOLD=赤 → フォールバックするので**安全**。オートが開かないだけ)。
+  - **影響 2**: **既存の `doctor.sh` の codex sandbox チェック (line ~53-66) も同じ旧構文で、現行 codex では偽 PASS している** (v1.5.0 出荷済みの既存バグ)。
+  - **対応 (別エンゲージメント推奨)**: codex 0.135.0 の `[permissions]` スキーマを調査し、`config.{mac,windows}.toml` と doctor の sandbox 呼び出し (既存 + 新規ドリル) を新構文に移行する。Safe Auto Mode の実装ロジック自体は終了コード契約で正しく、この移行とは独立 (移行後に green パスが有効化される)。
+
 ---
 
 ## 7. 将来 Claude Code 対応時の必須事項 (MVP 対象外・記録のみ)
