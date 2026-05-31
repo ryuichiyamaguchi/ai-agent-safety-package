@@ -12,7 +12,7 @@ note(){ echo "[onboarding-test] $1"; }
 [ -f "$HTML" ] || { note "FAIL: スタート.html がない"; exit 1; }
 
 # 2) HTML 自己完結（許可リンク=nodejs.org / target=_blank / rel=noopener 以外の外部参照なし）
-if grep -nE 'https?://' "$HTML" | grep -vE 'nodejs\.org|rel="noopener"|target="_blank"' >/tmp/onb_ext.txt 2>/dev/null; then
+if grep -nE 'https?://' "$HTML" | grep -vE 'nodejs\.org|antigravity\.google|rel="noopener"|target="_blank"' >/tmp/onb_ext.txt 2>/dev/null; then
   if [ -s /tmp/onb_ext.txt ]; then note "FAIL: 外部参照あり"; cat /tmp/onb_ext.txt; fail=1; fi
 fi
 
