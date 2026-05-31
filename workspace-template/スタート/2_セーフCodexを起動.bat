@@ -3,9 +3,7 @@ chcp 65001 >nul
 setlocal
 REM セーフ Codex 起動（薄いラッパー）。既存 launch-codex-safe.ps1 を呼ぶだけ。
 set "HERE=%~dp0"
-pushd "%HERE%.."
-set "WORKSPACE=%CD%"
-popd
+for %%I in ("%HERE%..") do set "WORKSPACE=%%~fI"
 set "TARGET=%WORKSPACE%\.ai-safety\hooks\windows\launch-codex-safe.ps1"
 if not exist "%TARGET%" (
   echo 起動スクリプトが見つかりません: %TARGET%

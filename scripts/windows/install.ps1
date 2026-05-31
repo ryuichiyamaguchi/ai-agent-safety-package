@@ -207,6 +207,26 @@ if (Test-Path -LiteralPath $gitignoreTemplate) {
     }
 }
 
+# 受講者向けスタートフォルダ（番号ラッパー + 案内 HTML）を workspace に配置。
+# ファイルシステム構造とは別に「ここを見てポチポチやれば使える」入口を用意する。
+$startSrc = Join-Path $packageRoot "workspace-template\スタート"
+if (Test-Path -LiteralPath $startSrc) {
+    $startDest = Join-Path $Workspace "スタート"
+    New-Item -ItemType Directory -Force -Path $startDest | Out-Null
+    Copy-Item -Path (Join-Path $startSrc "*") -Destination $startDest -Recurse -Force
+    $htmlSrc = Join-Path $packageRoot "スタート.html"
+    if (Test-Path -LiteralPath $htmlSrc) {
+        Copy-Item -LiteralPath $htmlSrc -Destination (Join-Path $startDest "スタート.html") -Force
+    }
+    # 受講者が同名ファイル（.command と .bat）で迷わないよう、当該 OS 用だけ残す。
+    if ($Platform -eq 'win') {
+        Get-ChildItem -LiteralPath $startDest -Filter *.command -ErrorAction SilentlyContinue | Remove-Item -Force
+    } elseif ($Platform -eq 'mac') {
+        Get-ChildItem -LiteralPath $startDest -Filter *.bat -ErrorAction SilentlyContinue | Remove-Item -Force
+    }
+    Write-Host "スタートフォルダを配置しました: $startDest"
+}
+
 if ($InstallGlobalClaudeSettings) {
     $globalSrc = Join-Path $packageRoot "configs\claude\settings.windows.json"
     $globalTarget = Join-Path $HOME ".claude\settings.json"

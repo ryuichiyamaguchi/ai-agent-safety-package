@@ -186,6 +186,24 @@ copy_with_backup "$package_root/configs/gemini/settings.mac.json" "$workspace/.g
 copy_with_backup "$package_root/configs/gemini/policies/safety.toml" "$workspace/.gemini/policies/safety.toml"
 copy_with_backup "$package_root/workspace-template/aiexclude.template" "$workspace/.aiexclude"
 
+# 受講者向けスタートフォルダ（番号ラッパー + 案内 HTML）を workspace に配置。
+# ファイルシステム構造とは別に「ここを見てポチポチやれば使える」入口を用意する。
+if [ -d "$package_root/workspace-template/スタート" ]; then
+  mkdir -p "$workspace/スタート"
+  cp -R "$package_root/workspace-template/スタート/." "$workspace/スタート/"
+  if [ -f "$package_root/スタート.html" ]; then
+    cp "$package_root/スタート.html" "$workspace/スタート/スタート.html"
+  fi
+  # 受講者が同名ファイル（.command と .bat）で迷わないよう、当該 OS 用だけ残す。
+  if [[ "$PLATFORM" == "mac" ]]; then
+    rm -f "$workspace/スタート/"*.bat
+  elif [[ "$PLATFORM" == "win" ]]; then
+    rm -f "$workspace/スタート/"*.command
+  fi
+  chmod +x "$workspace/スタート/"*.command 2>/dev/null || true
+  echo "スタートフォルダを配置しました: $workspace/スタート"
+fi
+
 if [ "$install_global_claude" = "--global-claude" ]; then
   global_target="$HOME/.claude/settings.json"
   global_src="$package_root/configs/claude/settings.mac.json"
