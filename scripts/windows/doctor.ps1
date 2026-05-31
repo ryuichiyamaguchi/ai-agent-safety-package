@@ -1,9 +1,46 @@
 ﻿param(
     [string]$Workspace = (Get-Location).Path,
-    [switch]$LiveCodex
+    [switch]$LiveCodex,
+    [string]$IsolationCheck = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+# Safe Auto Mode: 軽量隔離チェック。launcher が --auto 起動前に呼ぶ。
+# その engine の workspace外書込遮断 + 外部ネット送信遮断を実証し、
+# 全 PASS のときだけ exit 0。1つでも FAIL/HOLD なら非0(フェイルクローズ)。
+#
+# SKIP は表示専用(フル doctor 向け)。
+# launcher の自動承認判定はこの -IsolationCheck(strict: HOLD=非0)を使う。
+if ($IsolationCheck) {
+    $drillsPath = Join-Path $PSScriptRoot 'lib\IsolationDrills.ps1'
+    if (-not (Test-Path -LiteralPath $drillsPath)) {
+        Write-Error "IsolationDrills.ps1 missing: $drillsPath"
+        exit 2
+    }
+    . $drillsPath
+    $rcTotal = 0
+    switch ($IsolationCheck) {
+        'codex' {
+            # Codex は実証ドリル①②。
+            foreach ($fn in @('Test-WriteOutside', 'Test-NetworkEgress')) {
+                # Write-Host 出力(表示用)はそのまま。戻り値の int を取得して判定。
+                $rc = [int](& $fn 'codex')
+                if ($rc -ne 0) { $rcTotal = 1 }
+            }
+        }
+        'agy' {
+            # agy は宣言チェック④(実証ではない。spec §4 ④ / option B)。
+            $rc = [int](Test-AgyDeclaration 'agy')
+            if ($rc -ne 0) { $rcTotal = 1 }
+        }
+        default {
+            Write-Host "HOLD unknown engine: $IsolationCheck"
+            $rcTotal = 1
+        }
+    }
+    exit $rcTotal
+}
 $Workspace = [System.IO.Path]::GetFullPath($Workspace)
 $dot = [char]46
 $targetName = $dot + "env"
@@ -157,6 +194,24 @@ if (Test-Path -LiteralPath $policyPath) {
     } finally {
         if (Test-Path -LiteralPath $drillBackup) {
             Move-Item -LiteralPath $drillBackup -Destination $policyPath -Force
+        }
+    }
+}
+
+# Safe Auto Mode: 隔離ドリルをフル doctor にも組み込む(集計に反映)。
+# codex が無い等で HOLD のときは SKIP 扱い(集計から除外)。
+# フル doctor の HOLD=SKIP は表示専用。launcher の自動判定は -IsolationCheck(strict: HOLD=非0)を
+# 使うため、ここの SKIP が自動承認解放に影響することはない。
+$drillsPathFull = Join-Path $PSScriptRoot 'lib\IsolationDrills.ps1'
+if (Test-Path -LiteralPath $drillsPathFull) {
+    . $drillsPathFull
+    foreach ($fn in @('Test-WriteOutside', 'Test-NetworkEgress')) {
+        # Write-Host 内容(display)は関数が出力する。戻り値(int)で集計判定。
+        $rc = [int](& $fn 'codex')
+        switch ($rc) {
+            0  { Add-Result "isolation: $fn codex" $true  "PASS" }
+            10 { Add-Result "isolation: $fn codex" $false "FAIL" }
+            default { Write-Host "SKIP isolation: $fn codex (HOLD — codex not installed or probe inconclusive)" }
         }
     }
 }
