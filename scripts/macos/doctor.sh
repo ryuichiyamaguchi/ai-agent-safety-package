@@ -6,8 +6,8 @@ set -euo pipefail
 # 全 PASS のときだけ exit 0。1つでも FAIL/HOLD なら非0(フェイルクローズ)。
 if [ "${1:-}" = "--isolation-check" ]; then
   engine="${2:-}"
-  drills_lib="$(cd "$(dirname "$0")" && pwd)/lib/isolation-drills.sh"
-  if [ ! -f "$drills_lib" ]; then echo "FAIL isolation-drills.sh missing" >&2; exit 2; fi
+  drills_lib="$(cd "$(dirname "$0")" && pwd)/lib/isolation_drills.sh"
+  if [ ! -f "$drills_lib" ]; then echo "FAIL isolation_drills.sh missing" >&2; exit 2; fi
   # shellcheck disable=SC1090
   . "$drills_lib"
   rc_total=0

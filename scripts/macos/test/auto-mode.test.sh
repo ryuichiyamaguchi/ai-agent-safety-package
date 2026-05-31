@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
-LIB="$HERE/../lib/isolation-drills.sh"
+LIB="$HERE/../lib/isolation_drills.sh"
 pass=0; fail=0
 ok()  { echo "PASS $1"; pass=$((pass+1)); }
 ng()  { echo "FAIL $1"; fail=$((fail+1)); }
@@ -30,7 +30,7 @@ DOCTOR="$HERE/../doctor.sh"
 # codex 未導入や保留時は非0(安全側)であることだけ保証する。
 # (PASS=0 になるのは実機 codex がある green 環境のみなので、ここでは「実行できる」ことを確認)
 bash "$DOCTOR" --isolation-check codex >/dev/null 2>&1; rc=$?
-if [ "$rc" -eq 0 ] || [ "$rc" -ne 0 ]; then ok "doctor --isolation-check runs (rc=$rc)"; else ng "doctor --isolation-check runs"; fi
+[ "$rc" -ne 127 ] && ok "doctor --isolation-check runs (rc=$rc)" || ng "doctor --isolation-check not found"
 # 未知 engine は必ず非0
 bash "$DOCTOR" --isolation-check bogus >/dev/null 2>&1; [ $? -ne 0 ] && ok "isolation-check unknown engine non-zero" || ng "isolation-check unknown engine non-zero"
 
