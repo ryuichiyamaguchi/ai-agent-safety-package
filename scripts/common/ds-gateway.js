@@ -53,21 +53,24 @@ function maskValue(v, counts) {
   if (Array.isArray(v)) {
     return v.map((block) => {
       if (block && typeof block === 'object') {
-        if (typeof block.text === 'string') {
-          const r = maskSecrets(block.text);
-          addCounts(counts, r.counts);
-          return { ...block, text: r.masked };
-        }
-        // tool_result: nested content array (or string)
+        let out = block;
+        // Always recurse .content when present (tool_result: array or string)
         if (block.content !== undefined) {
-          return { ...block, content: maskValue(block.content, counts) };
+          out = { ...out, content: maskValue(block.content, counts) };
         }
-        // tool_use: input object — scan its JSON serialization
-        if (block.input && typeof block.input === 'object') {
-          const r = maskSecrets(JSON.stringify(block.input));
+        // Mask .text if present (may coexist with .content on a crafted/forward-compat block)
+        if (typeof out.text === 'string') {
+          const r = maskSecrets(out.text);
           addCounts(counts, r.counts);
-          try { return { ...block, input: JSON.parse(r.masked) }; } catch (_) { return block; }
+          out = { ...out, text: r.masked };
         }
+        // tool_use: input object (exclude arrays for clarity; outcome identical either way)
+        if (out.input && typeof out.input === 'object' && !Array.isArray(out.input)) {
+          const r = maskSecrets(JSON.stringify(out.input));
+          addCounts(counts, r.counts);
+          try { out = { ...out, input: JSON.parse(r.masked) }; } catch (_) { /* keep as-is */ }
+        }
+        return out;
       }
       return block;
     });

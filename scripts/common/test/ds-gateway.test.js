@@ -162,6 +162,18 @@ test('masks secrets in nested tool_result and tool_use blocks', async () => {
   assert.strictEqual(fwd.messages[1].content[0].type, 'tool_use');
 });
 
+test('masks .content even when a block also carries .text (no scan-evasion)', async () => {
+  let received = null;
+  const up = await startUpstream((req,res)=>{ let b=''; req.on('data',c=>b+=c); req.on('end',()=>{received=b; res.writeHead(200,{'content-type':'application/json'}); res.end('{}');}); });
+  after(()=>up.close());
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0 });
+  const server = await gw.listen(); after(()=>server.close());
+  await postJson(server.address().port, '/v1/messages', { messages: [
+    { role:'user', content:[{ type:'tool_result', text:'decoy', content:[{ type:'text', text:'hidden sk-ant-AAAAAAAAAAAAAAAAAAAAAA' }] }] },
+  ]});
+  assert.ok(!received.includes('sk-ant-AAAAAAAAAAAAAAAAAAAAAA'), '.content secret leaked when .text present');
+});
+
 test('writes a detection log line with source ds-gateway and no raw values', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-'));
   const prevLogDir = process.env.AI_SAFE_LOG_DIR;
