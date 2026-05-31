@@ -14,7 +14,7 @@
 # launcher の自動承認判定は -IsolationCheck(strict: HOLD=非0)を使うため、
 # ここの HOLD が自動承認解放に影響することはない。
 
-Set-StrictMode -Off  # dot-source 時に呼び出し元の Set-StrictMode が伝播するのを防ぐ
+Set-StrictMode -Off  # dot-source されるため呼び出し元スコープで未定義変数等による意図しないエラーが出ないよう StrictMode を Off にする
 
 # --- Test-WriteOutside ---
 # 金庫の中から workspace 外への書き込みを試み、作られないことを確認する。
@@ -82,7 +82,8 @@ function Get-NetResultClass([string]$Result) {
 # 金庫の中から <host>:<port> へ TCP 接続を試み、
 # "refused" / "connected" / "timeout" のいずれかを返す(Write-Output)。
 # データは送らない(接続確立の可否のみ)。
-function Get-EgressProbe([string]$Engine, [string]$Host, [int]$Port) {
+# 注: $TargetHost を使う($Host は PowerShell 自動変数とシャドウするため避ける)。
+function Get-EgressProbe([string]$Engine, [string]$TargetHost, [int]$Port) {
     switch ($Engine) {
         'codex' {
             # powershell -Command でサンドボックス内から TCP 接続を試みる。
@@ -90,7 +91,7 @@ function Get-EgressProbe([string]$Engine, [string]$Host, [int]$Port) {
             $probeCmd = @"
 try {
     `$tc = New-Object Net.Sockets.TcpClient
-    `$ar = `$tc.BeginConnect('$Host', $Port, `$null, `$null)
+    `$ar = `$tc.BeginConnect('$TargetHost', $Port, `$null, `$null)
     `$ok = `$ar.AsyncWaitHandle.WaitOne(5000)
     if (`$ok) { `$tc.EndConnect(`$ar); 'connected' } else { `$tc.Close(); 'timeout' }
 } catch {
@@ -136,6 +137,11 @@ function Test-NetworkEgress([string]$Engine) {
 # launcher 側が --sandbox を強制適用する前提。
 # 実証していないことは docs / 起動メッセージで明示する。
 function Test-AgyDeclaration([string]$Engine) {
+    # mac の drill_agy_declaration と同様、wrong-engine 呼び出しは HOLD(20)。
+    if ($Engine -ne 'agy') {
+        Write-Host "HOLD Test-AgyDeclaration called for wrong engine: $Engine"
+        return 20
+    }
     $agy = $env:AGY
     if (-not $agy) {
         $candidates = @(

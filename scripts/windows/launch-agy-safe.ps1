@@ -41,7 +41,7 @@ if (-not $Agy) {
     }
     if (-not $Agy) {
         $cmd = Get-Command agy -ErrorAction SilentlyContinue
-        if ($cmd) { $Agy = $cmd.Path }
+        if ($cmd) { $Agy = $cmd.Source }
     }
 }
 
