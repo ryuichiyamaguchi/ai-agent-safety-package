@@ -135,6 +135,22 @@
   .hero .howto b{ color:var(--ink); }
   .hero .howto p{ margin:2px 0 0; color:var(--ink-soft); font-size:14.5px; }
 
+  /* ===== 場所案内ボックス（最初に使うファイルはここ） ===== */
+  .here{
+    margin:26px auto 0; max-width:680px;
+    background:#fff; border:1px solid var(--line);
+    border-left:6px solid var(--accent);
+    border-radius:var(--radius); box-shadow:var(--shadow);
+    padding:18px 20px;
+  }
+  .here-head{ display:flex; align-items:flex-start; gap:12px; }
+  .here-ic{ flex:0 0 auto; font-size:26px; line-height:1.2; }
+  .here h2{
+    font-size:clamp(17px,3.8vw,20px); font-weight:900;
+    margin:0; line-height:1.5; color:var(--ink);
+  }
+  .here p{ margin:12px 0 0; color:var(--ink-soft); font-size:15px; }
+
   /* ===== ステップの縦ライン ===== */
   .steps{ position:relative; margin-top:34px; }
   .steps::before{
@@ -380,6 +396,19 @@
       </div>
     </section>
 
+    <!-- ===== 場所案内（最初に使うファイルはここ） ===== -->
+    <section class="here reveal d4" aria-label="最初に使うファイルの場所">
+      <div class="here-head">
+        <span class="here-ic" aria-hidden="true">📁</span>
+        <h2>いま見ているこの「スタート.html」と同じフォルダに、最初に使うファイルがあります</h2>
+      </div>
+      <p>
+        <span class="fname">0_AIツールをまとめて入れる</span>（任意）と
+        <span class="os-win"><span class="fname">1_安全パッケージを準備-Windows.bat</span></span><span class="os-mac"><span class="fname">1_安全パッケージを準備-Mac.command</span></span>
+        は、この案内ファイルと<b>同じ場所</b>にあります。別のフォルダを探す必要はありません。
+      </p>
+    </section>
+
     <!-- ===== ステップ群 ===== -->
     <div class="steps">
 
@@ -418,12 +447,12 @@
           <p class="cmd-label">Claude Code（クロードコード）を使う人</p>
           <div class="cmd"><span class="prompt">$</span><code>npm install -g @anthropic-ai/claude-code</code><button type="button" class="copy" data-copy="npm install -g @anthropic-ai/claude-code" onclick="copyText(this)">コピー</button></div>
           <p class="cmd-label">AntiGravity（アンチグラビティ）を使う人</p>
-          <p class="muted">AntiGravity だけは入れ方が違います。<b>下のボタンから公式ページを開いて、そこに書かれた手順どおりに入れてください。</b></p>
-          <p><a class="extlink" href="https://antigravity.google" target="_blank" rel="noopener">AntiGravity 公式ページを開く ↗</a></p>
-          <details>
-            <summary>ネットのコマンドをそのまま実行する時の注意</summary>
-            <p class="muted" style="font-size:13px;">ネットから取ってきたインストール用コマンド（<code>curl … | bash</code> のような形）を、中身を確かめずにそのまま実行するのは本来おすすめしません。出所が信頼できる公式ページだと確かめてから、案内どおりに実行してください。これはこの教材で学ぶ「安全の考え方」そのものです。</p>
-          </details>
+          <div class="cmd os-win"><span class="prompt">$</span><code>irm https://antigravity.google/cli/install.ps1 | iex</code><button type="button" class="copy" data-copy="irm https://antigravity.google/cli/install.ps1 | iex" onclick="copyText(this)">コピー</button></div>
+          <div class="cmd os-mac"><span class="prompt">$</span><code>curl -fsSL https://antigravity.google/cli/install.sh | bash</code><button type="button" class="copy" data-copy="curl -fsSL https://antigravity.google/cli/install.sh | bash" onclick="copyText(this)">コピー</button></div>
+          <p class="muted" style="font-size:13px;">これはネットから取得して実行するコマンドです。表示元が公式（<b>antigravity.google</b>）であることを確かめてから実行してください。</p>
+          <p><a class="ext" href="https://antigravity.google" target="_blank" rel="noopener">AntiGravity 公式ページを開く
+            <svg class="lic" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M11 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a></p>
 
           <!-- 0-3 -->
           <h3>0-3　ログインする</h3>
@@ -515,7 +544,7 @@
 
           <div class="meta">
             <div class="row why"><span class="k">なぜ</span><span>AIが安全に動くための「作業部屋」と「安全設定」を、自動で用意します。</span></div>
-            <div class="row"><span class="k">何が起きる</span><span>あなたの<b>書類フォルダ</b>の中に <span class="fname">my-ai-workspace</span> ができ、安全設定が入り、自己診断（doctor）が自動で走ります。最後に「準備OK」と出れば成功です。</span></div>
+            <div class="row"><span class="k">何が起きる</span><span>あなたの<b><span class="os-mac">書類</span><span class="os-win">ドキュメント</span>フォルダ</b>の中に <span class="fname">my-ai-workspace</span> ができ、安全設定が入り、自己診断（doctor）が自動で走ります。最後に「準備OK」と出れば成功です。<b>準備が終わると、次に使う「スタート」フォルダが自動で開きます。</b></span></div>
           </div>
 
           <details class="help">
@@ -540,13 +569,22 @@
 
           <div class="do">
             <span class="ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="1.6"/></svg></span>
-            <div>まず <span class="fname">書類 / my-ai-workspace / スタート</span> フォルダを開きます。<br>その中の、使いたいAIのファイルを<b>ダブルクリック</b>してください。</div>
+            <div>
+              <b>Step 1 が終わると、この「スタート」フォルダは自動で開きます。</b><br>
+              開いたフォルダの中の、使いたいAIのファイルを<b>ダブルクリック</b>してください。
+            </div>
           </div>
 
+          <p class="cmd-label">手動で開きたいときは、このフォルダの場所をコピーして使えます</p>
+          <div class="cmd os-win"><span class="prompt">📂</span><code>%USERPROFILE%\Documents\my-ai-workspace\スタート</code><button type="button" class="copy" data-copy="%USERPROFILE%\Documents\my-ai-workspace\スタート" onclick="copyText(this)">コピー</button></div>
+          <p class="muted os-win" style="font-size:13px;">エクスプローラーのアドレス欄に貼って Enter で開けます。</p>
+          <div class="cmd os-mac"><span class="prompt">📂</span><code>~/Documents/my-ai-workspace/スタート</code><button type="button" class="copy" data-copy="~/Documents/my-ai-workspace/スタート" onclick="copyText(this)">コピー</button></div>
+          <p class="muted os-mac" style="font-size:13px;">Finder で Command+Shift+G を押し、貼って Enter で開けます。</p>
+
           <ol class="steplist">
-            <li><span class="fname">2_セーフCodexを起動</span> … Codex を安全モードで動かす</li>
-            <li><span class="fname">3_セーフClaudeを起動</span> … Claude Code を安全モードで動かす</li>
-            <li><span class="fname">4_セーフAntiGravityを起動</span> … AntiGravity を安全モードで動かす</li>
+            <li><span class="fname">2_セーフCodexを起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … Codex を安全モードで動かす</li>
+            <li><span class="fname">3_セーフClaudeを起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … Claude Code を安全モードで動かす</li>
+            <li><span class="fname">4_セーフAntiGravityを起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … AntiGravity を安全モードで動かす</li>
           </ol>
 
           <div class="meta">
@@ -602,7 +640,7 @@
         <div class="card">
           <p class="step-eyebrow">上級・希望者だけ</p>
           <h2 class="step-title">DeepSeek（ディープシーク）を使う</h2>
-          <p class="muted">これは<b>使いたい人だけ</b>の追加機能です。よく分からない場合は、ここは<b>飛ばして大丈夫</b>です。ファイルは同じ <span class="fname">スタート</span> フォルダの中の「（上級）」が付いたものです。</p>
+          <p class="muted">これは<b>使いたい人だけ</b>の追加機能です。よく分からない場合は、ここは<b>飛ばして大丈夫</b>です。ファイルは <b>Step 2 と同じ「スタート」フォルダ</b>の中の「（上級）」が付いたものです（フォルダの場所は Step 2 のパスからコピーできます）。</p>
 
           <ol class="steplist">
             <li>

@@ -9,3 +9,12 @@ if [ ! -f "$TARGET" ]; then
   exit 1
 fi
 bash "$TARGET"
+
+# 準備が終わったら、次に使う「スタート」フォルダを自動で開く（迷わせない）。
+START_DIR="$HOME/Documents/my-ai-workspace/スタート"
+if [ -d "$START_DIR" ]; then
+  echo ""
+  echo "次に使うファイルはこのフォルダの中にあります:"
+  echo "  $START_DIR"
+  open "$START_DIR" 2>/dev/null || true
+fi
