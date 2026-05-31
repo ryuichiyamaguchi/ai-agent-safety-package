@@ -43,6 +43,39 @@ test('GET /healthz returns 200 ok', async () => {
   assert.match(res.body, /ok/);
 });
 
+test('GET /healthz echoes the health token nonce', async () => {
+  const prev = process.env.DS_GATEWAY_HEALTH_TOKEN;
+  process.env.DS_GATEWAY_HEALTH_TOKEN = 'abc123';
+  after(() => {
+    if (prev === undefined) delete process.env.DS_GATEWAY_HEALTH_TOKEN;
+    else process.env.DS_GATEWAY_HEALTH_TOKEN = prev;
+  });
+  const gw = createGateway({ upstream: 'http://127.0.0.1:1', port: 0 });
+  const server = await gw.listen();
+  after(() => server.close());
+  const res = await get(server.address().port, '/healthz');
+  assert.strictEqual(res.status, 200);
+  assert.match(res.body, /"status":"ok"/);
+  assert.match(res.body, /abc123/);
+});
+
+test('rejects non-JSON POST body fail-closed (415, not forwarded)', async () => {
+  let forwarded = false;
+  const up = await startUpstream((req,res)=>{ forwarded = true; req.resume(); res.writeHead(200); res.end(); });
+  after(()=>up.close());
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0 });
+  const server = await gw.listen(); after(()=>server.close());
+  const data = Buffer.from('plain text with sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX');
+  const res = await new Promise((resolve,reject)=>{
+    const r = http.request({host:'127.0.0.1',port:server.address().port,path:'/v1/messages',method:'POST',
+      headers:{'content-type':'text/plain','content-length':data.length}},
+      (rs)=>{let b='';rs.on('data',c=>b+=c);rs.on('end',()=>resolve({status:rs.statusCode}));});
+    r.on('error',reject); r.end(data);
+  });
+  assert.strictEqual(res.status, 415);
+  assert.strictEqual(forwarded, false);
+});
+
 test('masks secrets in messages before forwarding to upstream', async () => {
   let received = null;
   const up = await startUpstream((req, res) => {
@@ -187,7 +220,7 @@ test('writes a detection log line with source ds-gateway and no raw values', asy
   const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0 });
   const server = await gw.listen(); after(()=>server.close());
 
-  await postJson(server.address().port, '/v1/messages',
+  await postJson(server.address().port, '/v1/messages?token=sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX',
     { messages:[{role:'user',content:'sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX'}] });
   await new Promise(r=>setTimeout(r,30));
 
@@ -198,4 +231,5 @@ test('writes a detection log line with source ds-gateway and no raw values', asy
   assert.strictEqual(ev.source, 'ds-gateway');
   assert.strictEqual(ev.counts.openai, 1);
   assert.ok(!line.includes('sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX'), 'must not log raw value');
+  assert.ok(!ev.path.includes('?'), 'query string must be stripped from logged path');
 });

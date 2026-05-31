@@ -33,10 +33,24 @@ test('masks each remaining type', () => {
   }
 });
 
-test('masks PEM private key block markers', () => {
-  const r = maskSecrets('-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----');
+test('masks generic secret in JSON-quoted form', () => {
+  const r = maskSecrets('{"password":"hunter2hunter2","api_key":"longsecretvalue123"}');
+  assert.ok(!r.masked.includes('hunter2hunter2'));
+  assert.ok(!r.masked.includes('longsecretvalue123'));
+  assert.ok(r.counts.generic >= 2);
+  assert.doesNotThrow(() => JSON.parse(r.masked)); // still valid JSON
+});
+
+test('masks the entire private key block including body', () => {
+  const r = maskSecrets('-----BEGIN RSA PRIVATE KEY-----\nMIIBhupersecretkeymaterial\n-----END RSA PRIVATE KEY-----');
+  assert.ok(/\[MASKED:private_key\]/.test(r.masked));
+  assert.ok(!r.masked.includes('MIIBhupersecretkeymaterial'), 'key body leaked');
+  assert.strictEqual(r.counts.private_key, 1);
+});
+
+test('masks unpaired BEGIN private key marker (fallback)', () => {
+  const r = maskSecrets('-----BEGIN RSA PRIVATE KEY-----\nx');
   assert.ok(/\[MASKED:private_key_begin\]/.test(r.masked));
-  assert.ok(/\[MASKED:private_key_end\]/.test(r.masked));
   assert.strictEqual(r.counts.private_key, 1);
 });
 

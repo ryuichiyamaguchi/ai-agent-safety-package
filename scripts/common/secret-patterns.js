@@ -11,9 +11,10 @@ const RULES = [
   { type: 'github',             re: /gh[pousr]_[A-Za-z0-9_]{36,255}/g,                      label: '[MASKED:github]' },
   { type: 'slack',              re: /xox[baprs]-[A-Za-z0-9-]{10,}/g,                        label: '[MASKED:slack]' },
   { type: 'jwt',                re: /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,   label: '[MASKED:jwt]' },
+  { type: 'private_key_block',  re: /-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/g, label: '[MASKED:private_key]', countAs: 'private_key' },
   { type: 'private_key_begin',  re: /-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/g, label: '[MASKED:private_key_begin]', countAs: 'private_key' },
   { type: 'private_key_end',    re: /-----END (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/g,   label: '[MASKED:private_key_end]',   countAs: null },
-  { type: 'generic',            re: /(api[_-]?key|secret|token|password|passwd|pwd)(\s*[:=]\s*)['"]?[A-Za-z0-9_.+/=-]{12,}['"]?/gi, label: null },
+  { type: 'generic',            re: /(["']?(?:api[_-]?key|secret|token|password|passwd|pwd)["']?\s*[:=]\s*["']?)([A-Za-z0-9_.+/=-]{12,})/gi, label: null },
 ];
 
 const COUNT_KEYS = ['openai','anthropic','google','aws','github','slack','jwt','private_key','generic'];
@@ -31,9 +32,9 @@ function maskSecrets(input) {
   for (const rule of RULES) {
     rule.re.lastIndex = 0;
     if (rule.type === 'generic') {
-      masked = masked.replace(rule.re, (m, name, sep) => {
+      masked = masked.replace(rule.re, (m, prefix) => {
         counts.generic += 1; counts.total += 1;
-        return `${name}${sep}[MASKED:generic]`;
+        return `${prefix}[MASKED:generic]`;
       });
       continue;
     }

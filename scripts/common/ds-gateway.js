@@ -15,8 +15,9 @@ function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT } = {}
   const upstreamUrl = new URL(upstream);
   const server = http.createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') {
+      const token = process.env.DS_GATEWAY_HEALTH_TOKEN || '';
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end('{"status":"ok"}');
+      res.end(JSON.stringify({ status: 'ok', token }));
       return;
     }
     handleProxy(req, res, upstreamUrl).catch(() => {
@@ -45,37 +46,22 @@ function addCounts(acc, c) {
 }
 
 function maskValue(v, counts) {
+  // Generic deep-walk: mask EVERY string leaf in any string/array/object.
+  // This uniformly covers text, tool_result.content, tool_use.input, and any future fields.
   if (typeof v === 'string') {
     const r = maskSecrets(v);
     addCounts(counts, r.counts);
     return r.masked;
   }
   if (Array.isArray(v)) {
-    return v.map((block) => {
-      if (block && typeof block === 'object') {
-        let out = block;
-        // Always recurse .content when present (tool_result: array or string)
-        if (block.content !== undefined) {
-          out = { ...out, content: maskValue(block.content, counts) };
-        }
-        // Mask .text if present (may coexist with .content on a crafted/forward-compat block)
-        if (typeof out.text === 'string') {
-          const r = maskSecrets(out.text);
-          addCounts(counts, r.counts);
-          out = { ...out, text: r.masked };
-        }
-        // tool_use: input object (exclude arrays for clarity; outcome identical either way)
-        if (out.input && typeof out.input === 'object' && !Array.isArray(out.input)) {
-          const r = maskSecrets(JSON.stringify(out.input));
-          addCounts(counts, r.counts);
-          try { out = { ...out, input: JSON.parse(r.masked) }; } catch (_) { /* keep as-is */ }
-        }
-        return out;
-      }
-      return block;
-    });
+    return v.map((item) => maskValue(item, counts));
   }
-  return v;
+  if (v && typeof v === 'object') {
+    const out = {};
+    for (const k of Object.keys(v)) out[k] = maskValue(v[k], counts);
+    return out;
+  }
+  return v; // numbers, booleans, null
 }
 
 function maskRequestBody(json) {
@@ -103,7 +89,7 @@ function logDetection(reqUrl, counts) {
       user: os.userInfo().username || 'unknown',
       mode: 'mask',
       source: 'ds-gateway',
-      path: reqUrl,
+      path: String(reqUrl || '').split('?')[0],
       total: counts.total || 0,
       counts: {
         openai: counts.openai||0, anthropic: counts.anthropic||0, google: counts.google||0,
@@ -120,8 +106,14 @@ async function handleProxy(req, res, upstreamUrl) {
   const ct = (req.headers['content-type'] || '').toLowerCase();
   let outBody = raw;
 
-  // v1: only application/json POST bodies are scanned. Claude Code always sends application/json for Messages API. Revisit if new non-JSON endpoints carry user text.
-  if (req.method === 'POST' && ct.includes('application/json') && raw.length) {
+  // v1: POST bodies must be application/json so we can inspect them.
+  // A non-empty POST with a non-JSON content-type is NOT inspectable → fail-closed (415).
+  if (req.method === 'POST' && raw.length) {
+    if (!ct.includes('application/json')) {
+      res.writeHead(415, { 'content-type': 'application/json' });
+      res.end('{"error":"ds-gateway: non-JSON POST body not inspectable; not forwarded (fail-closed)"}');
+      return;
+    }
     let parsed;
     try {
       parsed = JSON.parse(raw.toString('utf8'));
@@ -133,7 +125,7 @@ async function handleProxy(req, res, upstreamUrl) {
     const { json, counts, changed } = maskRequestBody(parsed);
     if (changed) {
       outBody = Buffer.from(JSON.stringify(json), 'utf8');
-      logDetection(req.url, counts);
+      logDetection(req.url.split('?')[0], counts);
     }
   }
 
