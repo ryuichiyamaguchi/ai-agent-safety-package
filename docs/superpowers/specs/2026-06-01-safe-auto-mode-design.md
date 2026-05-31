@@ -27,17 +27,18 @@
 
 | エンジン | MVP での扱い | 根拠 |
 |---|---|---|
-| **Codex** | ✅ オート対象 (Mac / Windows 両方) | 自前の OS 金庫を持つ: `--sandbox workspace-write` + `[sandbox_workspace_write] network_access=false`。Windows は `[windows] sandbox="unelevated"` で動作。→ 「Windows 優先」要件を満たす |
-| **agy** (Antigravity CLI) | ✅ オート対象 | `--sandbox` を持つ。Windows でのサンドボックス検証手段は実装時に実機確認 (§6 リスク参照) |
+| **Codex** | ✅ オート対象・**実証検証(強)** (Mac / Windows 両方) | 自前の OS 金庫を持つ: `--sandbox workspace-write` + `[sandbox_workspace_write] network_access=false`。`codex sandbox` サブコマンドで doctor が金庫を**実証検証できる**。Windows は `[windows] sandbox="unelevated"` で動作。→ 「Windows 優先」要件を満たす |
+| **agy** (Antigravity CLI) | ⚠️ オート対象・**宣言ベース(弱)** | `--sandbox`(terminal restrictions)+ `--dangerously-skip-permissions` を持つが、**サンドボックス内コマンドを外部実行する手段(`codex sandbox` 相当)が無く、doctor が金庫を独立検証できない**(実機確認 2026-06-01)。ryuichi 判断で `--sandbox` フラグを**信頼**してオートを出す。Codex と異なり**実証されていない**ことを docs に正直明記する(§4・§6・docs 90 の overclaim 回避方針)|
 | **Claude Code** | ⛔ **MVP 対象外**・手動承認のまま (将来課題) | 受講者の Claude Code は基本 DeepSeek 駆動。かつ Claude のネイティブ金庫 (`sandbox.enabled`) は macOS / Linux(WSL2) のみで、**普通の Windows では効かない**。無理に deny-list だけで開けると「ネット遮断」を保証できず看板に反する |
 
 ### 決定事項 (確定済み)
 
 1. **主対象**: 教室の受講者 (リスク許容度は低め、迷わせない UX 最優先)。
-2. **解放トリガー**: **明示オプトイン** (専用 launcher または `--auto` フラグ) **かつ** doctor が金庫を検証して全 green のときだけ。意図しない全自動を防ぎ、「承認を読む」教育方針とも両立。
+2. **解放トリガー**: **明示オプトイン** (専用 launcher または `--auto` フラグ) **かつ** doctor のチェックが green のときだけ。意図しない全自動を防ぎ、「承認を読む」教育方針とも両立。
+   - Codex は**実証**チェック(実際に弾かれるか試す)。agy は**宣言**チェック(agy が存在し launcher が `--sandbox` を強制適用することの確認のみ。金庫の効力は実証しない)。
 3. **オートのレベル**: 承認プロンプトを外す。OS 金庫 + hook + deny は維持。
    - Codex: `--ask-for-approval` を `untrusted` から **`on-failure`** に下げる (危険時=コマンド失敗時のみ承認を挟む。暴走の最終ストッパーを残しつつ正常作業は止めない。`never` にするかはレビューで再検討)。
-   - agy: auto-run 系設定を有効化 (`--sandbox` は維持)。
+   - agy: green のとき **`--dangerously-skip-permissions`** を付ける (`--sandbox` は維持)。これは宣言ベースの解放であり、Codex のような実証保証は無いことを docs に明記。
 4. **フォールバック**: 金庫が検証できなければ **理由付きメッセージを表示してから通常モード (都度承認) で起動**。黙って落とさない。
 5. **フェイルクローズ**: 検証が「保留 (判定不能)」でも安全側に倒し、オートを開けない。
 
@@ -77,8 +78,8 @@
 
 ### コンポーネント
 
-1. **隔離検証ロジック** (新規) — doctor 内に engine 別の「金庫実ドリル」関数として実装し、launcher からも軽量に呼べる形にする。
-2. **doctor の軽量サブコマンド** `doctor.sh --isolation-check <engine>` (新規) — その engine の ①②③ だけを高速に実行。全 green なら exit 0。フル `doctor.sh` (引数なし) は従来どおり全ドリル + 隔離チェックを内包し `pass=/fail=` サマリを出す。
+1. **隔離検証ロジック** (新規) — doctor 内に engine 別のチェック関数として実装 (Codex=実証ドリル / agy=宣言チェック)、launcher からも軽量に呼べる形にする。
+2. **doctor の軽量サブコマンド** `doctor.sh --isolation-check <engine>` (新規) — Codex はその実証ドリル①②、agy は宣言チェック④を高速に実行。green なら exit 0。フル `doctor.sh` (引数なし) は従来どおり全ドリル + 隔離チェックを内包し `pass=/fail=` サマリを出す。
 3. **launcher の `--auto` 分岐** (`launch-codex-safe.{sh,ps1}` / `launch-agy-safe.{sh,ps1}` を変更) — `--auto` 受付 → doctor 検証 → green で承認解放 / 赤でフォールバック。
 4. **フォールバック表示** — 「何が」「なぜ」赤かを 1 行で受講者に示す。
 
@@ -89,15 +90,17 @@
 
 ---
 
-## 4. doctor の実証検証ドリル (安全の心臓部)
+## 4. doctor のチェック (安全の心臓部)
 
-**原則: 設定値を読むだけ (宣言) では信用しない。実際にやらせてみて弾かれるか (実証) で判定する。**
+**原則 (Codex): 設定値を読むだけ (宣言) では信用しない。実際にやらせてみて弾かれるか (実証) で判定する。**
+**例外 (agy): `codex sandbox` 相当の外部実行手段が無いため実証できない。agy は宣言チェック (agy が存在し launcher が `--sandbox` を強制適用すること) のみ。実証していないことを docs に明記 (overclaim 回避)。**
 
-### ① workspace 外への書き込み遮断ドリル
+Codex には ①②③ の実証ドリルを適用。agy には ④ の宣言チェックを適用する。
+
+### ① workspace 外への書き込み遮断ドリル (Codex のみ・実証)
 
 - 金庫の中から workspace の **外** のファイルに書き込みを試みる → ファイルが**作られなければ PASS**。
-- Codex 分は既存 (`scripts/macos/doctor.sh` の `codex sandbox macos -C <inside> /bin/sh -lc "echo pwn > <outside>"`)。
-- **agy 用にも追加**。agy がサンドボックス内コマンド実行を外部から呼べるか実装時に確認。呼べなければ「agy プロセスを起動して境界外に書かせ、作られないことを確認」する代替ドリル。
+- Codex は既存 (`scripts/macos/doctor.sh` の `codex sandbox macos -C <inside> /bin/sh -lc "echo pwn > <outside>"`)。
 
 ### ② 外部ネット送信遮断ドリル (新規・最重要)
 
@@ -116,6 +119,12 @@
 ### ③ hook / deny ドリル (既存を流用)
 
 - 既存の doctor ドリル (保護パス読取 block / ネットワークコマンド block / fail-closed drill 等) がそのまま「最後の砦が生きている」証拠になる。`--isolation-check` では必要最小限のサブセットを回す。
+
+### ④ agy 宣言チェック (agy のみ・実証ではない)
+
+- `--isolation-check agy` は **agy バイナリが存在し、launcher が `--sandbox` を強制適用する構成であること**だけを確認して green を返す。
+- **金庫の効力 (ネット遮断・workspace 外書込遮断) は実証しない**。`--sandbox` の "terminal restrictions" を信頼するのみ。
+- doctor / launcher の出力と docs に「agy のオートは宣言ベース (未実証)、Codex より保証が弱い」と明示する (overclaim 回避)。agy が存在しなければ赤 (= フォールバック)。
 
 ---
 
@@ -140,10 +149,24 @@ launch-codex-safe.sh [workspace] [prompt] [--auto]
     network_access=false は維持)
 ```
 
-### agy 版
+### agy 版 (宣言ベース)
 
-- doctor green なら auto-run 系設定を有効化して起動 (`--sandbox` は維持)。
-- agy CLI が auto-run をフラグ / 設定ファイルで制御できるか実装時に確認。制御できなければ「recommended-settings の auto-run を ON にする案内 + doctor 検証」に縮退し、その旨を正直に明記。
+```
+launch-agy-safe.sh [workspace] [prompt] [--auto]
+   │
+   --auto 有り
+   ▼
+   doctor.sh --isolation-check agy   (④ 宣言チェック: agy 存在 + --sandbox 強制)
+   │
+   exit 0 (green)                      exit≠0 (agy 無し等)
+   ▼                                   ▼
+   --sandbox --dangerously-skip-       理由付きメッセージ表示
+   permissions で起動                   → --sandbox のみ(通常承認)で起動
+   (実証保証なし=docs に明記)
+```
+
+- 実機確認 (2026-06-01): agy には `--sandbox` と `--dangerously-skip-permissions` がある。`codex sandbox` 相当の外部実行手段は無いため金庫を実証できない。
+- green のとき `--dangerously-skip-permissions` を付与 (`--sandbox` 維持)。**宣言ベースの解放であり Codex のような実証保証は無い**ことを launcher の起動時メッセージと docs に明記する。
 
 ### フォールバック表示の原則
 
@@ -156,7 +179,7 @@ launch-codex-safe.sh [workspace] [prompt] [--auto]
 
 - **doctor 軽量チェック自体が失敗 (実行不能・例外)** → フェイルクローズ。オートを開けず通常モードへ。
 - **ネット遮断ドリルの環境依存** → 「拒否 vs 到達不能」を区別。区別不能は赤 (§4 ②)。
-- **agy のサンドボックス検証手段が無い場合** → 代替ドリルへフォールバック。それも無理なら **agy は「設定強制 + 起動フラグ」までしか保証できない**と正直に明記し、agy オートの可否を実装時に再判断 (保証できないなら agy も対象外に降格しうる)。
+- **agy の金庫は実証できない (確定リスク)** → agy のオートは `--sandbox` を信頼する**宣言ベース**。`--sandbox` が実際にネット遮断するかは未検証。ryuichi 判断で許容。**残存リスク**: agy の `--sandbox` がネット遮断を伴わない場合、プロンプトインジェクションされた agy が承認なし (`--dangerously-skip-permissions`) でデータを外部送信しうる。→ 緩和策: (a) docs に「未実証・Codex より弱い」と明記、(b) `--sandbox` を必ず強制、(c) agy が無ければ赤でフォールバック。将来 agy に検証手段が出たら実証へ格上げ。
 - **Codex `on-failure` の妥当性** → OS 金庫で封じ込めた上での `on-failure` は安全と判断するが、`never` との比較はレビューで再検討。
 
 ---
@@ -199,9 +222,9 @@ launch-codex-safe.sh [workspace] [prompt] [--auto]
 
 ## 9. 完了条件 (Definition of Done)
 
-1. `doctor.sh` / `doctor.ps1` に engine 別の隔離実証ドリル (①②③) と `--isolation-check <engine>` 軽量サブコマンドが入り、テストで「金庫あり=green / 壊した=赤 / オフライン=赤」を出せる。
-2. `launch-codex-safe.{sh,ps1}` / `launch-agy-safe.{sh,ps1}` が `--auto` を受け、doctor green で承認解放・赤で理由付きフォールバックする。`--auto` 無しの従来動作は不変 (回帰テスト green)。
+1. `doctor.sh` / `doctor.ps1` に Codex の隔離実証ドリル (①②) + agy の宣言チェック (④) + `--isolation-check <engine>` 軽量サブコマンドが入り、テストで「金庫あり=green / 壊した=赤 / オフライン=赤」(Codex) と「agy 存在=green / agy 無し=赤」(agy) を出せる。
+2. `launch-codex-safe.{sh,ps1}` が `--auto` で doctor green→`on-failure` / 赤→理由付き `untrusted` フォールバック。`launch-agy-safe.{sh,ps1}` が `--auto` で green→`--dangerously-skip-permissions` 付与 (`--sandbox` 維持) / 赤→理由付き `--sandbox` のみ。`--auto` 無しの従来動作は不変 (回帰テスト green)。
 3. フォールバック時に「何が・なぜ」赤かが 1 行で受講者に表示される。
-4. Mac で Codex の①②③ドリルが実機 green。Windows は実機で doctor + launcher 分岐を確認。
-5. agy のサンドボックス検証可否を実機判定し、保証レベルを spec/docs に正直に反映。
+4. Mac で Codex の①②ドリルが実機 green。Windows は実機で doctor + launcher 分岐を確認。
+5. agy のオートが**宣言ベース (未実証・Codex より弱い)** であることを launcher 起動時メッセージと docs に正直明記する。
 6. Claude は MVP 対象外であること、将来対応の必須事項 (§7) が docs に記録される。

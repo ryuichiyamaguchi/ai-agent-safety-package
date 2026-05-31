@@ -110,14 +110,31 @@ drill_write_outside() {
       rm -rf "$root"; echo "PASS workspace-outside write blocked"; return 0
       ;;
     agy)
-      # agy はサンドボックス内コマンドの外部呼び出し手段が未確定(spec §6)。
-      # 手段が無い間は保留を返す。Task 5 で実機確認のうえ実装/縮退を決める。
-      echo "HOLD agy write drill not yet supported"; return 20
+      # agy は codex sandbox 相当の外部実行手段が無く実証不能(実機確認 2026-06-01)。
+      # agy は drill_agy_declaration(宣言チェック)を使うため、ここでは保留固定。
+      echo "HOLD agy write drill not supported (declaration-based; see drill_agy_declaration)"; return 20
       ;;
     *)
       echo "HOLD unknown engine: $engine"; return 20
       ;;
   esac
+}
+
+# drill_agy_declaration <engine>
+# agy 専用の「宣言チェック」。金庫の効力は実証しない(spec §4 ④, option B)。
+# agy バイナリが存在することだけを green の条件にする。launcher 側が --sandbox を
+# 強制適用する前提。実証していないことは docs / 起動メッセージで明示する。
+drill_agy_declaration() {
+  local agy="${AGY:-}"
+  if [ -z "$agy" ]; then
+    if [ -x "$HOME/.local/bin/agy" ]; then agy="$HOME/.local/bin/agy"
+    elif command -v agy >/dev/null 2>&1; then agy="$(command -v agy)"
+    fi
+  fi
+  if [ -z "$agy" ] || { [ ! -x "$agy" ] && ! command -v "$agy" >/dev/null 2>&1; }; then
+    echo "FAIL agy not found (cannot enable auto)"; return 10
+  fi
+  echo "PASS agy present (declaration-based, sandbox NOT independently verified)"; return 0
 }
 ```
 
@@ -275,11 +292,25 @@ if [ "${1:-}" = "--isolation-check" ]; then
   # shellcheck disable=SC1090
   . "$drills_lib"
   rc_total=0
-  for drill in drill_write_outside drill_network_egress; do
-    line="$("$drill" "$engine")"; rc=$?
-    echo "$line"
-    [ "$rc" -ne 0 ] && rc_total=1
-  done
+  case "$engine" in
+    codex)
+      # Codex は実証ドリル①②。
+      for drill in drill_write_outside drill_network_egress; do
+        line="$("$drill" "$engine")"; rc=$?
+        echo "$line"
+        [ "$rc" -ne 0 ] && rc_total=1
+      done
+      ;;
+    agy)
+      # agy は宣言チェック④(実証ではない。spec §4 ④ / option B)。
+      line="$(drill_agy_declaration "$engine")"; rc=$?
+      echo "$line"
+      [ "$rc" -ne 0 ] && rc_total=1
+      ;;
+    *)
+      echo "HOLD unknown engine: $engine"; rc_total=1
+      ;;
+  esac
   exit "$rc_total"
 fi
 ```
@@ -427,16 +458,16 @@ git commit -m "feat(safe-auto): codex launcher --auto drops approval to on-failu
 
 ---
 
-## Task 5: launch-agy-safe.sh に `--auto` 分岐(検証手段に応じ縮退)
+## Task 5: launch-agy-safe.sh に `--auto` 分岐(宣言ベース・option B)
 
 **Files:**
 - Modify: `scripts/macos/launch-agy-safe.sh`
 - Test: `scripts/macos/test/auto-mode.test.sh`
 
-> **実機確認(着手時に必須):** `agy --help` で (a) サンドボックス内コマンドを外部から実行する手段(codex の `codex sandbox` 相当)があるか、(b) auto-run をフラグ/環境変数で有効化できるか、を確認する。
-> - (a) があれば Task 1/2 の `agy` ケースを実ドリル化(`drill_write_outside`/`drill_network_egress` の `agy)` 分岐を codex と同型に実装)。
-> - (a) が無ければ agy のドリルは HOLD(=赤)のままとなり、`--auto` は常にフォールバックする。その場合 docs に「agy は現状オート未対応(隔離を実証できないため)」と正直に明記する。
-> 本 Task の分岐コードは (b) が「フラグで可能」を想定。不可なら auto-run 有効化を recommended-settings 案内に縮退し、それでも doctor green を必須にする。
+> **実機確認の結論(2026-06-01):** agy には `--sandbox`(terminal restrictions)と `--dangerously-skip-permissions`(全許可自動承認)があるが、`codex sandbox` 相当の外部実行手段は**無い**ため金庫を実証できない。ryuichi 判断により agy は**宣言ベース**でオートを出す(spec §4 ④, §6)。
+> - doctor `--isolation-check agy` は `drill_agy_declaration`(agy 存在チェック)で green/赤を返す。
+> - green のとき launcher は **`--dangerously-skip-permissions` を付与**(`--sandbox` は維持)。
+> - 起動時メッセージと docs に「agy のオートは未実証・Codex より弱い」と正直明記する(overclaim 回避)。
 
 - [ ] **Step 1: agy launcher 分岐の失敗テストを追記**
 
@@ -446,12 +477,18 @@ git commit -m "feat(safe-auto): codex launcher --auto drops approval to on-failu
 # --- Task 5: launch-agy-safe.sh --auto branch ---
 LAUNCH_A="$HERE/../launch-agy-safe.sh"
 export AGY="$STUB_OK"   # agy バイナリ検出を満たすためのダミー(実行はされない=DRY_RUN)
-# green: doctor 0 → auto-run 有効フラグが付く
+# green: doctor 0 → --dangerously-skip-permissions が付く(--sandbox は維持)
 out_a_ok="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_OK" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"
 printf '%s' "$out_a_ok" | grep -q -- "--sandbox" && ok "agy --auto keeps --sandbox" || ng "agy --auto keeps --sandbox"
-# 赤: フォールバックで理由表示
+printf '%s' "$out_a_ok" | grep -q -- "--dangerously-skip-permissions" && ok "agy green -> skip-permissions" || ng "agy green -> skip-permissions"
+# green でも未実証である旨を stderr に出す(overclaim 回避)
+err_a_ok="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_OK" bash "$LAUNCH_A" "$WS" "" --auto 2>&1 1>/dev/null)"
+printf '%s' "$err_a_ok" | grep -qi "未検証\|未実証\|verified" && ok "agy green shows unverified caveat" || ng "agy green shows unverified caveat"
+# 赤(agy 無し相当): --dangerously-skip-permissions を付けずフォールバック + 理由表示
 err_a_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_A" "$WS" "" --auto 2>&1 1>/dev/null)"
 printf '%s' "$err_a_ng" | grep -qi "オートを有効にできません" && ok "agy red shows reason" || ng "agy red shows reason"
+out_a_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"
+printf '%s' "$out_a_ng" | grep -q -- "--dangerously-skip-permissions" && ng "agy red must NOT skip-permissions" || ok "agy red stays safe (no skip-permissions)"
 ```
 
 - [ ] **Step 2: テストを実行して失敗を確認**
@@ -505,18 +542,19 @@ MSG
   touch "$HINT_FLAG" 2>/dev/null || true
 fi
 
-# Safe Auto Mode 分岐: doctor green のときだけ auto-run を有効化。
+# Safe Auto Mode 分岐(宣言ベース・option B): doctor green のとき
+# --dangerously-skip-permissions を付与(--sandbox は維持)。実証はしていない旨を必ず表示。
 auto_args=()
 if [ "$auto" -eq 1 ]; then
   doctor="${AI_SAFE_DOCTOR:-$AI_SAFE_ROOT/hooks/macos/doctor.sh}"
   [ -x "$doctor" ] || doctor="$(cd "$(dirname "$0")" && pwd)/doctor.sh"
   if "$doctor" --isolation-check agy >/dev/null 2>&1; then
-    # 実機確認(Task 5 注記)で確定した auto-run 有効化フラグをここに置く。
-    # 未確定の間は空(=承認は外れない)で、green でも安全側に倒す。
-    auto_args=()
+    auto_args=(--dangerously-skip-permissions)
+    echo "ℹ オートを有効化しました(agy)。注意: agy の隔離は --sandbox を信頼するもので、" >&2
+    echo "  Codex のように独立検証(実証)されていません。重要作業では手動承認の利用も検討してください。" >&2
   else
-    echo "⚠ オートを有効にできません: OS 隔離(金庫)を確認できませんでした。" >&2
-    echo "  → 安全のため通常モードで起動します。直すには doctor を実行してください。" >&2
+    echo "⚠ オートを有効にできません: agy を検出できませんでした。" >&2
+    echo "  → 安全のため通常モード(--sandbox のみ)で起動します。" >&2
   fi
 fi
 
@@ -692,9 +730,20 @@ function Test-NetworkEgress([string]$engine) {
       $cls = if ($out -match 'connected') {'connected'} elseif ($out -match 'refused') {'refused'} else {'timeout'}
       return (Get-NetResultClass $cls)
     }
-    'agy' { Write-Output 'HOLD agy network drill not yet supported'; return 20 }
+    'agy' { Write-Output 'HOLD agy network drill not supported (declaration-based)'; return 20 }
     default { Write-Output "HOLD unknown engine: $engine"; return 20 }
   }
+}
+
+function Test-AgyDeclaration([string]$engine) {
+  # agy 専用の宣言チェック(実証ではない。spec §4 ④, option B)。
+  $agy = $env:AGY
+  if (-not $agy) {
+    if (Test-Path (Join-Path $env:USERPROFILE '.local\bin\agy.exe')) { $agy = Join-Path $env:USERPROFILE '.local\bin\agy.exe' }
+    elseif (Get-Command agy -ErrorAction SilentlyContinue) { $agy = (Get-Command agy).Source }
+  }
+  if (-not $agy) { Write-Output 'FAIL agy not found (cannot enable auto)'; return 10 }
+  Write-Output 'PASS agy present (declaration-based, sandbox NOT independently verified)'; return 0
 }
 ```
 
@@ -743,15 +792,26 @@ if ($IsolationCheck) {
   if (-not (Test-Path $drills)) { Write-Error 'isolation-drills.ps1 missing'; exit 2 }
   . $drills
   $rcTotal = 0
-  foreach ($fn in @('Test-WriteOutside','Test-NetworkEgress')) {
-    $line = & $fn $IsolationCheck
-    $rc = $LASTEXITCODE
-    Write-Host $line
-    if ($rc -ne 0) { $rcTotal = 1 }
+  switch ($IsolationCheck) {
+    'codex' {
+      foreach ($fn in @('Test-WriteOutside','Test-NetworkEgress')) {
+        $out = & $fn 'codex'; $rc = $out[-1]
+        Write-Host ($out -join ' ')
+        if ($rc -ne 0) { $rcTotal = 1 }
+      }
+    }
+    'agy' {
+      $out = & Test-AgyDeclaration 'agy'; $rc = $out[-1]
+      Write-Host ($out -join ' ')
+      if ($rc -ne 0) { $rcTotal = 1 }
+    }
+    default { Write-Host "HOLD unknown engine: $IsolationCheck"; $rcTotal = 1 }
   }
   exit $rcTotal
 }
 ```
+
+> 注: Task 7 のドリル関数は `Write-Output <文字列>; return <int>` の形なので、`$out` は配列になり末尾要素 `$out[-1]` が数値(0/10/20 または 0/10)。表示は数値を除いた文字列部分を結合する。実装時に Task 7 の戻り形と厳密に一致させること。
 
 > 注: PowerShell 関数の戻り値取得は `& $fn ...; $rc=$LASTEXITCODE` ではなくパイプライン出力になるため、実装時は関数末尾を `exit`/`return` ではなく数値出力に統一するか、ドリル関数を `[int]` 戻りに揃える。Task 7 のドリルは `return <int>` を使うので、`$rc = (& $fn $engine)[-1]` で末尾の数値を取る形に合わせること(実装時に Task 7 と整合させる)。
 
@@ -882,11 +942,14 @@ $autoArgs = @()
 if ($auto) {
   $doctor = if ($env:AI_SAFE_DOCTOR) { $env:AI_SAFE_DOCTOR } else { Join-Path $PSScriptRoot 'doctor.ps1' }
   if ($doctor -match '\.cmd$') { & $doctor *> $null } else { & powershell -NoProfile -ExecutionPolicy Bypass -File $doctor -IsolationCheck agy *> $null }
-  if ($LASTEXITCODE -ne 0) {
-    [Console]::Error.WriteLine('⚠ オートを有効にできません: OS 隔離(金庫)を確認できませんでした。')
-    [Console]::Error.WriteLine('  → 安全のため通常モードで起動します。直すには doctor を実行してください。')
+  if ($LASTEXITCODE -eq 0) {
+    $autoArgs = @('--dangerously-skip-permissions')
+    [Console]::Error.WriteLine('ℹ オートを有効化しました(agy)。注意: agy の隔離は --sandbox を信頼するもので、')
+    [Console]::Error.WriteLine('  Codex のように独立検証(実証)されていません。重要作業では手動承認の利用も検討してください。')
+  } else {
+    [Console]::Error.WriteLine('⚠ オートを有効にできません: agy を検出できませんでした。')
+    [Console]::Error.WriteLine('  → 安全のため通常モード(--sandbox のみ)で起動します。')
   }
-  # green 時の auto-run 有効化フラグは実機確認で確定(未確定の間は空=安全側)。
 }
 $agyArgs = @('--sandbox', '--add-dir', $workspace) + $autoArgs
 if ($env:AI_SAFE_DRY_RUN -eq '1') { Write-Output ("$AGY " + ($agyArgs -join ' ')); exit 0 }
@@ -931,8 +994,9 @@ Expected: PASS — `win agy --auto handled`。
     powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1 <workspace> "" --auto
 
 - 対象: Codex / agy。Claude Code は対象外(基本 DeepSeek 駆動 + 普通の Windows では金庫が無いため)。
-- 解放されても OS 金庫・hook・deny は常時稼働します(承認の手間だけを省きます)。
-- agy はサンドボックス検証手段の都合で、現状 <実機確認の結論を記載> までを保証します。
+- **Codex(強・実証)**: doctor が「外部送信できない/作業フォルダ外に書けない」を実際に試して確認できたときだけオートを開きます。
+- **agy(弱・宣言ベース)**: agy には金庫を外から検証する手段が無いため、`--sandbox` フラグを**信頼**してオートを開きます(Codex のように実証はしていません)。重要作業では手動承認の利用も検討してください。
+- いずれも解放後も `--sandbox` 等の隔離は常時稼働します(承認の手間だけを省きます)。
 ```
 
 - [ ] **Step 6: 全テスト実行 + 最終コミット**
@@ -956,14 +1020,15 @@ git commit -m "feat(safe-auto): windows agy launcher + full doctor isolation + d
 - spec §3 軽量サブコマンド `--isolation-check` → Task 3,8。✅
 - spec §5 launcher 分岐 + フォールバック表示 → Task 4,5,9,10。✅
 - spec §2.3 Codex `on-failure` → Task 4,9。✅
-- spec §6 agy 縮退リスク → Task 5,10 の実機確認注記 + 安全側の空 auto_args。✅
+- spec §4 ④ agy 宣言チェック → Task 1(`drill_agy_declaration`),7(`Test-AgyDeclaration`),3/8(doctor エンジン分岐)。✅
+- spec §2/§6 agy 宣言ベース解放(`--dangerously-skip-permissions` + 未実証 caveat) → Task 5,10。✅
 - spec §8 テスト方針(金庫あり=PASS/壊した=FAIL/オフライン=赤、launcher 分岐、回帰) → 各 Task のテスト。✅
 - spec §7 Claude 将来課題 → 本計画は MVP のため非実装。docs(Task 10)で対象外を明記。✅(意図的に未実装)
 
-**2. Placeholder scan:** コードは全て実体を記載。Task 5/7/9 の「実機確認」は spec §6 由来の正当な実装時判断であり、未確定時の安全側挙動(HOLD=赤 / auto_args 空)を具体的に定義済み。プレースホルダではない。✅
+**2. Placeholder scan:** コードは全て実体を記載。agy の実機確認は 2026-06-01 に完了済み(`codex sandbox` 相当無し → 宣言ベース確定)。Task 5/10 の挙動(green→`--dangerously-skip-permissions`+caveat、赤→`--sandbox` のみ)は具体定義済み。プレースホルダではない。✅
 
 **3. Type consistency:**
-- ドリル戻り規約 0/10/20 を Task 1,2,6,7,10 で統一。✅
-- 関数名: mac `drill_write_outside` / `drill_network_egress` / `classify_net_result`、win `Test-WriteOutside` / `Test-NetworkEgress` / `Get-NetResultClass` を全 Task で一貫使用。✅
+- 実証ドリル戻り規約 0/10/20、宣言チェック戻り 0/10 を Task 1,2,3,6,7,8,10 で統一。✅
+- 関数名: mac `drill_write_outside` / `drill_network_egress` / `classify_net_result` / `drill_agy_declaration`、win `Test-WriteOutside` / `Test-NetworkEgress` / `Get-NetResultClass` / `Test-AgyDeclaration` を全 Task で一貫使用。✅
 - seam 変数 `AI_SAFE_DRY_RUN` / `AI_SAFE_DOCTOR` を全 launcher で一貫使用。✅
-- approval 値 `untrusted`(既定/フォールバック)/ `on-failure`(green)を Task 4,9 で一貫。✅
+- approval/auto 値: Codex `untrusted`(既定/フォールバック)/ `on-failure`(green) を Task 4,9。agy `--dangerously-skip-permissions`(green のみ付与) を Task 5,10 で一貫。✅
