@@ -17,13 +17,20 @@ if type drill_write_outside >/dev/null 2>&1; then ok "drill_write_outside define
 # --- Task 2: drill_network_egress ---
 if type drill_network_egress >/dev/null 2>&1; then ok "drill_network_egress defined"; else ng "drill_network_egress defined"; fi
 
-# 判定ロジックの単体検証: 接続結果の分類関数 classify_net_result。
-#   "refused"   -> 0  (PASS: 金庫が拒否した)
-#   "connected" -> 10 (FAIL: 繋がってしまった)
-#   "timeout"   -> 20 (HOLD: 区別不能 → 安全側で赤)
-classify_net_result refused   >/dev/null 2>&1; [ $? -eq 0 ]  && ok "classify refused=PASS"   || ng "classify refused=PASS"
-classify_net_result connected >/dev/null 2>&1; [ $? -eq 10 ] && ok "classify connected=FAIL" || ng "classify connected=FAIL"
-classify_net_result timeout   >/dev/null 2>&1; [ $? -eq 20 ] && ok "classify timeout=HOLD"   || ng "classify timeout=HOLD"
+# 判定ロジックの単体検証: 2 段プローブ分類関数 classify_net_result <baseline> <blocked>。
+# フェイルクローズ: ベースライン疎通 (connected) が取れたときだけ遮断 (refused) を PASS とする。
+#   baseline=connected blocked=refused   -> 0  (PASS: ネット可の環境で遮断を実証)
+#   baseline=connected blocked=connected -> 10 (FAIL: 遮断プロファイルでも繋がる = 穴)
+#   baseline=connected blocked=timeout   -> 20 (HOLD: 遮断結果が判定不能)
+#   baseline!=connected (オフライン/到達不能) -> 20 (HOLD: 遮断を実証できない)
+classify_net_result connected refused   >/dev/null 2>&1; [ $? -eq 0 ]  && ok "classify baseline+blocked=PASS"        || ng "classify baseline+blocked=PASS"
+classify_net_result connected connected >/dev/null 2>&1; [ $? -eq 10 ] && ok "classify block-leak=FAIL"              || ng "classify block-leak=FAIL"
+classify_net_result connected timeout   >/dev/null 2>&1; [ $? -eq 20 ] && ok "classify block-indeterminate=HOLD"     || ng "classify block-indeterminate=HOLD"
+classify_net_result refused   skipped   >/dev/null 2>&1; [ $? -eq 20 ] && ok "classify offline-baseline=HOLD"        || ng "classify offline-baseline=HOLD"
+classify_net_result timeout   skipped   >/dev/null 2>&1; [ $? -eq 20 ] && ok "classify baseline-timeout=HOLD"        || ng "classify baseline-timeout=HOLD"
+# 後方互換シグネチャ(引数1個)もフェイルクローズであること: refused 単独は PASS にしない。
+classify_net_result refused   >/dev/null 2>&1; [ $? -eq 20 ] && ok "classify single-refused=HOLD (no false PASS)"     || ng "classify single-refused=HOLD"
+classify_net_result connected >/dev/null 2>&1; [ $? -eq 10 ] && ok "classify single-connected=FAIL"                  || ng "classify single-connected=FAIL"
 
 # --- Task 3: doctor --isolation-check ---
 DOCTOR="$HERE/../doctor.sh"
