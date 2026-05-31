@@ -1,0 +1,15 @@
+@echo off
+chcp 65001 >nul
+setlocal
+set "HERE=%~dp0"
+pushd "%HERE%.."
+set "WORKSPACE=%CD%"
+popd
+set "TARGET=%WORKSPACE%\.ai-safety\hooks\windows\deepseek\起動-Claude-DeepSeek.bat"
+if not exist "%TARGET%" (
+  echo DeepSeek 起動スクリプトが見つかりません: %TARGET%
+  echo 先に「1_安全パッケージを準備」を実行してください。
+  pause
+  exit /b 1
+)
+call "%TARGET%"
