@@ -28,6 +28,7 @@ test('masks each remaining type', () => {
   for (const [type, sample] of Object.entries(cases)) {
     const r = maskSecrets(sample);
     assert.ok(r.counts[type] >= 1, `${type} not detected`);
+    assert.ok(!r.masked.includes(sample), `${type} raw value leaked`);
     assert.ok(r.counts.total >= 1, `${type} total`);
   }
 });

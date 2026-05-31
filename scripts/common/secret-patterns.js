@@ -2,6 +2,7 @@
 // 型ラベル精度のため特異なパターンを先に適用する。
 'use strict';
 
+// countAs: undefined → count under rule.type; countAs:'x' → count under 'x'; countAs: null → don't count (used for PEM _end markers)
 const RULES = [
   { type: 'anthropic',          re: /sk-ant-[A-Za-z0-9_-]{20,}/g,                          label: '[MASKED:anthropic]' },
   { type: 'openai',             re: /sk-(?:proj-)?[A-Za-z0-9_-]{20,}/g,                     label: '[MASKED:openai]' },

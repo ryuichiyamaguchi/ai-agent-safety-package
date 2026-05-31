@@ -25,9 +25,9 @@ test('JS masks every raw secret in the fixture', () => {
   }
 });
 
-test('bash secret-scan.sh masks the same fixture (parity)', () => {
+test('bash secret-scan.sh masks the same fixture (parity)', (t) => {
   const sh = path.join(__dirname, '..', '..', 'macos', 'secret-scan.sh');
-  if (!fs.existsSync(sh)) return;
+  if (!fs.existsSync(sh)) { t.skip('secret-scan.sh not available'); return; }
   let out;
   try {
     out = execFileSync('bash', [sh, '--mask', '--quiet', FIXTURE], { encoding: 'utf8' });
