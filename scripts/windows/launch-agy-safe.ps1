@@ -119,7 +119,9 @@ if ($AutoFlag -eq '--auto') {
             } else {
                 $jobRc = Receive-Job -Job $job
                 Remove-Job -Job $job -Force
-                if ($jobRc -eq 0) {
+                # M-3: Receive-Job は配列を返すことがあるため末尾要素を整数として取得する。
+                # フェイルクローズ方向: 末尾が 0 のときだけ green に解放する。
+                if (@($jobRc)[-1] -eq 0) {
                     $isolationOk = $true
                 } else {
                     # (d) 非0終了 → フェイルクローズ

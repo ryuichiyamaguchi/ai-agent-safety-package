@@ -27,6 +27,15 @@ if ((Test-Path -LiteralPath $workspaceCodexConfigSrc) -and (-not (Test-Path -Lit
     Copy-Item -LiteralPath $workspaceCodexConfigSrc -Destination $safeCodexConfig -Force
 }
 
+# codex 0.135: `--profile safe` が参照する $CODEX_HOME/safe.config.toml も配置する。
+# (config.toml に `[profiles.safe]` を残すと 0.135 では起動が fatal error になるため分離済み。)
+# config.toml が更新されたら safe.config.toml も追従させたいので、毎回上書きコピーする。
+$workspaceSafeProfile = Join-Path $Workspace ".codex\safe.config.toml"
+$safeCodexProfile = Join-Path $safeCodexHome "safe.config.toml"
+if (Test-Path -LiteralPath $workspaceSafeProfile) {
+    Copy-Item -LiteralPath $workspaceSafeProfile -Destination $safeCodexProfile -Force
+}
+
 if (-not (Test-Path -LiteralPath $env:AI_SAFE_POLICY)) {
     throw "AI Safety package is not installed in workspace: $Workspace"
 }
@@ -113,7 +122,9 @@ if ($AutoFlag -eq '--auto') {
             } else {
                 $jobRc = Receive-Job -Job $job
                 Remove-Job -Job $job -Force
-                if ($jobRc -eq 0) {
+                # M-3: Receive-Job は配列を返すことがあるため末尾要素を整数として取得する。
+                # フェイルクローズ方向: 末尾が 0 のときだけ green に解放する。
+                if (@($jobRc)[-1] -eq 0) {
                     $isolationOk = $true
                 } else {
                     # (d) 非0終了 → フェイルクローズ

@@ -128,37 +128,13 @@ Expect-Block "6 generated script reads protected file" "guard-write.ps1" (New-Ho
 Expect-Block "7 WebFetch unauthorized domain" "guard-webfetch.ps1" (New-HookJson "WebFetch" @{ url = "https://example.com"; prompt = "summarize" })
 Expect-Allow "control WebFetch allowed docs domain" "guard-webfetch.ps1" (New-HookJson "WebFetch" @{ url = "https://docs.anthropic.com/en/docs/claude-code/hooks"; prompt = "summarize" })
 
+# codex 0.135 系の検証は lib/IsolationDrills.ps1 の drill に一本化する
+# (旧 `codex sandbox windows` 構文は 0.135 で動かず、偽 PASS の原因だった)。
+# 実際の write+network 実証は下部の「隔離ドリル」セクションで集計するため、
+# ここでは codex バイナリの存在のみを確認する。
 $codex = Get-Command codex -ErrorAction SilentlyContinue
 if ($codex) {
-    $codexVersion = (& codex --version 2>$null)
-    Add-Result "codex installed" ($LASTEXITCODE -eq 0) $codexVersion
-
-    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ai-safe-doctor-" + [guid]::NewGuid().ToString("N"))
-    $inside = Join-Path $tempRoot "workspace"
-    $outside = Join-Path $tempRoot "outside"
-    New-Item -ItemType Directory -Force -Path $inside, $outside | Out-Null
-    $outsideFile = Join-Path $outside "pwn.txt"
-    $writeOutside = "Set-Content -Path '$outsideFile' -Value pwn"
-    # D-2: *>$null を廃止。stderr は捨てるが stdout をキャプチャし、
-    #      $LASTEXITCODE で codex 自体の起動成否を確認する。
-    #      codex が exit 0 以外（起動失敗含む）なら sandbox テストを FAIL にする。
-    $sandboxOut1 = & codex sandbox windows -C $inside powershell.exe -NoProfile -Command $writeOutside 2>$null
-    $sandboxExit1 = $LASTEXITCODE
-    if ($sandboxExit1 -ne 0) {
-        Add-Result "codex windows sandbox blocks outside write" $false ("codex exited $sandboxExit1 — sandbox may not have started")
-    } else {
-        Add-Result "codex windows sandbox blocks outside write" (-not (Test-Path -LiteralPath $outsideFile)) ("outsideFileExists=" + (Test-Path -LiteralPath $outsideFile))
-    }
-
-    $webCmd = ("Invoke-Web" + "Request https://example.com -UseBasicParsing")
-    $sandboxOut2 = & codex sandbox windows -C $inside powershell.exe -NoProfile -Command $webCmd 2>$null
-    $sandboxExit2 = $LASTEXITCODE
-    if ($sandboxExit2 -eq 0) {
-        # codex が exit 0 = sandbox 内コマンドが成功扱い = ネットワーク遮断されていない
-        Add-Result "codex windows sandbox blocks direct network test" $false ("exit=$sandboxExit2 — network may not be blocked")
-    } else {
-        Add-Result "codex windows sandbox blocks direct network test" $true ("exit=$sandboxExit2")
-    }
+    Add-Result "codex command present (sandbox drills evaluated below)" $true ""
 } else {
     Add-Result "codex installed" $false "codex command missing"
 }
