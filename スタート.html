@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIエージェント安全パッケージ｜スタート</title>
+<style>
+  /* ===== デザイントークン ===== */
+  :root{
+    --bg:#f4f1ea;            /* 紙のような明るい背景 */
+    --bg-2:#efe9dd;
+    --card:#ffffff;
+    --ink:#1f2733;          /* 本文の濃いインク */
+    --ink-soft:#566173;
+    --line:#e4ddcd;
+    --brand:#1f6f5c;        /* 落ち着いた緑（信頼・安全） */
+    --brand-deep:#155244;
+    --brand-soft:#e6f0ec;
+    --accent:#e0762d;       /* やわらかいオレンジ（行動を促す差し色） */
+    --accent-deep:#b85a1a;
+    --warn-bg:#fcebe7;
+    --warn-ink:#9b2616;
+    --warn-line:#f0bdb1;
+    --ok:#1f6f5c;
+    --radius:18px;
+    --radius-sm:12px;
+    --shadow:0 6px 24px rgba(31,39,51,.08), 0 1px 0 rgba(31,39,51,.04);
+    --shadow-lg:0 14px 40px rgba(31,39,51,.12);
+    --maxw:760px;
+    --font: -apple-system, "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic", "Meiryo", "BIZ UDPGothic", sans-serif;
+    --mono: "SFMono-Regular", "Menlo", "Consolas", "BIZ UDGothic", monospace;
+  }
+
+  *{box-sizing:border-box;}
+  html{ -webkit-text-size-adjust:100%; }
+  body{
+    margin:0;
+    font-family:var(--font);
+    color:var(--ink);
+    background:
+      radial-gradient(1200px 500px at 50% -200px, #ffffff 0%, rgba(255,255,255,0) 70%),
+      linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+    background-attachment:fixed;
+    line-height:1.85;
+    font-size:17px;
+    -webkit-font-smoothing:antialiased;
+    word-break: normal;
+    overflow-wrap: anywhere;
+    line-break: strict;
+  }
+
+  /* 日本語の不自然な改行を抑える */
+  h1,h2,h3,.lead,.step-title,.card p,.note,li{
+    overflow-wrap: anywhere;
+    line-break: strict;
+  }
+  .nowrap{ white-space:nowrap; }
+
+  /* ===== ヘッダー / OSトグル ===== */
+  .topbar{
+    position:sticky; top:0; z-index:50;
+    backdrop-filter:saturate(140%) blur(8px);
+    background:rgba(244,241,234,.82);
+    border-bottom:1px solid var(--line);
+  }
+  .topbar-inner{
+    max-width:var(--maxw); margin:0 auto;
+    padding:10px 18px;
+    display:flex; align-items:center; gap:12px; justify-content:space-between;
+    flex-wrap:wrap;
+  }
+  .brand-mini{ display:flex; align-items:center; gap:10px; font-weight:800; letter-spacing:.01em; }
+  .brand-mini .mark{ flex:0 0 auto; }
+  .brand-mini .t{ font-size:15px; }
+  .brand-mini .t small{ display:block; font-weight:600; color:var(--ink-soft); font-size:12px; letter-spacing:.02em; }
+
+  .ostoggle{
+    display:inline-flex; padding:4px; gap:4px;
+    background:#fff; border:1px solid var(--line);
+    border-radius:999px; box-shadow:var(--shadow);
+  }
+  .ostoggle button{
+    appearance:none; border:0; cursor:pointer;
+    font-family:inherit; font-weight:700; font-size:14px;
+    padding:8px 16px; border-radius:999px;
+    color:var(--ink-soft); background:transparent;
+    display:inline-flex; align-items:center; gap:7px;
+    transition:all .18s ease;
+  }
+  .ostoggle button svg{ width:18px; height:18px; }
+  /* 選択中のOSをハイライト（CSSだけで判定） */
+  body.show-win .ostoggle .btn-win,
+  body.show-mac .ostoggle .btn-mac{
+    background:var(--brand); color:#fff;
+    box-shadow:0 4px 12px rgba(31,111,92,.35);
+  }
+  .ostoggle button:focus-visible{ outline:3px solid var(--accent); outline-offset:2px; }
+
+  /* ===== OS出し分け ===== */
+  body.show-win .os-mac{ display:none !important; }
+  body.show-mac .os-win{ display:none !important; }
+
+  /* ===== レイアウト ===== */
+  .wrap{ max-width:var(--maxw); margin:0 auto; padding:26px 18px 80px; }
+
+  /* ===== ヒーロー ===== */
+  .hero{
+    text-align:center; padding:28px 8px 14px;
+  }
+  .hero .badge{
+    display:inline-flex; align-items:center; gap:8px;
+    background:var(--brand-soft); color:var(--brand-deep);
+    border:1px solid #cfe2db;
+    padding:6px 14px; border-radius:999px; font-weight:700; font-size:13px;
+    letter-spacing:.02em;
+  }
+  .hero h1{
+    font-size:clamp(28px, 6.4vw, 42px);
+    line-height:1.35; margin:18px 0 10px; letter-spacing:.01em;
+    font-weight:900;
+  }
+  .hero h1 .hl{ color:var(--brand-deep); }
+  .hero .lead{
+    color:var(--ink-soft); font-size:clamp(15px,3.6vw,18px);
+    max-width:560px; margin:0 auto; line-height:1.9;
+  }
+  .hero .howto{
+    margin:22px auto 0; max-width:560px;
+    background:#fff; border:1px solid var(--line);
+    border-radius:var(--radius); box-shadow:var(--shadow);
+    padding:16px 18px; text-align:left;
+    display:flex; gap:14px; align-items:flex-start;
+  }
+  .hero .howto .ic{ flex:0 0 auto; color:var(--accent-deep); }
+  .hero .howto b{ color:var(--ink); }
+  .hero .howto p{ margin:2px 0 0; color:var(--ink-soft); font-size:14.5px; }
+
+  /* ===== ステップの縦ライン ===== */
+  .steps{ position:relative; margin-top:34px; }
+  .steps::before{
+    content:""; position:absolute; left:31px; top:14px; bottom:60px;
+    width:3px; border-radius:3px;
+    background:linear-gradient(180deg, var(--brand) 0%, #cfe2db 90%);
+    opacity:.5;
+  }
+  @media (max-width:560px){ .steps::before{ left:25px; } }
+
+  /* ===== カード ===== */
+  .step{ position:relative; padding-left:74px; margin-bottom:26px; }
+  @media (max-width:560px){ .step{ padding-left:60px; } }
+
+  .num{
+    position:absolute; left:0; top:6px;
+    width:64px; height:64px; border-radius:50%;
+    background:var(--brand); color:#fff;
+    display:flex; align-items:center; justify-content:center;
+    font-size:30px; font-weight:900; font-variant-numeric:tabular-nums;
+    box-shadow:0 8px 20px rgba(31,111,92,.32), inset 0 -3px 0 rgba(0,0,0,.12);
+    border:4px solid var(--bg);
+    z-index:1;
+  }
+  @media (max-width:560px){ .num{ width:52px; height:52px; font-size:24px; } }
+  .step.step-pre .num{ background:var(--ink-soft); }
+  .step.step-adv .num{ background:var(--accent); box-shadow:0 8px 20px rgba(224,118,45,.34), inset 0 -3px 0 rgba(0,0,0,.12); }
+
+  .card{
+    background:var(--card); border:1px solid var(--line);
+    border-radius:var(--radius); box-shadow:var(--shadow);
+    padding:22px 24px;
+    transition:box-shadow .2s ease, transform .2s ease;
+  }
+  .card:hover{ box-shadow:var(--shadow-lg); transform:translateY(-1px); }
+  @media (max-width:560px){ .card{ padding:18px 16px; } }
+
+  .step-eyebrow{
+    font-size:12.5px; font-weight:800; letter-spacing:.08em;
+    color:var(--brand-deep); text-transform:none; margin:0 0 2px;
+  }
+  .step.step-adv .step-eyebrow{ color:var(--accent-deep); }
+  .step.step-pre .step-eyebrow{ color:var(--ink-soft); }
+  .step-title{ font-size:clamp(19px,4.6vw,23px); font-weight:900; margin:0 0 12px; line-height:1.45; }
+
+  .card h3{ font-size:16px; margin:18px 0 6px; font-weight:800; }
+  .card h3:first-of-type{ margin-top:6px; }
+  .card p{ margin:6px 0; }
+  .muted{ color:var(--ink-soft); font-size:15px; }
+
+  /* 行動ブロック（ダブルクリック等） */
+  .do{
+    display:flex; gap:12px; align-items:flex-start;
+    background:var(--brand-soft); border:1px solid #cfe2db;
+    border-radius:var(--radius-sm); padding:14px 16px; margin:12px 0;
+  }
+  .do .ic{ flex:0 0 auto; color:var(--brand-deep); margin-top:2px; }
+  .do b{ color:var(--brand-deep); }
+  .do .fname{
+    font-family:var(--mono); font-size:14.5px; font-weight:700;
+    background:#fff; border:1px solid #cfe2db; border-radius:8px;
+    padding:2px 8px; display:inline-block; margin:1px 1px;
+    color:var(--brand-deep); word-break:break-all;
+  }
+
+  /* 「なぜ / 何が起きる」2点メタ */
+  .meta{ display:grid; gap:8px; margin:10px 0 4px; }
+  .meta .row{ display:flex; gap:10px; align-items:flex-start; font-size:15px; }
+  .meta .row .k{
+    flex:0 0 auto; font-weight:800; font-size:12.5px;
+    color:var(--brand-deep); background:var(--brand-soft);
+    border:1px solid #cfe2db; border-radius:7px; padding:2px 9px; margin-top:3px;
+    min-width:78px; text-align:center;
+  }
+  .meta .row.why .k{ color:var(--accent-deep); background:#fbece0; border-color:#f3d2b3; }
+
+  /* コマンド行 */
+  .cmd{
+    display:flex; align-items:center; gap:10px;
+    background:#10202b; color:#e9f3ef;
+    border-radius:10px; padding:10px 12px; margin:8px 0;
+    font-family:var(--mono); font-size:14.5px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.06);
+    overflow:hidden;
+  }
+  .cmd .prompt{ color:#5fb39c; flex:0 0 auto; user-select:none; }
+  .cmd code{ flex:1 1 auto; overflow-x:auto; white-space:pre; padding-bottom:1px; -webkit-overflow-scrolling:touch; }
+  .cmd .copy{
+    flex:0 0 auto; appearance:none; cursor:pointer;
+    font-family:var(--font); font-weight:800; font-size:13px;
+    border:0; border-radius:8px; padding:7px 13px;
+    background:var(--accent); color:#fff;
+    box-shadow:0 2px 6px rgba(224,118,45,.4);
+    transition:transform .12s ease, background .15s ease, filter .15s;
+    white-space:nowrap;
+  }
+  .cmd .copy:hover{ filter:brightness(1.06); }
+  .cmd .copy:active{ transform:scale(.95); }
+  .cmd .copy:focus-visible{ outline:3px solid #fff; outline-offset:1px; }
+
+  .cmd-label{ font-size:13.5px; font-weight:700; color:var(--ink-soft); margin:12px 0 -2px; }
+
+  /* details（うまくいかない時） */
+  details.help{
+    margin-top:14px; border:1px dashed var(--line); border-radius:var(--radius-sm);
+    background:#faf7f0; padding:0 14px;
+  }
+  details.help[open]{ background:#fff; border-style:solid; }
+  details.help > summary{
+    cursor:pointer; list-style:none; padding:12px 0;
+    font-weight:800; font-size:14.5px; color:var(--ink);
+    display:flex; align-items:center; gap:9px;
+  }
+  details.help > summary::-webkit-details-marker{ display:none; }
+  details.help > summary .chev{ transition:transform .2s ease; color:var(--ink-soft); }
+  details.help[open] > summary .chev{ transform:rotate(90deg); }
+  details.help .help-body{ padding:2px 0 14px; font-size:14.5px; color:var(--ink-soft); }
+  details.help .help-body ul{ margin:6px 0; padding-left:20px; }
+  details.help .help-body li{ margin:5px 0; }
+
+  /* 警告ボックス（DeepSeek） */
+  .warn{
+    background:var(--warn-bg); border:1.5px solid var(--warn-line);
+    border-left:6px solid var(--warn-ink);
+    border-radius:var(--radius-sm); padding:14px 16px; margin:14px 0 4px;
+    color:var(--warn-ink);
+  }
+  .warn .wt{ font-weight:900; display:flex; align-items:center; gap:8px; margin:0 0 6px; }
+  .warn p{ margin:6px 0; font-size:14.5px; line-height:1.85; }
+  .warn .small{ font-size:13px; color:#7a3326; }
+
+  /* 補足インフォ */
+  .info{
+    background:#eef4fb; border:1px solid #d3e2f3; border-radius:var(--radius-sm);
+    padding:12px 15px; margin:10px 0; font-size:14px; color:#2a4868;
+    display:flex; gap:10px; align-items:flex-start;
+  }
+  .info .ic{ flex:0 0 auto; color:#2f6bb3; margin-top:1px; }
+
+  /* リンク */
+  a.ext{
+    color:var(--brand-deep); font-weight:800; text-decoration:none;
+    border-bottom:2px solid #bcdcd1; padding-bottom:1px;
+  }
+  a.ext:hover{ border-color:var(--brand); }
+  a.ext .lic{ vertical-align:-2px; margin-left:3px; }
+
+  ol.steplist{ margin:8px 0; padding-left:22px; }
+  ol.steplist li{ margin:8px 0; }
+  ol.steplist b{ color:var(--ink); }
+
+  .os-pill{
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:12px; font-weight:800; letter-spacing:.04em;
+    padding:3px 10px; border-radius:999px; margin-bottom:8px;
+  }
+  .os-pill.win{ background:#e7f0fb; color:#1d5aa8; border:1px solid #c9dcf3; }
+  .os-pill.mac{ background:#efeaf6; color:#5b3e8e; border:1px solid #ddd0ee; }
+
+  /* macの手順図（インラインSVGの代替・箇条書きステップ） */
+  .pathfig{
+    display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+    background:#fff; border:1px solid var(--line); border-radius:var(--radius-sm);
+    padding:12px 14px; margin:10px 0;
+  }
+  .pathfig .chip{
+    background:var(--bg-2); border:1px solid var(--line); border-radius:8px;
+    padding:6px 11px; font-weight:700; font-size:14px; color:var(--ink);
+    display:inline-flex; align-items:center; gap:7px;
+  }
+  .pathfig .arr{ color:var(--ink-soft); flex:0 0 auto; }
+
+  /* フッター */
+  .foot{
+    text-align:center; margin-top:40px; color:var(--ink-soft); font-size:13.5px;
+    border-top:1px solid var(--line); padding-top:22px;
+  }
+  .foot .done{
+    display:inline-flex; align-items:center; gap:9px;
+    background:var(--brand-soft); color:var(--brand-deep);
+    border:1px solid #cfe2db; border-radius:999px;
+    padding:8px 18px; font-weight:800; margin-bottom:12px;
+  }
+
+  /* 控えめな入場アニメ（高インパクトな瞬間に限定） */
+  @keyframes rise{ from{opacity:0; transform:translateY(14px);} to{opacity:1; transform:none;} }
+  .reveal{ opacity:0; animation:rise .6s cubic-bezier(.2,.7,.2,1) forwards; }
+  .reveal.d1{ animation-delay:.05s; } .reveal.d2{ animation-delay:.12s; }
+  .reveal.d3{ animation-delay:.18s; } .reveal.d4{ animation-delay:.24s; }
+  @media (prefers-reduced-motion: reduce){
+    .reveal{ animation:none; opacity:1; }
+    .card{ transition:none; }
+  }
+</style>
+</head>
+<body class="show-win">
+
+  <!-- ===== 上部バー：OSトグル（常に見える sticky） ===== -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand-mini">
+        <svg class="mark" width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 2.5l7.5 3v5.2c0 4.6-3.1 8-7.5 9.3-4.4-1.3-7.5-4.7-7.5-9.3V5.5L12 2.5z" fill="#1f6f5c"/>
+          <path d="M8.4 12.1l2.5 2.5 4.7-4.9" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="t">AIエージェント安全パッケージ<small>スタートガイド</small></span>
+      </div>
+      <div class="ostoggle" role="group" aria-label="OSの切り替え">
+        <button type="button" class="btn-win" onclick="setOS('win')" aria-label="Windows向けの説明を表示">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.2L11 4v7.5H3V5.2zM3 12.5h8V20l-8-1.2v-6.3zM12 3.9L21 2.6v8.9h-9V3.9zM12 12.5h9V21.4l-9-1.3v-7.6z"/></svg>
+          Windows
+        </button>
+        <button type="button" class="btn-mac" onclick="setOS('mac')" aria-label="Mac向けの説明を表示">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.7c0-2.2 1.8-3.3 1.9-3.4-1-1.5-2.6-1.7-3.2-1.7-1.4-.1-2.6.8-3.3.8-.7 0-1.7-.8-2.8-.8-1.5 0-2.8.8-3.6 2.2-1.5 2.6-.4 6.5 1.1 8.6.7 1 1.6 2.2 2.7 2.1 1.1 0 1.5-.7 2.8-.7s1.6.7 2.8.7c1.2 0 1.9-1 2.6-2 .8-1.2 1.2-2.3 1.2-2.4-.1 0-2.2-.9-2.2-3.5zM14.3 6c.6-.7 1-1.7.9-2.8-.9 0-1.9.6-2.5 1.3-.5.6-1 1.6-.9 2.6 1 .1 2-.5 2.5-1.1z"/></svg>
+          Mac
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <!-- ===== ヒーロー ===== -->
+    <section class="hero">
+      <span class="badge reveal d1">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2.5l7.5 3v5.2c0 4.6-3.1 8-7.5 9.3-4.4-1.3-7.5-4.7-7.5-9.3V5.5L12 2.5z" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M8.6 12l2.4 2.4 4.4-4.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        安全に、迷わず、はじめよう
+      </span>
+      <h1 class="reveal d2">上から順番に <span class="hl">ポチポチ</span> やるだけ。</h1>
+      <p class="lead reveal d3">
+        ここは、AIエージェントを<b>安全に</b>使うための「最初の1ページ」です。<br>
+        むずかしい知識はいりません。番号の<b>小さい順</b>に進めば、全部つながります。
+      </p>
+
+      <div class="howto reveal d4">
+        <span class="ic" aria-hidden="true">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 8h.01M11 12h1v4h1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <div>
+          <b>最初にやること</b>
+          <p>あなたのパソコンはどっち？　画面上の <b>「Windows / Mac」</b> ボタンで切り替えてください。説明が自動で変わります（選んだOSは次回も覚えています）。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== ステップ群 ===== -->
+    <div class="steps">
+
+      <!-- ====== Step 0 ====== -->
+      <section class="step step-pre">
+        <div class="num" aria-hidden="true">0</div>
+        <div class="card">
+          <p class="step-eyebrow">はじめての人だけ・最初の1回だけ</p>
+          <h2 class="step-title">下ごしらえ（AIを動かす準備）</h2>
+          <p class="muted">パソコンに「AIを動かすための道具」を入れます。1回やれば、次からは飛ばしてOKです。</p>
+
+          <!-- 0-1 -->
+          <h3>0-1　Node.js（ノードジェイエス）を入れる</h3>
+          <div class="meta">
+            <div class="row why"><span class="k">なぜ</span><span>AIツールを動かすための「土台」です。これが無いとAIが動きません。</span></div>
+            <div class="row"><span class="k">何が起きる</span><span>下のリンクから公式サイトを開き、<b>LTS版</b>（おすすめ・安定版）をダウンロードしてインストールします。</span></div>
+          </div>
+          <p>
+            <a class="ext" href="https://nodejs.org/ja" target="_blank" rel="noopener">Node.js 公式サイトを開く（LTS版を選ぶ）
+              <svg class="lic" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M11 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+          </p>
+          <p class="cmd-label">入れ終わったら、ちゃんと入ったか確認（黒い画面に貼って Enter）</p>
+          <div class="cmd"><span class="prompt">$</span><code>node -v</code><button type="button" class="copy" data-copy="node -v" onclick="copyText(this)">コピー</button></div>
+          <div class="cmd"><span class="prompt">$</span><code>npm -v</code><button type="button" class="copy" data-copy="npm -v" onclick="copyText(this)">コピー</button></div>
+          <p class="muted"><code>v20.◯◯</code> のように<b>数字が出れば成功</b>です（数字はバージョンなので何でもOK）。</p>
+
+          <!-- 0-2 -->
+          <h3>0-2　AIのCLI（コマンド）を入れる</h3>
+          <div class="meta">
+            <div class="row why"><span class="k">なぜ</span><span>使いたいAIの「本体」です。使うものだけ入れればOK（全部入れても構いません）。</span></div>
+            <div class="row"><span class="k">何が起きる</span><span>黒い画面（<span class="os-win nowrap">PowerShell</span><span class="os-mac nowrap">ターミナル</span>）に貼って Enter すると、自動でダウンロード＆セットアップされます。</span></div>
+          </div>
+          <p class="cmd-label">Codex（コーデックス）を使う人</p>
+          <div class="cmd"><span class="prompt">$</span><code>npm install -g @openai/codex</code><button type="button" class="copy" data-copy="npm install -g @openai/codex" onclick="copyText(this)">コピー</button></div>
+          <p class="cmd-label">Claude Code（クロードコード）を使う人</p>
+          <div class="cmd"><span class="prompt">$</span><code>npm install -g @anthropic-ai/claude-code</code><button type="button" class="copy" data-copy="npm install -g @anthropic-ai/claude-code" onclick="copyText(this)">コピー</button></div>
+          <p class="cmd-label">AntiGravity（アンチグラビティ）を使う人</p>
+          <div class="cmd"><span class="prompt">$</span><code>npm install -g @antigravity/agy</code><button type="button" class="copy" data-copy="npm install -g @antigravity/agy" onclick="copyText(this)">コピー</button></div>
+          <p class="muted" style="font-size:13px;">※ AntiGravity は提供元の都合でパッケージ名が変わる可能性があります。うまくいかない時は配布元の案内をご確認ください。</p>
+
+          <!-- 0-3 -->
+          <h3>0-3　ログインする</h3>
+          <div class="meta">
+            <div class="row why"><span class="k">なぜ</span><span>あなたのAIアカウントと結びつけるためです。</span></div>
+            <div class="row"><span class="k">何が起きる</span><span>下を貼って Enter すると、ログイン画面（またはAPIキーの入力）が始まります。</span></div>
+          </div>
+          <div class="cmd"><span class="prompt">$</span><code>codex login</code><button type="button" class="copy" data-copy="codex login" onclick="copyText(this)">コピー</button></div>
+          <div class="info">
+            <span class="ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z" stroke="currentColor" stroke-width="1.6"/><path d="M12 10v4M12 8h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+            <div><b>APIキーの入力だけは、あなた自身でやる必要があります。</b>　キー（パスワードのようなもの）はとても大切な情報です。人に見せたり、チャットに貼ったりしないでください。</div>
+          </div>
+
+          <!-- 0-4 Windows -->
+          <div class="os-win">
+            <h3>0-4　PowerShell の実行許可（Windowsのみ・1回だけ）</h3>
+            <span class="os-pill win">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.2L11 4v7.5H3V5.2zM3 12.5h8V20l-8-1.2v-6.3zM12 3.9L21 2.6v8.9h-9V3.9zM12 12.5h9V21.4l-9-1.3v-7.6z"/></svg>
+              Windows 専用
+            </span>
+            <div class="meta">
+              <div class="row why"><span class="k">なぜ</span><span>Windowsは初期状態だと、安全のため一部のスクリプトを止めます。安全パッケージのファイルを動かせるように、1回だけ許可します。</span></div>
+              <div class="row"><span class="k">何が起きる</span><span>このパソコンの「あなたのアカウントだけ」で、署名済みスクリプトを動かせるようになります。</span></div>
+            </div>
+            <p class="cmd-label">PowerShell を「ふつうに」（管理者でなくてOK）開いて、1回だけ貼る</p>
+            <div class="cmd"><span class="prompt">PS&gt;</span><code>Set-ExecutionPolicy -Scope CurrentUser RemoteSigned</code><button type="button" class="copy" data-copy="Set-ExecutionPolicy -Scope CurrentUser RemoteSigned" onclick="copyText(this)">コピー</button></div>
+            <p class="muted">途中で「変更しますか？」と聞かれたら <b>Y</b> を入れて Enter。</p>
+          </div>
+
+          <!-- 0-4 Mac -->
+          <div class="os-mac">
+            <h3>0-4　初回の安全許可（Macのみ・1回だけ）</h3>
+            <span class="os-pill mac">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.7c0-2.2 1.8-3.3 1.9-3.4-1-1.5-2.6-1.7-3.2-1.7-1.4-.1-2.6.8-3.3.8-.7 0-1.7-.8-2.8-.8-1.5 0-2.8.8-3.6 2.2-1.5 2.6-.4 6.5 1.1 8.6.7 1 1.6 2.2 2.7 2.1 1.1 0 1.5-.7 2.8-.7s1.6.7 2.8.7c1.2 0 1.9-1 2.6-2 .8-1.2 1.2-2.3 1.2-2.4-.1 0-2.2-.9-2.2-3.5zM14.3 6c.6-.7 1-1.7.9-2.8-.9 0-1.9.6-2.5 1.3-.5.6-1 1.6-.9 2.6 1 .1 2-.5 2.5-1.1z"/></svg>
+              Mac 専用
+            </span>
+            <div class="meta">
+              <div class="row why"><span class="k">なぜ</span><span>Macは「ネットから来たファイル」を最初はブロックします。安全パッケージを動かすために、1回だけ許可します。</span></div>
+              <div class="row"><span class="k">何が起きる</span><span>「開いてもいいよ」とMacに伝わり、次回からふつうに開けるようになります。</span></div>
+            </div>
+            <p class="cmd-label"><b>おすすめ：</b>画面の案内から許可する（コマンド不要）</p>
+            <div class="pathfig" role="img" aria-label="システム設定からプライバシーとセキュリティを開き、このまま開くを押す手順">
+              <span class="chip">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                システム設定
+              </span>
+              <span class="arr" aria-hidden="true">›</span>
+              <span class="chip">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M8 10V7a4 4 0 018 0v3" stroke="currentColor" stroke-width="1.6"/></svg>
+                プライバシーとセキュリティ
+              </span>
+              <span class="arr" aria-hidden="true">›</span>
+              <span class="chip">「このまま開く」を押す</span>
+            </div>
+            <p class="cmd-label">うまく出ないときの代わりのコマンド（解凍したフォルダの中で実行）</p>
+            <div class="cmd"><span class="prompt">$</span><code>xattr -dr com.apple.quarantine .</code><button type="button" class="copy" data-copy="xattr -dr com.apple.quarantine ." onclick="copyText(this)">コピー</button></div>
+            <p class="muted" style="font-size:13px;">※ 末尾の「<b>.</b>（ドット）」は「いまのフォルダ全部」という意味です。<b>必ず解凍したフォルダの中</b>で実行してください。</p>
+          </div>
+
+          <details class="help">
+            <summary><span class="chev" aria-hidden="true">▸</span> うまくいかない時（クリックで開く）</summary>
+            <div class="help-body">
+              <ul>
+                <li><b><code>node -v</code> で何も出ない／エラー</b>：0-1 のインストールがまだか、パソコンの<b>再起動</b>で直ることがあります。</li>
+                <li><b><code>npm install</code> が赤い文字で止まる</b>：ネット接続を確認し、もう一度同じコマンドを貼ってみてください。</li>
+                <li class="os-win"><b>Windows：「このスクリプトは実行できません」</b>：0-4 の実行許可をまだやっていません。先に 0-4 を済ませてください。</li>
+                <li class="os-mac"><b>Mac：「開発元を確認できません」</b>：0-4 の安全許可をまだやっていません。先に 0-4 を済ませてください。</li>
+              </ul>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- ====== Step 1 ====== -->
+      <section class="step">
+        <div class="num" aria-hidden="true">1</div>
+        <div class="card">
+          <p class="step-eyebrow">いちばん最初のひと押し</p>
+          <h2 class="step-title">安全パッケージを準備する</h2>
+
+          <div class="do os-win">
+            <span class="ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M7 7l5 3 5-3M12 10v8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" stroke="currentColor" stroke-width="1.6"/></svg></span>
+            <div><b>Windows：</b><span class="fname">1_安全パッケージを準備-Windows.bat</span> を<b>ダブルクリック</b>します。</div>
+          </div>
+          <div class="do os-mac">
+            <span class="ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M7 7l5 3 5-3M12 10v8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" stroke="currentColor" stroke-width="1.6"/></svg></span>
+            <div><b>Mac：</b><span class="fname">1_安全パッケージを準備-Mac.command</span> を<b>右クリック → 「開く」→ もう一度「開く」</b>を押します。</div>
+          </div>
+
+          <div class="meta">
+            <div class="row why"><span class="k">なぜ</span><span>AIが安全に動くための「作業部屋」と「安全設定」を、自動で用意します。</span></div>
+            <div class="row"><span class="k">何が起きる</span><span>あなたの<b>書類フォルダ</b>の中に <span class="fname">my-ai-workspace</span> ができ、安全設定が入り、自己診断（doctor）が自動で走ります。最後に「準備OK」と出れば成功です。</span></div>
+          </div>
+
+          <details class="help">
+            <summary><span class="chev" aria-hidden="true">▸</span> うまくいかない時（クリックで開く）</summary>
+            <div class="help-body">
+              <ul>
+                <li class="os-win"><b>Windows：</b>黒い画面が一瞬で消える／「実行できません」→ <b>Step 0-4</b>（PowerShellの実行許可）を先に済ませてください。</li>
+                <li class="os-mac"><b>Mac：</b>「開けません」と言われる→ <b>Step 0-4</b>（初回の安全許可）を先に済ませてください。ダブルクリックではなく<b>右クリック→開く</b>が大切です。</li>
+                <li>途中で止まったように見えても、文字が流れている間は<b>動いています</b>。終わるまで待ちましょう。</li>
+              </ul>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- ====== Step 2 ====== -->
+      <section class="step">
+        <div class="num" aria-hidden="true">2</div>
+        <div class="card">
+          <p class="step-eyebrow">いよいよAIを動かす</p>
+          <h2 class="step-title">AIエージェントを安全に起動する</h2>
+
+          <div class="do">
+            <span class="ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="1.6"/></svg></span>
+            <div>まず <span class="fname">書類 / my-ai-workspace / スタート</span> フォルダを開きます。<br>その中の、使いたいAIのファイルを<b>ダブルクリック</b>してください。</div>
+          </div>
+
+          <ol class="steplist">
+            <li><span class="fname">2_セーフCodexを起動</span> … Codex を安全モードで動かす</li>
+            <li><span class="fname">3_セーフClaudeを起動</span> … Claude Code を安全モードで動かす</li>
+            <li><span class="fname">4_セーフAntiGravityを起動</span> … AntiGravity を安全モードで動かす</li>
+          </ol>
+
+          <div class="meta">
+            <div class="row why"><span class="k">なぜ</span><span>「安全モード」で起動することで、危険な操作にガードがかかった状態でAIを使えます。</span></div>
+            <div class="row"><span class="k">何が起きる</span><span>専用の画面が開き、AIに話しかけられるようになります。使いたい1つだけ起動すればOKです。</span></div>
+          </div>
+
+          <details class="help">
+            <summary><span class="chev" aria-hidden="true">▸</span> うまくいかない時（クリックで開く）</summary>
+            <div class="help-body">
+              <ul>
+                <li><b>「コマンドが見つかりません」と出る</b>：そのAIの本体がまだです→ <b>Step 0-2</b> でインストールしてください。</li>
+                <li><b>ログインを求められる／認証エラー</b>：<b>Step 0-3</b> のログインがまだです。</li>
+                <li><b><span class="fname">スタート</span> フォルダが無い</b>：<b>Step 1</b> の準備がまだか、失敗しています。Step 1 をやり直してください。</li>
+              </ul>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- ====== Step 3 ====== -->
+      <section class="step">
+        <div class="num" aria-hidden="true">3</div>
+        <div class="card">
+          <p class="step-eyebrow">安心して見守る</p>
+          <h2 class="step-title">見守りモニターを起動する</h2>
+
+          <div class="do">
+            <span class="ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M9 20h6M12 16v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7 10l2.5 2.5L13 8l2 2 2-2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <div><b>別ウィンドウ</b>で <span class="fname">5_見守りモニターを起動</span> を<b>ダブルクリック</b>します。</div>
+          </div>
+
+          <div class="meta">
+            <div class="row why"><span class="k">なぜ</span><span>AIが「いま何をしているか」を、目で見て確認できると安心だからです。</span></div>
+            <div class="row"><span class="k">何が起きる</span><span>AIの動き（実行中の操作など）がリアルタイムで表示されます。AIを使っている間、開きっぱなしにしておくのがおすすめです。</span></div>
+          </div>
+
+          <details class="help">
+            <summary><span class="chev" aria-hidden="true">▸</span> うまくいかない時（クリックで開く）</summary>
+            <div class="help-body">
+              <ul>
+                <li><b>何も表示されない</b>：先に <b>Step 2</b> でAIを起動していますか？　AIが動いていないと表示する内容がありません。</li>
+                <li><b>ウィンドウがすぐ閉じる</b>：<span class="fname">スタート</span> フォルダの外に出してしまっていないか確認し、元の場所で開いてください。</li>
+              </ul>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- ====== Step 4（上級） ====== -->
+      <section class="step step-adv">
+        <div class="num" aria-hidden="true">4</div>
+        <div class="card">
+          <p class="step-eyebrow">上級・希望者だけ</p>
+          <h2 class="step-title">DeepSeek（ディープシーク）を使う</h2>
+          <p class="muted">これは<b>使いたい人だけ</b>の追加機能です。よく分からない場合は、ここは<b>飛ばして大丈夫</b>です。ファイルは同じ <span class="fname">スタート</span> フォルダの中の「（上級）」が付いたものです。</p>
+
+          <ol class="steplist">
+            <li>
+              <b>① <span class="fname">（上級）1_DeepSeekキーを登録</span></b>（初回だけ）<br>
+              <span class="muted">DeepSeek の APIキー（パスワードのようなもの）を貼って登録します。</span>
+            </li>
+            <li>
+              <b>② <span class="fname">（上級）2_DeepSeek-Claudeを起動</span></b><br>
+              <span class="muted">これを押すと、<b>送信検査 Gateway が自動で立ち上がり</b>、APIキーなどを<b>送る前にマスキング（隠す）</b>した状態で DeepSeek につながります。</span>
+            </li>
+            <li>
+              <b>③ <span class="fname">（上級）9_DeepSeekキーを削除</span></b><br>
+              <span class="muted">使い終わって、やめる時に押します。登録したキーを消します。</span>
+            </li>
+          </ol>
+
+          <div class="warn">
+            <p class="wt"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3l9 16H3l9-16z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 9v5M12 17h.01" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg> 必ず読んでください（正直なお知らせ）</p>
+            <p>会話の内容は <b>DeepSeek（中国管轄のサーバー）</b>に送信されます。マスキングは<b>既知のパターンに限られ</b>、すべてを隠せる完全な保証ではありません。<b>本当に困る情報（個人情報・機密・パスワード等）は入力しないでください。</b></p>
+            <p class="small">補足：Gateway は<b>手動で起動する必要はありません</b>（②が内部で自動的に立ち上げます）。マスキングした内容の<b>元への復元はベストエフォート</b>（できる範囲での対応）です。</p>
+          </div>
+
+          <details class="help">
+            <summary><span class="chev" aria-hidden="true">▸</span> うまくいかない時（クリックで開く）</summary>
+            <div class="help-body">
+              <ul>
+                <li><b>「キーが登録されていません」</b>：先に <b>①</b> でキーを登録してください。</li>
+                <li><b>接続できない／途中で止まる</b>：いったん画面を閉じ、<b>②</b> をもう一度開き直してください。Gateway も一緒に立ち上がり直します。</li>
+                <li><b>キーを完全に消したい</b>：<b>③</b> を実行してください。登録したキーが削除されます。</li>
+              </ul>
+            </div>
+          </details>
+        </div>
+      </section>
+
+    </div><!-- /.steps -->
+
+    <!-- ===== フッター ===== -->
+    <footer class="foot">
+      <div class="done">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M8.4 12.2l2.4 2.4 4.8-5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        ここまでできれば準備完了です。お疲れさまでした。
+      </div>
+      <p>困ったら、各ステップの「<b>うまくいかない時</b>」を開いてみてください。<br>このページはネットに接続していなくても動きます（完全オフライン対応）。</p>
+    </footer>
+
+  </main>
+
+<script>
+  function copyText(btn){
+    var t = btn.getAttribute('data-copy');
+    function done(){ var o=btn.textContent; btn.textContent='コピーしました'; setTimeout(function(){btn.textContent=o;},1200); }
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(t).then(done, function(){ fallback(t); done(); });
+    } else { fallback(t); done(); }
+  }
+  function fallback(t){
+    var ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try{ document.execCommand('copy'); }catch(e){} document.body.removeChild(ta);
+  }
+  function setOS(os){
+    document.body.classList.remove('show-win','show-mac');
+    document.body.classList.add(os==='mac'?'show-mac':'show-win');
+    try{ localStorage.setItem('os', os); }catch(e){}
+  }
+  document.addEventListener('DOMContentLoaded', function(){
+    var saved='win'; try{ saved=localStorage.getItem('os')||'win'; }catch(e){}
+    setOS(saved);
+  });
+</script>
+</body>
+</html>
