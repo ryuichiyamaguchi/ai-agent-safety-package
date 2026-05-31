@@ -15,6 +15,10 @@ function Ok([string]$m) { Write-Host "PASS $m"; $script:pass++ }
 function Ng([string]$m) { Write-Host "FAIL $m"; $script:fail++ }
 
 # ---- Task 7: IsolationDrills.ps1 の関数定義チェック + 分類ロジック ----
+# 注意: codex ドリルの実行(Test-WriteOutside / Test-NetworkEgress の codex パス)は
+#   codex sandbox --permissions-profile <profile> -C ... を呼ぶため Windows 実機でのみ意味がある。
+#   network ドリルは 2 段(netbaseline で 1.1.1.1:443 へ疎通確認 → netblock で遮断実証)。
+#   この静的テストは関数定義・分類ロジック・ヘルパー関数の存在確認のみ行う。
 
 . $lib
 
@@ -38,16 +42,66 @@ if (Get-Command Test-AgyDeclaration -ErrorAction SilentlyContinue) {
 } else {
     Ng 'Test-AgyDeclaration defined'
 }
+# codex 0.135 新構文対応: New-CodexProbeHome ヘルパー関数の定義チェック。
+if (Get-Command New-CodexProbeHome -ErrorAction SilentlyContinue) {
+    Ok 'New-CodexProbeHome defined (codex 0.135 probe helper)'
+} else {
+    Ng 'New-CodexProbeHome defined (codex 0.135 probe helper)'
+}
+# New-CodexProbeHome が一時ディレクトリと config.toml を生成できるか静的検証
+$testProbeHome = New-CodexProbeHome
+if ($testProbeHome -and (Test-Path -LiteralPath (Join-Path $testProbeHome 'config.toml'))) {
+    # safeprobe / netblock / netbaseline 各プロファイルが config.toml に含まれているか確認
+    $probeContent = Get-Content -LiteralPath (Join-Path $testProbeHome 'config.toml') -Raw
+    if ($probeContent -match 'permissions\.safeprobe' -and $probeContent -match 'extends.*:workspace') {
+        Ok 'New-CodexProbeHome generates safeprobe config'
+    } else {
+        Ng 'New-CodexProbeHome generates safeprobe config (missing fields)'
+    }
+    # network 2 段プローブ用: netblock(enabled=false) と netbaseline(enabled=true) の両方が要る。
+    if ($probeContent -match 'permissions\.netblock' -and $probeContent -match 'permissions\.netbaseline') {
+        Ok 'New-CodexProbeHome generates netblock + netbaseline profiles'
+    } else {
+        Ng 'New-CodexProbeHome generates netblock + netbaseline profiles (missing)'
+    }
+    if ($probeContent -match 'permissions\.netbaseline\.network[\s\S]*enabled\s*=\s*true') {
+        Ok 'New-CodexProbeHome netbaseline has network enabled=true'
+    } else {
+        Ng 'New-CodexProbeHome netbaseline has network enabled=true (missing)'
+    }
+    Remove-Item -Recurse -Force -LiteralPath $testProbeHome -ErrorAction SilentlyContinue
+} else {
+    Ng 'New-CodexProbeHome creates temp dir and config.toml'
+    if ($testProbeHome) { Remove-Item -Recurse -Force -LiteralPath $testProbeHome -ErrorAction SilentlyContinue }
+}
 
-# 分類ロジックの単体検証: refused=0(PASS) / connected=10(FAIL) / timeout=20(HOLD)
-$r1 = [int](Get-NetResultClass 'refused')
-if ($r1 -eq 0)  { Ok 'classify refused=PASS' }   else { Ng "classify refused=PASS (got $r1)" }
+# 判定ロジックの単体検証: 2 段プローブ分類関数 Get-NetResultClass <baseline> <blocked>。
+# フェイルクローズ: ベースライン疎通 (connected) が取れたときだけ遮断 (refused) を PASS とする。
+#   baseline=connected blocked=refused   -> 0  (PASS: ネット可の環境で遮断を実証)
+#   baseline=connected blocked=connected -> 10 (FAIL: 遮断プロファイルでも繋がる = 穴)
+#   baseline=connected blocked=timeout   -> 20 (HOLD: 遮断結果が判定不能)
+#   baseline!=connected (オフライン/到達不能) -> 20 (HOLD: 遮断を実証できない)
+$c1 = [int](Get-NetResultClass 'connected' 'refused')
+if ($c1 -eq 0)  { Ok 'classify baseline+blocked=PASS' }        else { Ng "classify baseline+blocked=PASS (got $c1)" }
 
-$r2 = [int](Get-NetResultClass 'connected')
-if ($r2 -eq 10) { Ok 'classify connected=FAIL' } else { Ng "classify connected=FAIL (got $r2)" }
+$c2 = [int](Get-NetResultClass 'connected' 'connected')
+if ($c2 -eq 10) { Ok 'classify block-leak=FAIL' }              else { Ng "classify block-leak=FAIL (got $c2)" }
 
-$r3 = [int](Get-NetResultClass 'timeout')
-if ($r3 -eq 20) { Ok 'classify timeout=HOLD' }   else { Ng "classify timeout=HOLD (got $r3)" }
+$c3 = [int](Get-NetResultClass 'connected' 'timeout')
+if ($c3 -eq 20) { Ok 'classify block-indeterminate=HOLD' }     else { Ng "classify block-indeterminate=HOLD (got $c3)" }
+
+$c4 = [int](Get-NetResultClass 'refused' 'skipped')
+if ($c4 -eq 20) { Ok 'classify offline-baseline=HOLD' }        else { Ng "classify offline-baseline=HOLD (got $c4)" }
+
+$c5 = [int](Get-NetResultClass 'timeout' 'skipped')
+if ($c5 -eq 20) { Ok 'classify baseline-timeout=HOLD' }        else { Ng "classify baseline-timeout=HOLD (got $c5)" }
+
+# 後方互換シグネチャ(引数1個)もフェイルクローズであること: refused 単独は PASS にしない。
+$c6 = [int](Get-NetResultClass 'refused')
+if ($c6 -eq 20) { Ok 'classify single-refused=HOLD (no false PASS)' } else { Ng "classify single-refused=HOLD (got $c6)" }
+
+$c7 = [int](Get-NetResultClass 'connected')
+if ($c7 -eq 10) { Ok 'classify single-connected=FAIL' }        else { Ng "classify single-connected=FAIL (got $c7)" }
 
 # ---- Task 8: doctor.ps1 -IsolationCheck ----
 
