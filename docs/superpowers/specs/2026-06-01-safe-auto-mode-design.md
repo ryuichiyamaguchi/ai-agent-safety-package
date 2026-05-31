@@ -188,6 +188,7 @@ launch-agy-safe.sh [workspace] [prompt] [--auto]
   - **影響 1**: Safe Auto Mode の Codex green パスは現行 codex では到達不能 (ただし doctor が HOLD=赤 → フォールバックするので**安全**。オートが開かないだけ)。
   - **影響 2**: **既存の `doctor.sh` の codex sandbox チェック (line ~53-66) も同じ旧構文で、現行 codex では偽 PASS している** (v1.5.0 出荷済みの既存バグ)。
   - **対応 (別エンゲージメント推奨)**: codex 0.135.0 の `[permissions]` スキーマを調査し、`config.{mac,windows}.toml` と doctor の sandbox 呼び出し (既存 + 新規ドリル) を新構文に移行する。Safe Auto Mode の実装ロジック自体は終了コード契約で正しく、この移行とは独立 (移行後に green パスが有効化される)。
+- **ネット送信ドリルの分類精度 (mitigated・移行時に併修推奨)**: `_probe_egress`(mac) / `Get-EgressProbe`(Windows) は `codex sandbox ... 2>&1` で内側プローブと外側 codex の stderr をマージして判定するため、外側 codex の起動失敗メッセージに "refused" 等が含まれると 'refused'(=PASS)に誤分類しうる。**ただし自動承認解放には至らない**: 同時に走る workspace-外書込ドリルが codex 起動失敗で HOLD を返し、`--isolation-check` 全体が非0(フォールバック)になるため。緩和済みだが、上記 codex sandbox 移行で drill を作り直す際に「内側プローブの stdout のみを採取」する形へ tighten すること (mac/Windows 両方)。
 
 ---
 
