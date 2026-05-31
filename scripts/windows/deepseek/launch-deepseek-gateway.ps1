@@ -20,7 +20,7 @@ if (-not (Test-Path $launchClaude)) {
 }
 
 $env:DS_GATEWAY_PORT = $port
-$gw = Start-Process node -ArgumentList ""$gatewayJs"" -PassThru -WindowStyle Hidden
+$gw = Start-Process node -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden
 try {
   $ok = $false
   for ($i = 0; $i -lt 50; $i++) {

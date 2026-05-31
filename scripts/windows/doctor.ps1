@@ -176,7 +176,8 @@ $gwPatterns = Join-Path $Workspace ".ai-safety\hooks\common\secret-patterns.js"
 
 if (Test-Path -LiteralPath $gwLauncher) {
     $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
-    Add-Result "gateway node present" ($null -ne $nodeCmd) (if ($null -ne $nodeCmd) { $nodeCmd.Source } else { "node not found — DeepSeek Gateway requires Node.js (https://nodejs.org)" })
+    $nodeDetail = if ($null -ne $nodeCmd) { $nodeCmd.Source } else { "node not found — DeepSeek Gateway requires Node.js (https://nodejs.org)" }
+    Add-Result "gateway node present" ($null -ne $nodeCmd) $nodeDetail
     Add-Result "gateway ds-gateway.js present"      (Test-Path -LiteralPath $gwJs)       $gwJs
     Add-Result "gateway secret-patterns.js present" (Test-Path -LiteralPath $gwPatterns) $gwPatterns
 } else {
