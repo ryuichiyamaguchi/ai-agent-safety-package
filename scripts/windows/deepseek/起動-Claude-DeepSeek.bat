@@ -60,9 +60,10 @@ if exist "%DEEPSEEK_GATE%" (
 
 :: -- 3. DeepSeek バックエンドへ向ける環境変数を前差し --------------
 :: ANTHROPIC_AUTH_TOKEN は「登録-初回だけ.bat」で setx 済み（ここには書かない）。
-set "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic"
+:: BASE_URL is set by the gateway launcher (launch-deepseek-gateway.ps1)
 set "ANTHROPIC_MODEL=deepseek-v4-pro"
 set "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash"
+set "GATEWAY_LAUNCH=%HOOKS%\deepseek\launch-deepseek-gateway.ps1"
 
 :: ↑ もし起動時に「モデル名が無効」エラーが出る環境では（GitHub Issue #56990）、
 ::   上の ANTHROPIC_MODEL 行を次のどちらかに差し替えてください:
@@ -89,7 +90,7 @@ echo DeepSeek バックエンドで Claude Code を起動します...
 echo （画面のモデル表示が deepseek-v4-pro になっていればOK）
 echo.
 pushd "%WORKSPACE%"
-PowerShell -NoProfile -ExecutionPolicy Bypass -File "%LAUNCH_CLAUDE%" -Workspace "%WORKSPACE%"
+PowerShell -NoProfile -ExecutionPolicy Bypass -File "%GATEWAY_LAUNCH%" -Workspace "%WORKSPACE%"
 set "EXITCODE=%ERRORLEVEL%"
 popd
 
