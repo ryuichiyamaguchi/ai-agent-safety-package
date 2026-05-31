@@ -1,0 +1,52 @@
+#!/bin/bash
+# オンボーディング入口の健全性テスト（依存ゼロ・mac 開発機で実行）。
+# 検証: HTML 自己完結 / コピーボタン / OS トグル / ラッパー構文 / 相対 ws 解決。
+set -u
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+HTML="$ROOT/スタート.html"
+START_DIR="$ROOT/workspace-template/スタート"
+fail=0
+note(){ echo "[onboarding-test] $1"; }
+
+# 1) HTML 存在
+[ -f "$HTML" ] || { note "FAIL: スタート.html がない"; exit 1; }
+
+# 2) HTML 自己完結（許可リンク=nodejs.org / target=_blank / rel=noopener 以外の外部参照なし）
+if grep -nE 'https?://' "$HTML" | grep -vE 'nodejs\.org|rel="noopener"|target="_blank"' >/tmp/onb_ext.txt 2>/dev/null; then
+  if [ -s /tmp/onb_ext.txt ]; then note "FAIL: 外部参照あり"; cat /tmp/onb_ext.txt; fail=1; fi
+fi
+
+# 3) コピーボタン >= 6
+n=$(grep -c 'onclick="copyText' "$HTML")
+[ "$n" -ge 6 ] || { note "FAIL: コピーボタン数=$n (<6)"; fail=1; }
+
+# 4) OS トグル要素
+grep -q 'show-win' "$HTML" && grep -q 'show-mac' "$HTML" || { note "FAIL: OS トグルがない"; fail=1; }
+
+# 5) ルート Step1 導入ラッパー存在 + mac 側構文
+[ -f "$ROOT/1_安全パッケージを準備-Mac.command" ] || { note "FAIL: Step1 Mac ラッパーがない"; fail=1; }
+[ -f "$ROOT/1_安全パッケージを準備-Windows.bat" ] || { note "FAIL: Step1 Win ラッパーがない"; fail=1; }
+bash -n "$ROOT/1_安全パッケージを準備-Mac.command" || { note "FAIL: Step1 Mac 構文"; fail=1; }
+
+# 6) workspace 内ラッパー（.command）構文 + 相対 ws 解決
+for f in "$START_DIR/"*.command; do
+  bash -n "$f" || { note "FAIL syntax: $f"; fail=1; }
+  grep -q 'HERE/\.\.' "$f" || { note "FAIL: ws 解決(HERE/..)なし: $f"; fail=1; }
+done
+
+# 7) workspace 内ラッパー（.bat）相対解決 + ターゲット呼び出し
+for f in "$START_DIR/"*.bat; do
+  grep -q '%HERE%' "$f" || { note "FAIL: %HERE% なし: $f"; fail=1; }
+done
+
+# 8) install が スタート/ を配置する追記を含む（両 OS）
+grep -q 'workspace-template/スタート' "$ROOT/scripts/macos/install.sh" || { note "FAIL: install.sh に スタート 配置追記なし"; fail=1; }
+grep -q 'workspace-template\\\\スタート' "$ROOT/scripts/windows/install.ps1" || grep -q 'workspace-template\\スタート' "$ROOT/scripts/windows/install.ps1" || { note "FAIL: install.ps1 に スタート 配置追記なし"; fail=1; }
+
+# 9) 期待される番号ファイルが揃う（2..5 と 上級1/2/9）
+for base in "2_セーフCodexを起動" "3_セーフClaudeを起動" "4_セーフAntiGravityを起動" "5_見守りモニターを起動" "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）9_DeepSeekキーを削除"; do
+  [ -f "$START_DIR/$base.command" ] || { note "FAIL: $base.command がない"; fail=1; }
+  [ -f "$START_DIR/$base.bat" ] || { note "FAIL: $base.bat がない"; fail=1; }
+done
+
+if [ $fail -eq 0 ]; then note "ALL PASS"; else note "FAILURES ABOVE"; exit 1; fi
