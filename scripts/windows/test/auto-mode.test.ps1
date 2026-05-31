@@ -139,6 +139,20 @@ if ($outMissCmd -match 'untrusted') {
     Ng "win codex missing-doctor-cmd LEAKS to on-failure (got: $outMissCmd)"
 }
 
+# 存在するが実行できない doctor(.txt の中身は実行不能)→ フェイルクローズ。
+# Windows には実行ビットの概念が無いので、mac の chmod -x 相当として
+# powershell.exe -File が起動できない(=非0終了する)ファイルを指定する。
+# launcher は Start-Job 内で powershell.exe -File <.txt> を呼ぶ → 非0 → untrusted。
+$notRunnable = Join-Path ([System.IO.Path]::GetTempPath()) ("doctor-notrunnable-" + [guid]::NewGuid().ToString("N") + ".txt")
+'this is not a runnable script' | Set-Content -LiteralPath $notRunnable
+$env:AI_SAFE_DOCTOR = $notRunnable
+$outNotRunC = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launchC $ws.FullName '' '--auto' 2>$null
+if ($outNotRunC -match 'untrusted') {
+    Ok 'win codex not-runnable doctor -> untrusted (fail-closed)'
+} else {
+    Ng "win codex not-runnable doctor LEAKS to on-failure (got: $outNotRunC)"
+}
+
 Remove-Item Env:\AI_SAFE_DRY_RUN, Env:\AI_SAFE_DOCTOR -ErrorAction SilentlyContinue
 
 # ---- Task 10: launch-agy-safe.ps1 --auto 分岐 ----
@@ -213,6 +227,17 @@ if ($outMissA -match '--dangerously-skip-permissions') {
     Ok 'win agy missing-doctor -> no skip-permissions (fail-closed)'
 }
 
+# 存在するが実行できない doctor(.txt)→ フェイルクローズ(mac の noexec-doctor 相当)。
+# launcher は Start-Job 内で powershell.exe -File <.txt> を呼ぶ → 非0 → skip-permissions 付与しない。
+$env:AGY = $stubOk
+$env:AI_SAFE_DOCTOR = $notRunnable
+$outNotRunA = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launchA $ws.FullName '' '--auto' 2>$null
+if ($outNotRunA -match '--dangerously-skip-permissions') {
+    Ng 'win agy not-runnable doctor LEAKS skip-permissions'
+} else {
+    Ok 'win agy not-runnable doctor -> no skip-permissions (fail-closed)'
+}
+
 Remove-Item Env:\AGY, Env:\AI_SAFE_DRY_RUN, Env:\AI_SAFE_DOCTOR -ErrorAction SilentlyContinue
 
 # ---- Task 10 (フル doctor): 隔離ドリル行を出力するか ----
@@ -228,6 +253,7 @@ if ($fullOutText -match 'isolation|egress|workspace-outside') {
 # ---- クリーンアップ ----
 
 Remove-Item -LiteralPath $stubOk, $stubNg -ErrorAction SilentlyContinue
+if ($notRunnable) { Remove-Item -LiteralPath $notRunnable -ErrorAction SilentlyContinue }
 Remove-Item -Recurse -Force -LiteralPath $ws.FullName -ErrorAction SilentlyContinue
 
 Write-Host ""
