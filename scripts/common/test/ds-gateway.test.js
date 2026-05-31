@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { createGateway } = require('../ds-gateway.js');
+const { createTokenMap } = require('../token-map.js');
 
 function get(port, path) {
   return new Promise((resolve, reject) => {
@@ -252,4 +253,51 @@ test('reversible PII becomes a token in the forwarded body; hard secret stays ma
   assert.ok(!received.includes('user@example.com'), 'email not sent raw');
   assert.match(received, /〔R\d+〕/, 'email replaced by reversible token');
   assert.ok(received.includes('[MASKED:anthropic]'), 'hard secret irreversible');
+});
+
+test('restores reversible token in SSE response, even split across chunks', async () => {
+  const up = await startUpstream((req,res)=>{
+    let b=''; req.on('data',c=>b+=c); req.on('end',()=>{
+      const sent = JSON.parse(b);
+      const token = (JSON.stringify(sent).match(/〔R\d+〕/) || [])[0] || '〔R1〕';
+      res.writeHead(200, {'content-type':'text/event-stream'});
+      const mid = Math.ceil(token.length/2);
+      res.write('data: {"delta":{"text":"連絡先は ' + token.slice(0, mid));
+      setTimeout(()=>{ res.write(token.slice(mid) + ' です"}}\n\n'); res.end(); }, 10);
+    });
+  });
+  after(()=>up.close());
+  const tm = createTokenMap();
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, tokenMap: tm, denylistTerms: [] });
+  const server = await gw.listen(); after(()=>server.close());
+
+  const chunks = [];
+  await new Promise((resolve,reject)=>{
+    const data = Buffer.from(JSON.stringify({ messages:[{role:'user',content:'連絡先 user@example.com'}], stream:true }));
+    const r = http.request({host:'127.0.0.1',port:server.address().port,path:'/v1/messages',method:'POST',headers:{'content-type':'application/json','content-length':data.length}},
+      (res)=>{ res.on('data',c=>chunks.push(c.toString())); res.on('end',resolve); });
+    r.on('error',reject); r.end(data);
+  });
+  const all = chunks.join('');
+  assert.ok(all.includes('user@example.com'), 'token restored to original even across chunk split');
+  assert.ok(!/〔R\d+〕/.test(all), 'no residual token');
+});
+
+test('JSON-escapes restored value with special chars', async () => {
+  const tm = createTokenMap();
+  const token = tm.alloc('a"b\nc', 'denylist');
+  const up = await startUpstream((req,res)=>{ req.resume(); res.writeHead(200,{'content-type':'text/event-stream'}); res.end('data: {"t":"' + token + '"}\n\n'); });
+  after(()=>up.close());
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, tokenMap: tm, denylistTerms: [] });
+  const server = await gw.listen(); after(()=>server.close());
+  let body='';
+  await new Promise((resolve,reject)=>{
+    const data = Buffer.from(JSON.stringify({ messages:[{role:'user',content:'hi'}] }));
+    const r = http.request({host:'127.0.0.1',port:server.address().port,path:'/v1/messages',method:'POST',headers:{'content-type':'application/json','content-length':data.length}},
+      (res)=>{ res.on('data',c=>body+=c); res.on('end',resolve); });
+    r.on('error',reject); r.end(data);
+  });
+  const jsonPart = body.split('data: ')[1].trim();
+  assert.doesNotThrow(()=>JSON.parse(jsonPart));
+  assert.strictEqual(JSON.parse(jsonPart).t, 'a"b\nc');
 });

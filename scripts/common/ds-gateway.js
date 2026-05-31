@@ -142,6 +142,29 @@ async function handleProxy(req, res, upstreamUrl, session) {
   forward(req, res, upstreamUrl, outBody, session);
 }
 
+function jsonEscape(s) { const j = JSON.stringify(String(s)); return j.slice(1, -1); }
+
+function makeRestorer(tokenMap) {
+  const TOKEN_RE = /〔R\d+〕/g;
+  const OPEN = '〔';
+  let carry = '';
+  const restore = (s) => s.replace(TOKEN_RE, (t) => {
+    const orig = tokenMap.getOriginal(t);
+    return orig === undefined ? t : jsonEscape(orig);
+  });
+  return {
+    push(chunkStr) {
+      let s = carry + chunkStr;
+      const lastOpen = s.lastIndexOf(OPEN);
+      let safeLen = s.length;
+      if (lastOpen !== -1 && s.indexOf('〕', lastOpen) === -1 && (s.length - lastOpen) < 20) safeLen = lastOpen;
+      carry = s.slice(safeLen);
+      return restore(s.slice(0, safeLen));
+    },
+    flush() { const out = restore(carry); carry = ''; return out; },
+  };
+}
+
 function forward(req, res, upstreamUrl, body, session) {
   const isHttps = upstreamUrl.protocol === 'https:';
   const lib = isHttps ? https : http;
@@ -151,25 +174,25 @@ function forward(req, res, upstreamUrl, body, session) {
   delete headers['accept-encoding'];
   const HOP_BY_HOP = ['connection','keep-alive','proxy-authenticate','proxy-authorization','te','trailer','transfer-encoding','upgrade'];
   for (const h of HOP_BY_HOP) delete headers[h];
-
   const basePath = upstreamUrl.pathname.replace(/\/$/, '');
   const reqPath = basePath + req.url;
 
   const upReq = lib.request(
-    { protocol: upstreamUrl.protocol, host: upstreamUrl.hostname,
-      port: upstreamUrl.port || (isHttps ? 443 : 80), method: req.method, path: reqPath, headers },
+    { protocol: upstreamUrl.protocol, host: upstreamUrl.hostname, port: upstreamUrl.port || (isHttps ? 443 : 80), method: req.method, path: reqPath, headers },
     (upRes) => {
       res.writeHead(upRes.statusCode, upRes.headers);
+      const ct = (upRes.headers['content-type'] || '').toLowerCase();
+      const transform = ct.includes('json') || ct.includes('event-stream');
+      if (!transform || !session || session.tokenMap.size === 0) { upRes.on('error', () => { if (!res.writableEnded) res.end(); }); upRes.pipe(res); return; }
+      const restorer = makeRestorer(session.tokenMap);
+      upRes.setEncoding('utf8');
+      upRes.on('data', (chunk) => res.write(restorer.push(chunk)));
+      upRes.on('end', () => { res.write(restorer.flush()); res.end(); });
       upRes.on('error', () => { if (!res.writableEnded) res.end(); });
-      upRes.pipe(res);
     });
   upReq.on('error', () => {
-    if (!res.headersSent) {
-      res.writeHead(502, { 'content-type': 'application/json' });
-      res.end('{"error":"ds-gateway: upstream unreachable (fail-closed)"}');
-    } else if (!res.writableEnded) {
-      res.end();
-    }
+    if (!res.headersSent) { res.writeHead(502, {'content-type':'application/json'}); res.end('{"error":"ds-gateway: upstream unreachable (fail-closed)"}'); }
+    else if (!res.writableEnded) res.end();
   });
   upReq.end(body);
 }
