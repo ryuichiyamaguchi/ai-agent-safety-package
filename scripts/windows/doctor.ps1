@@ -167,6 +167,23 @@ if (Test-Path -LiteralPath $policyPath) {
     }
 }
 
+# ── DeepSeek Gateway checks ───────────────────────────────────────────────
+# DeepSeek Gateway launcher が配置されている場合のみ FAIL にする。
+# 未構成環境では SKIP として集計から除外する。
+$gwLauncher = Join-Path $Workspace ".ai-safety\hooks\windows\deepseek\launch-deepseek-gateway.ps1"
+$gwJs       = Join-Path $Workspace ".ai-safety\hooks\common\ds-gateway.js"
+$gwPatterns = Join-Path $Workspace ".ai-safety\hooks\common\secret-patterns.js"
+
+if (Test-Path -LiteralPath $gwLauncher) {
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    $nodeDetail = if ($null -ne $nodeCmd) { $nodeCmd.Source } else { "node not found — DeepSeek Gateway requires Node.js (https://nodejs.org)" }
+    Add-Result "gateway node present" ($null -ne $nodeCmd) $nodeDetail
+    Add-Result "gateway ds-gateway.js present"      (Test-Path -LiteralPath $gwJs)       $gwJs
+    Add-Result "gateway secret-patterns.js present" (Test-Path -LiteralPath $gwPatterns) $gwPatterns
+} else {
+    Add-Skip "gateway checks" "DeepSeek Gateway not installed in this workspace"
+}
+
 $results | Format-Table -AutoSize
 $failed = @($results | Where-Object { $_.Status -ne "PASS" -and $_.Status -ne "SKIP" })
 if ($failed.Count -gt 0) {

@@ -160,5 +160,41 @@ with open('$drill_policy', 'w') as f:
   fi
 fi
 
+# ── DeepSeek Gateway checks ───────────────────────────────────────────────
+# これらは DeepSeek Gateway が有効化されている（= deepseek launcher が配置済み）
+# ときだけ FAIL にする。未構成環境では SKIP として集計から除外する。
+gw_launcher="$workspace/.ai-safety/hooks/macos/deepseek/launch-deepseek-gateway.sh"
+gw_js="$workspace/.ai-safety/hooks/common/ds-gateway.js"
+gw_patterns="$workspace/.ai-safety/hooks/common/secret-patterns.js"
+
+if [ -f "$gw_launcher" ]; then
+  # node が存在するか（Gateway の必須要件）
+  if command -v node >/dev/null 2>&1; then
+    echo "PASS gateway node present"
+    pass=$((pass + 1))
+  else
+    echo "FAIL gateway node present — DeepSeek Gateway requires Node.js (install via https://nodejs.org)"
+    fail=$((fail + 1))
+  fi
+  # ds-gateway.js が配置されているか
+  if [ -f "$gw_js" ]; then
+    echo "PASS gateway ds-gateway.js present"
+    pass=$((pass + 1))
+  else
+    echo "FAIL gateway ds-gateway.js missing: $gw_js (reinstall the safety package)"
+    fail=$((fail + 1))
+  fi
+  # secret-patterns.js が配置されているか
+  if [ -f "$gw_patterns" ]; then
+    echo "PASS gateway secret-patterns.js present"
+    pass=$((pass + 1))
+  else
+    echo "FAIL gateway secret-patterns.js missing: $gw_patterns (reinstall the safety package)"
+    fail=$((fail + 1))
+  fi
+else
+  echo "SKIP gateway checks (DeepSeek Gateway not installed in this workspace)"
+fi
+
 echo "doctor summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]
