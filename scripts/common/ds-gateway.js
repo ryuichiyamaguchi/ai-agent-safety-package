@@ -15,15 +15,20 @@ function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT } = {}
   const upstreamUrl = new URL(upstream);
   const server = http.createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') {
-      const token = process.env.DS_GATEWAY_HEALTH_TOKEN || '';
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', token }));
+      res.end('{"status":"ok"}');
       return;
     }
     handleProxy(req, res, upstreamUrl).catch(() => {
       if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' });
       if (!res.writableEnded) res.end('{"error":"ds-gateway: internal error (fail-closed)"}');
     });
+  });
+  // ポート bind 失敗（EADDRINUSE 等）は致命的に扱い即終了。
+  // launcher 側は「spawn した node が health 後も生存している」ことで自プロセスの占有を確認する。
+  server.on('error', (e) => {
+    console.error(`ds-gateway: listen failed: ${e && e.message ? e.message : e}`);
+    process.exit(1);
   });
   return {
     listen() {

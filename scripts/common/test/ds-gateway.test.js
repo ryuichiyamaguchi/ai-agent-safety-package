@@ -4,6 +4,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 const { createGateway } = require('../ds-gateway.js');
 
 function get(port, path) {
@@ -33,30 +34,35 @@ function postJson(port, path, obj) {
   });
 }
 
-test('GET /healthz returns 200 ok', async () => {
+test('GET /healthz returns 200 ok with no token field', async () => {
   const gw = createGateway({ upstream: 'http://127.0.0.1:1', port: 0 });
   const server = await gw.listen();
   const port = server.address().port;
   after(() => server.close());
   const res = await get(port, '/healthz');
   assert.strictEqual(res.status, 200);
-  assert.match(res.body, /ok/);
+  assert.strictEqual(res.body, '{"status":"ok"}');
+  assert.ok(!res.body.includes('token'), 'healthz must not echo any token');
 });
 
-test('GET /healthz echoes the health token nonce', async () => {
-  const prev = process.env.DS_GATEWAY_HEALTH_TOKEN;
-  process.env.DS_GATEWAY_HEALTH_TOKEN = 'abc123';
-  after(() => {
-    if (prev === undefined) delete process.env.DS_GATEWAY_HEALTH_TOKEN;
-    else process.env.DS_GATEWAY_HEALTH_TOKEN = prev;
-  });
-  const gw = createGateway({ upstream: 'http://127.0.0.1:1', port: 0 });
-  const server = await gw.listen();
+test('second gateway on the same port exits non-zero (bind failure)', async () => {
+  // 1つ目を固定ポートで起動 → 同ポートで子プロセスとして2つ目を spawn → 非0で即終了することを確認。
+  const first = createGateway({ upstream: 'http://127.0.0.1:1', port: 0 });
+  const server = await first.listen();
+  const port = server.address().port;
   after(() => server.close());
-  const res = await get(server.address().port, '/healthz');
-  assert.strictEqual(res.status, 200);
-  assert.match(res.body, /"status":"ok"/);
-  assert.match(res.body, /abc123/);
+
+  const gwPath = path.join(__dirname, '..', 'ds-gateway.js');
+  const child = spawn(process.execPath, [gwPath], {
+    env: { ...process.env, DS_GATEWAY_PORT: String(port) },
+    stdio: 'ignore',
+  });
+  const code = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('child did not exit on bind failure')); }, 5000);
+    child.on('exit', (c) => { clearTimeout(timer); resolve(c); });
+    child.on('error', (e) => { clearTimeout(timer); reject(e); });
+  });
+  assert.notStrictEqual(code, 0, 'second gateway must exit non-zero on EADDRINUSE');
 });
 
 test('rejects non-JSON POST body fail-closed (415, not forwarded)', async () => {

@@ -10,11 +10,6 @@ GATEWAY_JS="$HOOKS_DIR/common/ds-gateway.js"
 LAUNCH_CLAUDE="$HOOKS_DIR/macos/launch-claude-safe.sh"
 PORT="${DS_GATEWAY_PORT:-8788}"
 
-# 自プロセス識別用の nonce。foreign process がポートを占有していても healthz で見分ける（fail-closed）。
-TOKEN="$(head -c 16 /dev/urandom 2>/dev/null | xxd -p 2>/dev/null | tr -d '\n')"
-[ -n "$TOKEN" ] || TOKEN="$RANDOM$RANDOM$RANDOM"
-export DS_GATEWAY_HEALTH_TOKEN="$TOKEN"
-
 command -v node >/dev/null 2>&1 || { echo "【エラー】node が見つかりません。Claude Code には Node が必要です。"; exit 1; }
 [ -f "$GATEWAY_JS" ] || { echo "【エラー】ds-gateway.js が見つかりません: $GATEWAY_JS"; exit 1; }
 [ -f "$LAUNCH_CLAUDE" ] || { echo "【エラー】launch-claude-safe.sh が見つかりません: $LAUNCH_CLAUDE"; exit 1; }
@@ -26,12 +21,18 @@ trap cleanup EXIT INT TERM
 
 ok=0
 for _ in $(seq 1 50); do
-  resp="$(curl -s "http://127.0.0.1:$PORT/healthz" 2>/dev/null)"
-  if printf '%s' "$resp" | grep -q '"status":"ok"' && printf '%s' "$resp" | grep -q "$TOKEN"; then ok=1; break; fi
+  if curl -s "http://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q '"status":"ok"'; then ok=1; break; fi
   sleep 0.1
 done
 if [ "$ok" -ne 1 ]; then
   echo "【エラー】Gateway の起動確認に失敗しました。送信検査なしでは起動しません（fail-closed）。"
+  exit 1
+fi
+
+# health OK かつ「自身が spawn した node が生存」なら、そのポートは確実に自プロセスのもの。
+# foreign process がポートを占有していれば自 node は bind 失敗で即終了している。
+if ! kill -0 "$GW_PID" 2>/dev/null; then
+  echo "【エラー】Gateway プロセスが生存していません（ポート占有の可能性）。送信検査なしでは起動しません（fail-closed）。"
   exit 1
 fi
 

@@ -8,9 +8,6 @@ $hooks = Join-Path $Workspace '.ai-safety\hooks'
 $gatewayJs = Join-Path $hooks 'common\ds-gateway.js'
 $launchClaude = Join-Path $hooks 'windows\launch-claude-safe.ps1'
 $port = if ($env:DS_GATEWAY_PORT) { $env:DS_GATEWAY_PORT } else { '8788' }
-# 自プロセス識別用の nonce。foreign process がポートを占有していても healthz で見分ける（fail-closed）。
-$token = [guid]::NewGuid().ToString('N')
-$env:DS_GATEWAY_HEALTH_TOKEN = $token
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   Write-Host "[ERROR] node not found. Claude Code requires Node.js."; exit 1
@@ -29,11 +26,17 @@ try {
   for ($i = 0; $i -lt 50; $i++) {
     try {
       $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/healthz" -UseBasicParsing -TimeoutSec 1
-      if ($r.Content -match '"status":"ok"' -and $r.Content -match $token) { $ok = $true; break }
+      if ($r.Content -match '"status":"ok"') { $ok = $true; break }
     } catch { Start-Sleep -Milliseconds 100 }
   }
   if (-not $ok) {
     Write-Host "[ERROR] Gateway health check failed. Not launching without send-side inspection (fail-closed)."
+    exit 1
+  }
+  # health OK かつ spawn した node が生存していれば、そのポートは確実に自プロセスのもの。
+  # foreign process がポートを占有していれば自 node は bind 失敗で即終了している。
+  if ($gw.HasExited) {
+    Write-Host "[ERROR] Gateway process is not alive (port may be in use). Not launching without send-side inspection (fail-closed)."
     exit 1
   }
   $env:ANTHROPIC_BASE_URL = "http://127.0.0.1:$port"
