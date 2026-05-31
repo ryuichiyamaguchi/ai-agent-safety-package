@@ -24,6 +24,15 @@ if [ -f "$WORKSPACE_CONFIG" ] && [ ! -f "$SAFE_CONFIG" ]; then
   cp "$WORKSPACE_CONFIG" "$SAFE_CONFIG"
 fi
 
+# codex 0.135: `--profile safe` が参照する $CODEX_HOME/safe.config.toml も配置する。
+# (config.toml に `[profiles.safe]` を残すと 0.135 では起動が fatal error になるため分離済み。)
+# config.toml が更新されたら safe.config.toml も追従させたいので、両者が揃うよう毎回上書きコピーする。
+WORKSPACE_SAFE_PROFILE="$workspace/.codex/safe.config.toml"
+SAFE_PROFILE="$SAFE_CODEX_HOME/safe.config.toml"
+if [ -f "$WORKSPACE_SAFE_PROFILE" ]; then
+  cp "$WORKSPACE_SAFE_PROFILE" "$SAFE_PROFILE"
+fi
+
 [ -f "$AI_SAFE_POLICY" ] || { echo "AI Safety package is not installed in workspace: $workspace" >&2; exit 2; }
 if [ "${AI_SAFE_DRY_RUN:-}" != "1" ]; then
   [ -f "$SAFE_CONFIG" ] || { echo "Codex safety config was not found: $SAFE_CONFIG" >&2; exit 2; }

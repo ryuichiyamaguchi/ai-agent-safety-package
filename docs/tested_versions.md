@@ -99,7 +99,8 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 | configs/claude/settings.windows.json | 2886773553d02d868cb01501a1ce3683891bea2dc88e803654f4d8c24dc79661 | v1.4.1 で env exfil deny 追加（変更なし） |
 | configs/gemini/settings.mac.json | b9f45bac5583930c6b44a07a2351c6bd21722503de82983e63cd5f38db2a6213 | v1.0.x から変更なし |
 | configs/gemini/settings.windows.json | f061d04699ce366887ae829d0f6fd78ac8d597c9bbaac80bb985332f32d1f012 | v1.0.x から変更なし |
-| configs/codex/config.mac.toml | ba8c3ec6603ae2812918683a8f46c828a79cc432f22323ea9c218672aa029791 | v1.4.1 で `features.hooks=true` 修正（変更なし） |
+| configs/codex/config.mac.toml | 34ac08a64cfe8444351b6d09ec280891763db3e47117b79b062429d2b75a6b13 | Safe Auto Mode: 0.135 で fatal の `[profiles.safe]` を除去し `[permissions.safeprobe]` 追加 |
+| configs/codex/safe.config.toml | 763a59104a8eeb2dbd61bf5a5311c0a709c00a8c466b26eeac76f327fbca36b1 | Safe Auto Mode: 0.135 で `--profile safe` 用に分離したプロファイル層 |
 | configs/codex/config.windows.toml | 005fbee210b77482cb68912610b551a124608a192992346956a57cc724388537 | v1.4.1 で `features.hooks=true` 修正（変更なし） |
 | configs/gemini/policies/safety.toml | d63830fc7548c9987a1d84b7ec0212b6527f639a6af808ee29d00427ceb87f3c | v1.0.x から変更なし |
 | workspace-template/aiexclude.template | 9fee69aa1fa5dc7253ebb1419bc1f28b4ca24c8c794f5c6fcc011a1c4a2e444b | v1.0.x から変更なし |
