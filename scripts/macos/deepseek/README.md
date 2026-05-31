@@ -1,0 +1,79 @@
+# DeepSeek で Claude Code を使う（Mac・ガード付き）
+
+このフォルダの3つの `.command` は、**本パッケージの保護フック（ガード）が効いたまま**、
+バックエンドだけ DeepSeek に向けた Claude Code を起動するためのものです。
+Windows 版（`scripts/windows/deepseek/`）の Mac 対等版です。
+
+> 前提：先に `install-one-click.command` で安全パッケージをインストールしておくこと。
+> 起動 `.command` は workspace（`~/Documents/my-ai-workspace`）の
+> `launch-claude-safe.sh` を呼び出します。workspace が無いと起動できません。
+
+---
+
+## ⚠ 最初に正しく理解すること（overclaim 防止）
+
+- **会話内容は DeepSeek（中国管轄のサーバー）に送信されます。**
+- 本パッケージのガードは、AI の**ツール操作の暴走**（ファイル削除・危険なコマンド実行・
+  機微ファイルの読み書き等）を止めます。
+- ガードは **DeepSeek への「送信そのもの」は止めません。**
+  「ガードがあるから DeepSeek でも完全に安全」というのは**誤り**です。
+- したがって：**流出して困る情報（本物の API キー・パスワード・顧客名・社外秘・
+  個人情報）は入力しない**こと。
+
+---
+
+## 3つのファイルの役割
+
+| ファイル | いつ使う | 何をする |
+|---|---|---|
+| `登録-初回だけ.command` | 初回に1回だけ | DeepSeek の API キーを `~/.deepseek-claude/auth`（権限 600）に保存（起動ファイルに平文で書かない） |
+| `起動-Claude-DeepSeek.command` | 毎日 | ① DeepSeek 同意ゲート → ② 環境変数を前差し → ③ `launch-claude-safe.sh` 経由で起動 |
+| `キー削除.command` | 授業後 | `~/.deepseek-claude/auth` を削除 |
+
+> Mac には Windows の `setx`（永続環境変数）が無いため、キーは権限 600 のファイルに
+> 分離して保存し、起動 `.command` がそこから読み込みます。考え方は Windows 版と同じ
+> （毎日使う起動ファイルに平文を残さない）です。
+
+---
+
+## 使い方
+
+1. **DeepSeek の API キーを取る**：https://platform.deepseek.com/ でサインアップ →
+   少額だけ Top up → API keys → Create new API key → すぐコピー。
+2. **`登録-初回だけ.command` をダブルクリック** → キーを貼り付けて Enter（入力は非表示）。
+3. **`起動-Claude-DeepSeek.command` をダブルクリック** → 赤枠の同意ゲートで `yes` →
+   Claude Code が起動。画面のモデル表示が **`deepseek-v4-pro`** ならOK。
+4. **授業後：** `キー削除.command` をダブルクリック ＋ DeepSeek 管理画面でもキーを Delete。
+
+> 初回ダブルクリック時に Gatekeeper が「開発元を確認できません」と出たら、
+> Finder で右クリック →「開く」、または `chmod +x *.command` 済みであることを確認。
+
+---
+
+## 「本当に DeepSeek が動いている」確認
+
+- 画面のモデル名が `deepseek-v4-pro`。
+- 数回質問後、https://platform.deepseek.com/ の Usage / Billing で**残高が減っていれば確実**。
+
+---
+
+## つまずき対処
+
+### ① モデル名で「無効」エラー（GitHub Issue #56990）
+`起動-Claude-DeepSeek.command` の `ANTHROPIC_MODEL` を差し替え：
+- **A案**：`export ANTHROPIC_CUSTOM_MODEL_OPTION="deepseek-v4-pro"`（検証スキップ）
+- **B案**：`ANTHROPIC_MODEL` 行を消し、起動後 `/model` で opus を選ぶ。
+
+### ②「あなたは誰？」で「私は Claude」と答える
+故障でも詐称でもありません。Claude Code のシステムプロンプトに「あなたは Claude です」と
+書いてあり DeepSeek がそう名乗るだけ。確認は自己紹介ではなく**モデル名表示と請求**で。
+
+### ③ 漏えい対策の運用
+各自でキー作成 / 少額チャージ / 授業後に削除（`キー削除.command` ＋ 管理画面 Delete）。
+
+---
+
+## 出典（一次情報）
+- DeepSeek 公式 Claude Code 連携: https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
+- DeepSeek 公式 Anthropic API: https://api-docs.deepseek.com/guides/anthropic_api
+- 非 Anthropic モデル名の検証問題: https://github.com/anthropics/claude-code/issues/56990

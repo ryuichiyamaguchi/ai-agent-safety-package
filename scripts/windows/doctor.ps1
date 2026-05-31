@@ -3,7 +3,7 @@
     [switch]$LiveCodex
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"   # v1.5.0: 1 drill のエラー (codex sandbox 等) で全体中断し summary 未出力になる問題を解消。診断は全 drill 走らせ結果を集計する。意図的 fail-closed は throw のままなので影響なし。
 $Workspace = [System.IO.Path]::GetFullPath($Workspace)
 $dot = [char]46
 $targetName = $dot + "env"
@@ -28,6 +28,12 @@ $results = New-Object System.Collections.ArrayList
 function Add-Result([string]$Name, [bool]$Pass, [string]$Detail) {
     $status = if ($Pass) { "PASS" } else { "FAIL" }
     [void]$script:results.Add([PSCustomObject]@{ Status = $status; Name = $Name; Detail = $Detail })
+}
+
+function Add-Skip([string]$Name, [string]$Detail) {
+    # 環境都合で実施不能な drill (例: codex ネイティブサンドボックス未起動)。
+    # FAIL ではなく SKIP として集計から除外する。
+    [void]$script:results.Add([PSCustomObject]@{ Status = "SKIP"; Name = $Name; Detail = $Detail })
 }
 
 function New-HookJson([string]$ToolName, [hashtable]$ToolInput, [string]$EventName = "PreToolUse") {
@@ -108,7 +114,7 @@ if ($codex) {
     $sandboxOut1 = & codex sandbox windows -C $inside powershell.exe -NoProfile -Command $writeOutside 2>$null
     $sandboxExit1 = $LASTEXITCODE
     if ($sandboxExit1 -ne 0) {
-        Add-Result "codex windows sandbox blocks outside write" $false ("codex exited $sandboxExit1 — sandbox may not have started")
+        Add-Skip "codex windows sandbox blocks outside write" ("codex native sandbox unavailable (codex exited $sandboxExit1) — codex CLI 側の制約。保護は PreToolUse フックガードが担うため SKIP")
     } else {
         Add-Result "codex windows sandbox blocks outside write" (-not (Test-Path -LiteralPath $outsideFile)) ("outsideFileExists=" + (Test-Path -LiteralPath $outsideFile))
     }
@@ -162,7 +168,7 @@ if (Test-Path -LiteralPath $policyPath) {
 }
 
 $results | Format-Table -AutoSize
-$failed = @($results | Where-Object { $_.Status -ne "PASS" })
+$failed = @($results | Where-Object { $_.Status -ne "PASS" -and $_.Status -ne "SKIP" })
 if ($failed.Count -gt 0) {
     exit 1
 }

@@ -1,6 +1,6 @@
 # 既知の問題
 
-v1.4.4 時点で把握している既知の問題と回避策。
+v1.5.0 時点で把握している既知の問題と回避策。
 
 ## Gemini CLI → Antigravity CLI 並立対応（v1.3.0 時点）
 
@@ -75,6 +75,14 @@ powershell -ExecutionPolicy Bypass -File <スクリプトパス>
 `codex sandbox windows` が `elevated`（Admin 必要）モードでしか強力に動かないケース。`unelevated` は弱い。
 
 → hook 層で同等の防御を行うため、サンドボックス単独で守られない場合も hook で塞がる。`doctor` で確認可能。
+
+### codex の Windows サンドボックスが一部環境で起動しない
+
+codex-cli 0.135.0 で `codex sandbox windows` が `CreateProcessAsUserW failed: 2` で失敗し、`doctor` の「codex windows sandbox blocks outside write」drill が FAIL する場合があります。
+
+これは **codex CLI 自身のサンドボックス機能の問題**で、本パッケージの PreToolUse フックガードは正常に機能しています（`doctor` の guard drill 1〜7 は全 PASS）。codex の defense-in-depth が一段減るだけで、ガードによる保護は維持されます。
+
+回避策・原因は調査中（codex バージョン依存の可能性）。
 
 ### Windows Defender SmartScreen の警告
 

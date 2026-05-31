@@ -92,11 +92,11 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 
 | ファイル | SHA-256 | 備考 |
 |---------|---------|------|
-| policy/safety-policy.json | 435f745b0ad4f80549c1762a12c8962e9419a266f9697f20b4b6a019d89472dd | v1.4.4 で packageVersion を 1.4.4 に bump |
+| policy/safety-policy.json | 42b0abdcb62b8677686e3051b702ca2c9fd2707d0426c40ba16df28b1ebb82ba | v1.5.0 で packageVersion を 1.5.0 に bump |
 | configs/codex/hooks.mac.json | 6f03deee71871c40dd81d098867a4860284700f98135fbb05730936738a729ca | v1.0.x から変更なし |
 | configs/codex/hooks.windows.json | 9e7292426dd844ebe4d6ffa20f92f2283e9c1f6e704412bb1321117d4eb62d6a | v1.0.x から変更なし |
-| configs/claude/settings.mac.json | 38b720bbe14be938574c7411913ad7c01313bfb4c8ebefd02d0f5d8d6b4740d6 | v1.4.1 で env exfil deny 追加（変更なし） |
-| configs/claude/settings.windows.json | 2886773553d02d868cb01501a1ce3683891bea2dc88e803654f4d8c24dc79661 | v1.4.1 で env exfil deny 追加（変更なし） |
+| configs/claude/settings.mac.json | 8dbfee7f872fa15d0695526035bc358f6a699065d10985f80c1fe3d15f05d629 | v1.5.0 で env の壊れた AI_SAFE_LOG_DIR 行を削除 |
+| configs/claude/settings.windows.json | ed5eb26a81f3fd803cc5b793d3ed30af22feee60c95457cf350a3cca56628d9e | v1.5.0 で env の壊れた AI_SAFE_LOG_DIR 行を削除 |
 | configs/gemini/settings.mac.json | b9f45bac5583930c6b44a07a2351c6bd21722503de82983e63cd5f38db2a6213 | v1.0.x から変更なし |
 | configs/gemini/settings.windows.json | f061d04699ce366887ae829d0f6fd78ac8d597c9bbaac80bb985332f32d1f012 | v1.0.x から変更なし |
 | configs/codex/config.mac.toml | ba8c3ec6603ae2812918683a8f46c828a79cc432f22323ea9c218672aa029791 | v1.4.1 で `features.hooks=true` 修正（変更なし） |

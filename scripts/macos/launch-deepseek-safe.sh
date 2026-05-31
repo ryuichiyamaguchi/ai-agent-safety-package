@@ -13,14 +13,20 @@
 # 使い方:
 #   launch-deepseek-safe.sh           # 警告 + 同意確認 + 案内
 #   launch-deepseek-safe.sh --skip-warning   # 同意確認だけスキップ（推奨しない）
+#   launch-deepseek-safe.sh --consent-only   # 赤枠警告 + 同意確認までで終了
+#                                            # （Web UI 用ワークフロー案内は出さない）
 
 set -u
 LANG=${LANG:-en_US.UTF-8}
 
 SKIP_WARNING=0
-if [ "${1:-}" = "--skip-warning" ]; then
-  SKIP_WARNING=1
-fi
+CONSENT_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --skip-warning) SKIP_WARNING=1 ;;
+    --consent-only) CONSENT_ONLY=1 ;;
+  esac
+done
 
 if [ -t 1 ]; then
   C_RED=$'\033[1;31m'; C_YEL=$'\033[1;33m'; C_GRN=$'\033[1;32m'; C_RST=$'\033[0m'
@@ -63,6 +69,12 @@ if [ "$SKIP_WARNING" -ne 1 ]; then
     echo "${C_GRN}キャンセルしました。${C_RST}"
     exit 1
   fi
+fi
+
+# --consent-only: 同意確認だけ取って終了（Claude Code on DeepSeek 文脈では
+# クリップボード貼り付けが発生しないため、以降の Web UI 用案内は出さない）。
+if [ "$CONSENT_ONLY" -eq 1 ]; then
+  exit 0
 fi
 
 echo ""

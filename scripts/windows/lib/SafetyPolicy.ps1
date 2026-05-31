@@ -32,7 +32,12 @@ function Get-SafetyPolicy {
 }
 
 function Read-HookInput {
-    $raw = [Console]::In.ReadToEnd()
+    # UTF-8 で stdin を読む。Claude Code/Codex のフック入力 JSON は UTF-8。
+    # [Console]::In はコンソール codepage (日本語 Windows では CP932) で読むため、
+    # 日本語プロンプトが壊れて ConvertFrom-Json が落ち Fail-Closed していた。
+    $stdinStream = [Console]::OpenStandardInput()
+    $stdinReader = New-Object System.IO.StreamReader($stdinStream, [System.Text.Encoding]::UTF8)
+    try { $raw = $stdinReader.ReadToEnd() } finally { $stdinReader.Dispose() }
     if ($raw.Length -gt 262144) {
         $raw = $raw.Substring(0, 262144)
     }
