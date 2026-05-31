@@ -4,7 +4,7 @@ setlocal
 set "HERE=%~dp0"
 set "TARGET=%HERE%scripts\windows\install-one-click.bat"
 if not exist "%TARGET%" (
-  echo 繧､繝ｳ繧ｹ繝医�ｼ繝ｩ縺瑚ｦ九▽縺九ｊ縺ｾ縺帙ｓ: %TARGET%
+  echo インストーラが見つかりません: %TARGET%
   pause
   exit /b 1
 )
