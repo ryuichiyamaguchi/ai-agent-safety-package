@@ -196,6 +196,8 @@ fi
 
 # Safe Auto Mode: 隔離ドリルをフル doctor にも組み込む(集計に反映)。
 # codex が無い等で HOLD のときは SKIP 扱い(集計から除外)。
+# フル doctor の HOLD=SKIP は表示専用。launcher の自動判定は --isolation-check(strict: HOLD=非0)を
+# 使うため、ここの SKIP が自動承認解放に影響することはない。
 drills_lib="$(cd "$(dirname "$0")" && pwd)/lib/isolation_drills.sh"
 if [ -f "$drills_lib" ]; then
   # shellcheck disable=SC1090

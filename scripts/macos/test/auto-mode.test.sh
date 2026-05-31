@@ -40,6 +40,7 @@ WS="$(mktemp -d)"; mkdir -p "$WS/.ai-safety/policy"
 echo '{}' > "$WS/.ai-safety/policy/safety-policy.json"
 STUB_OK="$(mktemp)";  printf '#!/bin/sh\nexit 0\n' > "$STUB_OK";  chmod +x "$STUB_OK"
 STUB_NG="$(mktemp)";  printf '#!/bin/sh\necho "FAIL egress indeterminate"\nexit 1\n' > "$STUB_NG"; chmod +x "$STUB_NG"
+trap 'rm -rf "$WS" "$STUB_OK" "$STUB_NG" 2>/dev/null' EXIT
 
 # green: doctor が exit 0 → on-failure に解放
 out_ok="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_OK" bash "$LAUNCH_C" "$WS" "" --auto 2>/dev/null)"
@@ -57,20 +58,21 @@ out_def="$(AI_SAFE_DRY_RUN=1 bash "$LAUNCH_C" "$WS" "" 2>/dev/null)"
 printf '%s' "$out_def" | grep -q -- "--ask-for-approval untrusted" && ok "codex no-auto stays untrusted" || ng "codex no-auto stays untrusted"
 
 # --- Task 5: launch-agy-safe.sh --auto branch ---
+# AGY="$STUB_OK" は agy バイナリ検出を満たすためのダミー(実行はされない=DRY_RUN)。
+# グローバル export は避け、各呼び出しに inline で渡す。
 LAUNCH_A="$HERE/../launch-agy-safe.sh"
-export AGY="$STUB_OK"   # agy バイナリ検出を満たすためのダミー(実行はされない=DRY_RUN)
 # green: doctor 0 → --dangerously-skip-permissions が付く(--sandbox は維持)
-out_a_ok="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_OK" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"
+out_a_ok="$(AI_SAFE_DRY_RUN=1 AGY="$STUB_OK" AI_SAFE_DOCTOR="$STUB_OK" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"
 printf '%s' "$out_a_ok" | grep -q -- "--sandbox" && ok "agy --auto keeps --sandbox" || ng "agy --auto keeps --sandbox"
 printf '%s' "$out_a_ok" | grep -q -- "--dangerously-skip-permissions" && ok "agy green -> skip-permissions" || ng "agy green -> skip-permissions"
 # green でも未実証である旨を stderr に出す(overclaim 回避)
-err_a_ok="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_OK" bash "$LAUNCH_A" "$WS" "" --auto 2>&1 1>/dev/null)"
+err_a_ok="$(AI_SAFE_DRY_RUN=1 AGY="$STUB_OK" AI_SAFE_DOCTOR="$STUB_OK" bash "$LAUNCH_A" "$WS" "" --auto 2>&1 1>/dev/null)"
 printf '%s' "$err_a_ok" | grep -qi "未検証\|未実証\|verified" && ok "agy green shows unverified caveat" || ng "agy green shows unverified caveat"
-# 赤(agy 無し相当): --dangerously-skip-permissions を付けずフォールバック + 理由表示
-err_a_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_A" "$WS" "" --auto 2>&1 1>/dev/null)"
+# 赤(doctor 非0): --dangerously-skip-permissions を付けずフォールバック + 理由表示
+err_a_ng="$(AI_SAFE_DRY_RUN=1 AGY="$STUB_OK" AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_A" "$WS" "" --auto 2>&1 1>/dev/null)"
 printf '%s' "$err_a_ng" | grep -qi "オートを有効にできません" && ok "agy red shows reason" || ng "agy red shows reason"
 # 赤でも --sandbox 付きで dry-run 成功(exit 0)すること = クラッシュしていないことを明示検証。
-out_a_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"; rc_ng=$?
+out_a_ng="$(AI_SAFE_DRY_RUN=1 AGY="$STUB_OK" AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"; rc_ng=$?
 printf '%s' "$out_a_ng" | grep -q -- "--sandbox" && [ "$rc_ng" -eq 0 ] && ok "agy red still launches with --sandbox" || ng "agy red launch broken"
 printf '%s' "$out_a_ng" | grep -q -- "--dangerously-skip-permissions" && ng "agy red must NOT skip-permissions" || ok "agy red stays safe (no skip-permissions)"
 
