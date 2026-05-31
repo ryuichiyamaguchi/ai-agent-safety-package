@@ -68,8 +68,7 @@ else
   echo ""
 fi
 
-# -- DeepSeek バックエンドへ向ける環境変数を前差し ------------------
-export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
+# -- DeepSeek backend 環境変数（BASE_URL は Gateway 側で設定） ------
 export ANTHROPIC_MODEL="deepseek-v4-pro"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"
 
@@ -80,16 +79,24 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"
 #   B案（動けばよい・表示は Opus）: ANTHROPIC_MODEL 行を消し、
 #     起動後に /model で opus を選ぶ（サーバ側で v4 に振り分け）。
 
-# -- ガード付き Claude Code を起動（素の claude は呼ばない） ----------
-# launch-claude-safe.sh に workspace を渡す。スクリプト内で workspace に
-# cd し、.claude/settings.json の PreToolUse hook（ガード）を効かせたまま
-# claude を起動する。バックエンドだけ DeepSeek に向く。
+# -- 送信検査 Gateway 経由でガード付き Claude Code を起動 ----------
+# launch-deepseek-gateway.sh が ds-gateway を起動し、health 確認後に
+# ANTHROPIC_BASE_URL をプロキシへ向けてから launch-claude-safe.sh を呼ぶ。
+# 送信プロンプトは DeepSeek 到達前に機微情報マスキングされ、ガード
+# （PreToolUse hook）も継続して効く。
+GATEWAY_LAUNCH="$HOOKS/deepseek/launch-deepseek-gateway.sh"
 echo ""
-echo "DeepSeek バックエンドで Claude Code を起動します..."
-echo "（画面のモデル表示が deepseek-v4-pro になっていればOK）"
+echo "送信検査 Gateway 経由で DeepSeek バックエンドの Claude Code を起動します..."
+echo "（送信プロンプトは DeepSeek 到達前に機微情報マスキングされます）"
 echo ""
-bash "$LAUNCH_CLAUDE" "$WORKSPACE"
-EXITCODE=$?
+if [ -f "$GATEWAY_LAUNCH" ]; then
+  bash "$GATEWAY_LAUNCH" "$WORKSPACE"
+  EXITCODE=$?
+else
+  echo "【エラー】送信検査 Gateway ($GATEWAY_LAUNCH) が見つかりません。"
+  echo "  最新の安全パッケージを再インストールしてください。"
+  EXITCODE=1
+fi
 
 echo ""
 echo "Claude Code（DeepSeek）を終了しました。"
