@@ -8,6 +8,9 @@ $hooks = Join-Path $Workspace '.ai-safety\hooks'
 $gatewayJs = Join-Path $hooks 'common\ds-gateway.js'
 $launchClaude = Join-Path $hooks 'windows\launch-claude-safe.ps1'
 $port = if ($env:DS_GATEWAY_PORT) { $env:DS_GATEWAY_PORT } else { '8788' }
+# 自プロセス識別用の nonce。foreign process がポートを占有していても healthz で見分ける（fail-closed）。
+$token = [guid]::NewGuid().ToString('N')
+$env:DS_GATEWAY_HEALTH_TOKEN = $token
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   Write-Host "[ERROR] node not found. Claude Code requires Node.js."; exit 1
@@ -26,7 +29,7 @@ try {
   for ($i = 0; $i -lt 50; $i++) {
     try {
       $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/healthz" -UseBasicParsing -TimeoutSec 1
-      if ($r.Content -match '"status":"ok"') { $ok = $true; break }
+      if ($r.Content -match '"status":"ok"' -and $r.Content -match $token) { $ok = $true; break }
     } catch { Start-Sleep -Milliseconds 100 }
   }
   if (-not $ok) {
