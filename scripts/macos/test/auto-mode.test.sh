@@ -34,5 +34,27 @@ bash "$DOCTOR" --isolation-check codex >/dev/null 2>&1; rc=$?
 # 未知 engine は必ず非0
 bash "$DOCTOR" --isolation-check bogus >/dev/null 2>&1; [ $? -ne 0 ] && ok "isolation-check unknown engine non-zero" || ng "isolation-check unknown engine non-zero"
 
+# --- Task 4: launch-codex-safe.sh --auto branch (dry-run + doctor stub) ---
+LAUNCH_C="$HERE/../launch-codex-safe.sh"
+WS="$(mktemp -d)"; mkdir -p "$WS/.ai-safety/policy"
+echo '{}' > "$WS/.ai-safety/policy/safety-policy.json"
+STUB_OK="$(mktemp)";  printf '#!/bin/sh\nexit 0\n' > "$STUB_OK";  chmod +x "$STUB_OK"
+STUB_NG="$(mktemp)";  printf '#!/bin/sh\necho "FAIL egress indeterminate"\nexit 1\n' > "$STUB_NG"; chmod +x "$STUB_NG"
+
+# green: doctor が exit 0 → on-failure に解放
+out_ok="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_OK" bash "$LAUNCH_C" "$WS" "" --auto 2>/dev/null)"
+printf '%s' "$out_ok" | grep -q -- "--ask-for-approval on-failure" && ok "codex --auto green -> on-failure" || ng "codex --auto green -> on-failure"
+
+# 赤: doctor が exit 1 → untrusted にフォールバック
+out_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_C" "$WS" "" --auto 2>/dev/null)"
+printf '%s' "$out_ng" | grep -q -- "--ask-for-approval untrusted" && ok "codex --auto red -> untrusted fallback" || ng "codex --auto red -> untrusted fallback"
+# 赤のとき理由が stderr に出る
+err_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_C" "$WS" "" --auto 2>&1 1>/dev/null)"
+printf '%s' "$err_ng" | grep -qi "オートを有効にできません" && ok "codex red shows reason" || ng "codex red shows reason"
+
+# --auto 無し: 従来どおり untrusted(回帰)
+out_def="$(AI_SAFE_DRY_RUN=1 bash "$LAUNCH_C" "$WS" "" 2>/dev/null)"
+printf '%s' "$out_def" | grep -q -- "--ask-for-approval untrusted" && ok "codex no-auto stays untrusted" || ng "codex no-auto stays untrusted"
+
 echo "auto-mode.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]
