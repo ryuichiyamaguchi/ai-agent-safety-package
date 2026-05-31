@@ -6,20 +6,24 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { URL } = require('node:url');
-const { maskSecrets } = require('./secret-patterns.js');
+const { maskText } = require('./secret-patterns.js');
+const { createTokenMap } = require('./token-map.js');
+const { loadDenylist } = require('./denylist.js');
 
 const DEFAULT_PORT = Number(process.env.DS_GATEWAY_PORT || 8788);
 const DEFAULT_UPSTREAM = process.env.DS_GATEWAY_UPSTREAM || 'https://api.deepseek.com/anthropic';
 
-function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT } = {}) {
+function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT,
+                        tokenMap = createTokenMap(), denylistTerms = loadDenylist() } = {}) {
   const upstreamUrl = new URL(upstream);
+  const session = { tokenMap, denylistTerms };
   const server = http.createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end('{"status":"ok"}');
       return;
     }
-    handleProxy(req, res, upstreamUrl).catch(() => {
+    handleProxy(req, res, upstreamUrl, session).catch(() => {
       if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' });
       if (!res.writableEnded) res.end('{"error":"ds-gateway: internal error (fail-closed)"}');
     });
@@ -50,35 +54,35 @@ function addCounts(acc, c) {
   for (const k of Object.keys(c)) acc[k] = (acc[k] || 0) + c[k];
 }
 
-function maskValue(v, counts) {
+function maskValue(v, counts, ctx) {
   // Generic deep-walk: mask EVERY string leaf in any string/array/object.
   // This uniformly covers text, tool_result.content, tool_use.input, and any future fields.
   if (typeof v === 'string') {
-    const r = maskSecrets(v);
+    const r = maskText(v, { alloc: ctx.alloc, denylistTerms: ctx.denylistTerms });
     addCounts(counts, r.counts);
     return r.masked;
   }
   if (Array.isArray(v)) {
-    return v.map((item) => maskValue(item, counts));
+    return v.map((item) => maskValue(item, counts, ctx));
   }
   if (v && typeof v === 'object') {
     const out = {};
-    for (const k of Object.keys(v)) out[k] = maskValue(v[k], counts);
+    for (const k of Object.keys(v)) out[k] = maskValue(v[k], counts, ctx);
     return out;
   }
   return v; // numbers, booleans, null
 }
 
-function maskRequestBody(json) {
+function maskRequestBody(json, ctx) {
   const counts = {};
   // v1: only messages/system are scanned (Anthropic Messages API shape). Audit this when adding endpoints whose payloads carry user text in other fields.
   if (!json || (json.messages === undefined && json.system === undefined)) {
     return { json, counts, changed: false };
   }
-  if (json.system !== undefined) json.system = maskValue(json.system, counts);
+  if (json.system !== undefined) json.system = maskValue(json.system, counts, ctx);
   if (Array.isArray(json.messages)) {
     json.messages = json.messages.map((m) =>
-      (m && m.content !== undefined) ? { ...m, content: maskValue(m.content, counts) } : m);
+      (m && m.content !== undefined) ? { ...m, content: maskValue(m.content, counts, ctx) } : m);
   }
   return { json, counts, changed: true };
 }
@@ -106,7 +110,7 @@ function logDetection(reqUrl, counts) {
   } catch (_) { /* ログ失敗で送信は止めない */ }
 }
 
-async function handleProxy(req, res, upstreamUrl) {
+async function handleProxy(req, res, upstreamUrl, session) {
   const raw = await readBody(req);
   const ct = (req.headers['content-type'] || '').toLowerCase();
   let outBody = raw;
@@ -127,17 +131,18 @@ async function handleProxy(req, res, upstreamUrl) {
       res.end('{"error":"ds-gateway: unparseable JSON; not forwarded (fail-closed)"}');
       return;
     }
-    const { json, counts, changed } = maskRequestBody(parsed);
+    const ctx = { alloc: (v, c) => session.tokenMap.alloc(v, c), denylistTerms: session.denylistTerms };
+    const { json, counts, changed } = maskRequestBody(parsed, ctx);
     if (changed) {
       outBody = Buffer.from(JSON.stringify(json), 'utf8');
       logDetection(req.url.split('?')[0], counts);
     }
   }
 
-  forward(req, res, upstreamUrl, outBody);
+  forward(req, res, upstreamUrl, outBody, session);
 }
 
-function forward(req, res, upstreamUrl, body) {
+function forward(req, res, upstreamUrl, body, session) {
   const isHttps = upstreamUrl.protocol === 'https:';
   const lib = isHttps ? https : http;
   const headers = { ...req.headers };

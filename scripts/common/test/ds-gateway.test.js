@@ -239,3 +239,17 @@ test('writes a detection log line with source ds-gateway and no raw values', asy
   assert.ok(!line.includes('sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX'), 'must not log raw value');
   assert.ok(!ev.path.includes('?'), 'query string must be stripped from logged path');
 });
+
+test('reversible PII becomes a token in the forwarded body; hard secret stays masked', async () => {
+  let received = null;
+  const up = await startUpstream((req,res)=>{ let b=''; req.on('data',c=>b+=c); req.on('end',()=>{received=b; res.writeHead(200,{'content-type':'application/json'}); res.end('{}');}); });
+  after(()=>up.close());
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0 });
+  const server = await gw.listen(); after(()=>server.close());
+  await postJson(server.address().port, '/v1/messages', { messages:[
+    { role:'user', content:'連絡先 user@example.com と key sk-ant-ABCDEFGHIJKLMNOPQRSTUVWX' },
+  ]});
+  assert.ok(!received.includes('user@example.com'), 'email not sent raw');
+  assert.match(received, /〔R\d+〕/, 'email replaced by reversible token');
+  assert.ok(received.includes('[MASKED:anthropic]'), 'hard secret irreversible');
+});
