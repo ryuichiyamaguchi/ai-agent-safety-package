@@ -80,9 +80,9 @@ New-Item -ItemType Directory -Path (Join-Path $ws '.ai-safety\policy') -Force | 
 # doctor スタブ: exit 0(green) / exit 1(red) を返す cmd ファイル
 $stubOk = Join-Path ([System.IO.Path]::GetTempPath()) ('stub-ok-' + [guid]::NewGuid().ToString("N") + '.cmd')
 $stubNg = Join-Path ([System.IO.Path]::GetTempPath()) ('stub-ng-' + [guid]::NewGuid().ToString("N") + '.cmd')
-'@exit /b 0' | Set-Content $stubOk
-'@echo FAIL egress indeterminate' | Out-File $stubNg -Encoding ASCII -Append
-'@exit /b 1'  | Out-File $stubNg -Encoding ASCII -Append
+# ASCII 固定 + BOM なしで書く(cmd.exe は UTF-8 BOM を認識しないため)
+[System.IO.File]::WriteAllText($stubOk, "@exit /b 0`r`n", [System.Text.Encoding]::ASCII)
+[System.IO.File]::WriteAllText($stubNg, "@echo FAIL egress indeterminate`r`n@exit /b 1`r`n", [System.Text.Encoding]::ASCII)
 
 # green: doctor が exit 0 → on-failure に解放
 $env:AI_SAFE_DRY_RUN = '1'; $env:AI_SAFE_DOCTOR = $stubOk
