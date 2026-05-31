@@ -144,9 +144,32 @@ test('returns 502 when upstream is unreachable', async () => {
   assert.strictEqual(res.status, 502);
 });
 
+test('masks secrets in nested tool_result and tool_use blocks', async () => {
+  let received = null;
+  const up = await startUpstream((req,res)=>{ let b=''; req.on('data',c=>b+=c); req.on('end',()=>{received=b; res.writeHead(200,{'content-type':'application/json'}); res.end('{}');}); });
+  after(()=>up.close());
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0 });
+  const server = await gw.listen(); after(()=>server.close());
+  await postJson(server.address().port, '/v1/messages', { messages: [
+    { role:'user', content:[{ type:'tool_result', tool_use_id:'x', content:[{ type:'text', text:'env has sk-ant-AAAAAAAAAAAAAAAAAAAAAA here' }] }] },
+    { role:'assistant', content:[{ type:'tool_use', id:'y', name:'t', input:{ api_key:'sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX' } }] },
+  ]});
+  assert.ok(!received.includes('sk-ant-AAAAAAAAAAAAAAAAAAAAAA'), 'tool_result text leaked');
+  assert.ok(!received.includes('sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX'), 'tool_use input leaked');
+  // structure preserved
+  const fwd = JSON.parse(received);
+  assert.strictEqual(fwd.messages[0].content[0].type, 'tool_result');
+  assert.strictEqual(fwd.messages[1].content[0].type, 'tool_use');
+});
+
 test('writes a detection log line with source ds-gateway and no raw values', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-'));
+  const prevLogDir = process.env.AI_SAFE_LOG_DIR;
   process.env.AI_SAFE_LOG_DIR = tmp;
+  after(() => {
+    if (prevLogDir === undefined) delete process.env.AI_SAFE_LOG_DIR;
+    else process.env.AI_SAFE_LOG_DIR = prevLogDir;
+  });
   const up = await startUpstream((req,res)=>{ req.resume(); res.writeHead(200); res.end('{}'); });
   after(()=>up.close());
   const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0 });

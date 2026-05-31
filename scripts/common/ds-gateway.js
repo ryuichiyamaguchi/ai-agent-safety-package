@@ -19,7 +19,10 @@ function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT } = {}
       res.end('{"status":"ok"}');
       return;
     }
-    handleProxy(req, res, upstreamUrl);
+    handleProxy(req, res, upstreamUrl).catch(() => {
+      if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' });
+      if (!res.writableEnded) res.end('{"error":"ds-gateway: internal error (fail-closed)"}');
+    });
   });
   return {
     listen() {
@@ -49,10 +52,22 @@ function maskValue(v, counts) {
   }
   if (Array.isArray(v)) {
     return v.map((block) => {
-      if (block && typeof block === 'object' && typeof block.text === 'string') {
-        const r = maskSecrets(block.text);
-        addCounts(counts, r.counts);
-        return { ...block, text: r.masked };
+      if (block && typeof block === 'object') {
+        if (typeof block.text === 'string') {
+          const r = maskSecrets(block.text);
+          addCounts(counts, r.counts);
+          return { ...block, text: r.masked };
+        }
+        // tool_result: nested content array (or string)
+        if (block.content !== undefined) {
+          return { ...block, content: maskValue(block.content, counts) };
+        }
+        // tool_use: input object — scan its JSON serialization
+        if (block.input && typeof block.input === 'object') {
+          const r = maskSecrets(JSON.stringify(block.input));
+          addCounts(counts, r.counts);
+          try { return { ...block, input: JSON.parse(r.masked) }; } catch (_) { return block; }
+        }
       }
       return block;
     });
@@ -62,6 +77,7 @@ function maskValue(v, counts) {
 
 function maskRequestBody(json) {
   const counts = {};
+  // v1: only messages/system are scanned (Anthropic Messages API shape). Audit this when adding endpoints whose payloads carry user text in other fields.
   if (!json || (json.messages === undefined && json.system === undefined)) {
     return { json, counts, changed: false };
   }
@@ -101,6 +117,7 @@ async function handleProxy(req, res, upstreamUrl) {
   const ct = (req.headers['content-type'] || '').toLowerCase();
   let outBody = raw;
 
+  // v1: only application/json POST bodies are scanned. Claude Code always sends application/json for Messages API. Revisit if new non-JSON endpoints carry user text.
   if (req.method === 'POST' && ct.includes('application/json') && raw.length) {
     let parsed;
     try {
@@ -127,20 +144,27 @@ function forward(req, res, upstreamUrl, body) {
   headers.host = upstreamUrl.host;
   headers['content-length'] = Buffer.byteLength(body);
   delete headers['accept-encoding'];
+  const HOP_BY_HOP = ['connection','keep-alive','proxy-authenticate','proxy-authorization','te','trailer','transfer-encoding','upgrade'];
+  for (const h of HOP_BY_HOP) delete headers[h];
 
   const basePath = upstreamUrl.pathname.replace(/\/$/, '');
-  const path = basePath + req.url;
+  const reqPath = basePath + req.url;
 
   const upReq = lib.request(
     { protocol: upstreamUrl.protocol, host: upstreamUrl.hostname,
-      port: upstreamUrl.port || (isHttps ? 443 : 80), method: req.method, path, headers },
+      port: upstreamUrl.port || (isHttps ? 443 : 80), method: req.method, path: reqPath, headers },
     (upRes) => {
       res.writeHead(upRes.statusCode, upRes.headers);
+      upRes.on('error', () => { if (!res.writableEnded) res.end(); });
       upRes.pipe(res);
     });
-  upReq.on('error', (e) => {
-    if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' });
-    res.end('{"error":"ds-gateway: upstream unreachable (fail-closed)"}');
+  upReq.on('error', () => {
+    if (!res.headersSent) {
+      res.writeHead(502, { 'content-type': 'application/json' });
+      res.end('{"error":"ds-gateway: upstream unreachable (fail-closed)"}');
+    } else if (!res.writableEnded) {
+      res.end();
+    }
   });
   upReq.end(body);
 }
