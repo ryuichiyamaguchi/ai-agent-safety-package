@@ -189,6 +189,10 @@ launch-agy-safe.sh [workspace] [prompt] [--auto]
   - **影響 2**: **既存の `doctor.sh` の codex sandbox チェック (line ~53-66) も同じ旧構文で、現行 codex では偽 PASS している** (v1.5.0 出荷済みの既存バグ)。
   - **対応 (別エンゲージメント推奨)**: codex 0.135.0 の `[permissions]` スキーマを調査し、`config.{mac,windows}.toml` と doctor の sandbox 呼び出し (既存 + 新規ドリル) を新構文に移行する。Safe Auto Mode の実装ロジック自体は終了コード契約で正しく、この移行とは独立 (移行後に green パスが有効化される)。
 - **ネット送信ドリルの分類精度 (mitigated・移行時に併修推奨)**: `_probe_egress`(mac) / `Get-EgressProbe`(Windows) は `codex sandbox ... 2>&1` で内側プローブと外側 codex の stderr をマージして判定するため、外側 codex の起動失敗メッセージに "refused" 等が含まれると 'refused'(=PASS)に誤分類しうる。**ただし自動承認解放には至らない**: 同時に走る workspace-外書込ドリルが codex 起動失敗で HOLD を返し、`--isolation-check` 全体が非0(フォールバック)になるため。緩和済みだが、上記 codex sandbox 移行で drill を作り直す際に「内側プローブの stdout のみを採取」する形へ tighten すること (mac/Windows 両方)。
+- **最終レビュー (2026-06-01) で出た Minor 3 点 (いずれも fail-closed を破らず・上記移行/Windows 実機検証と同バッチで対応推奨)**:
+  - **M-1**: Windows `IsolationDrills.ps1` の egress 分類キーワードが `access` を含み広すぎる (mac は `operation not permitted|not permitted|denied|refused`)。mac と語彙を揃え `access` を除去 (パリティ回復)。`connected` を先判定するため穴 (FAIL) は取りこぼさず、write-drill HOLD で全体フォールバックするので自動承認解放には至らない。
+  - **M-2**: `launch-codex-safe.sh <ws> "--auto"` のように `--auto` を prompt 位置 ($2) に誤入力すると auto は off のまま (安全) だが `--auto` 文字列が codex の prompt として渡る。docs に正位置を明記済みで許容範囲。任意で位置非依存フラグ化 or 警告。
+  - **M-3**: Windows launcher の `$jobRc -eq 0` は `Receive-Job` が配列を返すと脆い (実害方向は fail-closed 側)。Windows 実機検証時に `Receive-Job` 戻り値の型を確認し、必要なら `@($jobRc)[-1]` で末尾整数を取る形へ。
 
 ---
 
