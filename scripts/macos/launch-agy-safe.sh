@@ -71,7 +71,9 @@ if [ "$auto" -eq 1 ]; then
   fi
 fi
 
-cmd=("$AGY" --sandbox --add-dir "$workspace" "${auto_args[@]}")
+# bash 3.2 + set -u では空配列の "${arr[@]}" 展開が unbound variable でクラッシュするため、
+# ${arr[@]+"${arr[@]}"}(空配列でも安全な展開)を使う。
+cmd=("$AGY" --sandbox --add-dir "$workspace" ${auto_args[@]+"${auto_args[@]}"})
 
 if [ "${AI_SAFE_DRY_RUN:-}" = "1" ]; then
   printf '%s ' "${cmd[@]}"; [ -n "$prompt" ] && printf -- '--prompt %q' "$prompt"; printf '\n'

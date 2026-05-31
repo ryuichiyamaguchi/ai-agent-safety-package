@@ -69,8 +69,15 @@ printf '%s' "$err_a_ok" | grep -qi "未検証\|未実証\|verified" && ok "agy g
 # 赤(agy 無し相当): --dangerously-skip-permissions を付けずフォールバック + 理由表示
 err_a_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_A" "$WS" "" --auto 2>&1 1>/dev/null)"
 printf '%s' "$err_a_ng" | grep -qi "オートを有効にできません" && ok "agy red shows reason" || ng "agy red shows reason"
-out_a_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"
+# 赤でも --sandbox 付きで dry-run 成功(exit 0)すること = クラッシュしていないことを明示検証。
+out_a_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"; rc_ng=$?
+printf '%s' "$out_a_ng" | grep -q -- "--sandbox" && [ "$rc_ng" -eq 0 ] && ok "agy red still launches with --sandbox" || ng "agy red launch broken"
 printf '%s' "$out_a_ng" | grep -q -- "--dangerously-skip-permissions" && ng "agy red must NOT skip-permissions" || ok "agy red stays safe (no skip-permissions)"
+
+# --auto 無し: 通常起動(--sandbox のみ)。bash 3.2 で空配列展開クラッシュしないことを検証。
+out_a_def="$(AI_SAFE_DRY_RUN=1 AGY="$STUB_OK" bash "$LAUNCH_A" "$WS" "" 2>/dev/null)"; rc_def=$?
+printf '%s' "$out_a_def" | grep -q -- "--sandbox" && [ "$rc_def" -eq 0 ] && ok "agy no-auto launches (--sandbox only)" || ng "agy no-auto broken"
+printf '%s' "$out_a_def" | grep -q -- "--dangerously-skip-permissions" && ng "agy no-auto must NOT skip-permissions" || ok "agy no-auto has no skip-permissions"
 
 # --- Task 6: full doctor includes isolation drills ---
 full_out="$(bash "$HERE/../doctor.sh" "$WS" 2>/dev/null || true)"
