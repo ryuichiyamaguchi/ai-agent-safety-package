@@ -85,15 +85,12 @@ run_case "7 WebFetch unauthorized domain" "guard-webfetch.sh" "block" "{\"hook_e
 run_case "control allowed docs domain" "guard-webfetch.sh" "allow" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"WebFetch\",\"cwd\":\"$workspace\",\"tool_input\":{\"url\":\"https://docs.anthropic.com/en/docs/claude-code/hooks\",\"prompt\":\"summarize\"}}"
 
 if command -v codex >/dev/null 2>&1; then
-  temp_root="$(mktemp -d)"
-  inside="$temp_root/workspace"
-  outside="$temp_root/outside"
-  mkdir -p "$inside" "$outside"
-  outside_file="$outside/pwn.txt"
-  set +e
-  codex sandbox macos -C "$inside" /bin/sh -lc "echo pwn > '$outside_file'" >/tmp/ai-safe-sandbox.out 2>/tmp/ai-safe-sandbox.err
-  set -e
-  if [ ! -e "$outside_file" ]; then echo "PASS codex mac sandbox blocks outside write"; pass=$((pass + 1)); else echo "FAIL codex mac sandbox outside write"; fail=$((fail + 1)); fi
+  # codex 0.135 系の検証は lib/isolation_drills.sh の drill に一本化する
+  # (旧 `codex sandbox macos` 構文は 0.135 で動かず、偽 PASS の原因だった)。
+  # 実際の write+network 実証は下部の「隔離ドリル」セクションで集計するため、
+  # ここでは codex バイナリの存在のみを確認する。
+  echo "PASS codex command present (sandbox drills evaluated below)"
+  pass=$((pass + 1))
 else
   echo "FAIL codex command missing"
   fail=$((fail + 1))
