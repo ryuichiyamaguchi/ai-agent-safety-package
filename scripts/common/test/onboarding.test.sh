@@ -39,6 +39,13 @@ for f in "$START_DIR/"*.bat; do
   grep -q '%HERE%' "$f" || { note "FAIL: %HERE% なし: $f"; fail=1; }
 done
 
+# 7b) GitHub で文字化けしないよう、上級 DeepSeek .bat は UTF-8 + chcp 65001 に固定
+for base in "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）9_DeepSeekキーを削除"; do
+  f="$START_DIR/$base.bat"
+  iconv -f UTF-8 -t UTF-8 "$f" >/dev/null 2>&1 || { note "FAIL: UTF-8 ではない: $f"; fail=1; }
+  grep -q 'chcp 65001' "$f" || { note "FAIL: chcp 65001 ではない: $f"; fail=1; }
+done
+
 # 8) install が スタート/ を配置する追記を含む（両 OS）
 grep -q 'workspace-template/スタート' "$ROOT/scripts/macos/install.sh" || { note "FAIL: install.sh に スタート 配置追記なし"; fail=1; }
 grep -q 'workspace-template\\\\スタート' "$ROOT/scripts/windows/install.ps1" || grep -q 'workspace-template\\スタート' "$ROOT/scripts/windows/install.ps1" || { note "FAIL: install.ps1 に スタート 配置追記なし"; fail=1; }
