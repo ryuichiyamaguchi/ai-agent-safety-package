@@ -50,6 +50,21 @@ done
 grep -q 'workspace-template/スタート' "$ROOT/scripts/macos/install.sh" || { note "FAIL: install.sh に スタート 配置追記なし"; fail=1; }
 grep -q 'workspace-template\\\\スタート' "$ROOT/scripts/windows/install.ps1" || grep -q 'workspace-template\\スタート' "$ROOT/scripts/windows/install.ps1" || { note "FAIL: install.ps1 に スタート 配置追記なし"; fail=1; }
 
+# 8b) Windows は install-one-click.bat の最後の pause より前に スタート フォルダを開く
+win_installer_txt="/tmp/onboarding-win-installer.$$"
+if iconv -f CP932 -t UTF-8 "$ROOT/scripts/windows/install-one-click.bat" > "$win_installer_txt" 2>/dev/null; then
+  open_line=$(grep -n 'start "" explorer' "$win_installer_txt" | tail -1 | cut -d: -f1)
+  last_pause_line=$(grep -n '^pause' "$win_installer_txt" | tail -1 | cut -d: -f1)
+  if [ -z "$open_line" ] || [ -z "$last_pause_line" ] || [ "$open_line" -gt "$last_pause_line" ]; then
+    note "FAIL: Windows installer が最後の pause 前に スタート フォルダを開かない"
+    fail=1
+  fi
+else
+  note "FAIL: install-one-click.bat を CP932 として読めない"
+  fail=1
+fi
+rm -f "$win_installer_txt"
+
 # 9) 期待される番号ファイルが揃う（2..5 と 上級1/2/9）
 for base in "2_セーフCodexを起動" "3_セーフClaudeを起動" "4_セーフAntiGravityを起動" "5_見守りモニターを起動" "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）9_DeepSeekキーを削除"; do
   [ -f "$START_DIR/$base.command" ] || { note "FAIL: $base.command がない"; fail=1; }

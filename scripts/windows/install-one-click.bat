@@ -117,6 +117,25 @@ echo      powershell -File .ai-safety\hooks\windows\monitor.ps1
 echo.
 echo   詳しい使い方は docs\00_クイックスタート.md を参照してください。
 echo.
+
+:: Open the next-step folder before the final pause.
+:: The folder name may be non-ASCII, so find it by the ASCII wrapper pattern.
+set "START_OPENED="
+for /d %%D in ("%WORKSPACE%\*") do (
+    if not defined START_OPENED (
+        if exist "%%~fD\2_*.bat" (
+            echo.
+            echo   Next-step folder:
+            echo     %%~fD
+            start "" explorer "%%~fD"
+            set "START_OPENED=1"
+        )
+    )
+)
+if not defined START_OPENED (
+    echo.
+    echo   Next-step folder was not found. Please open the workspace folder manually.
+)
+echo.
 pause
 endlocal
-
