@@ -14,6 +14,30 @@ command -v node >/dev/null 2>&1 || { echo "【エラー】node が見つかり�
 [ -f "$GATEWAY_JS" ] || { echo "【エラー】ds-gateway.js が見つかりません: $GATEWAY_JS"; exit 1; }
 [ -f "$LAUNCH_CLAUDE" ] || { echo "【エラー】launch-claude-safe.sh が見つかりません: $LAUNCH_CLAUDE"; exit 1; }
 
+stop_stale_gateway() {
+  command -v lsof >/dev/null 2>&1 || return 0
+  pids="$(lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
+  [ -n "$pids" ] || return 0
+  for pid in $pids; do
+    cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    case "$cmd" in
+      *"$GATEWAY_JS"*)
+        echo "古い DeepSeek Gateway を停止します（PID: $pid）。"
+        kill "$pid" 2>/dev/null || true
+        for _ in $(seq 1 20); do
+          kill -0 "$pid" 2>/dev/null || break
+          sleep 0.1
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+          kill -9 "$pid" 2>/dev/null || true
+        fi
+        ;;
+    esac
+  done
+}
+
+stop_stale_gateway
+
 DS_GATEWAY_PORT="$PORT" node "$GATEWAY_JS" &
 GW_PID=$!
 cleanup() { kill "$GW_PID" 2>/dev/null; }
@@ -37,5 +61,5 @@ if ! kill -0 "$GW_PID" 2>/dev/null; then
 fi
 
 export ANTHROPIC_BASE_URL="http://127.0.0.1:$PORT"
-echo "送信検査 Gateway 稼働中（127.0.0.1:$PORT）。DeepSeek へは検査後に転送されます。"
+echo "送信検査 Gateway 稼働中（127.0.0.1:${PORT}）。DeepSeek へは検査後に転送されます。"
 bash "$LAUNCH_CLAUDE" "$WORKSPACE"

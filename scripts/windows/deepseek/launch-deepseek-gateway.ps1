@@ -19,6 +19,35 @@ if (-not (Test-Path $launchClaude)) {
   Write-Host "[ERROR] launch-claude-safe.ps1 not found: $launchClaude"; exit 1
 }
 
+function Stop-StaleGateway {
+  param([string]$Port, [string]$GatewayJs)
+
+  $gatewayPath = (Resolve-Path -LiteralPath $GatewayJs).Path.Replace('/', '\').ToLowerInvariant()
+  try {
+    $listeners = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort ([int]$Port) -State Listen -ErrorAction SilentlyContinue
+  } catch {
+    $listeners = @()
+  }
+
+  foreach ($listener in @($listeners)) {
+    $processId = $listener.OwningProcess
+    if (-not $processId) { continue }
+    try {
+      $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction Stop
+    } catch {
+      continue
+    }
+    $cmd = ([string]$proc.CommandLine).Replace('/', '\').ToLowerInvariant()
+    if ($cmd.Contains($gatewayPath)) {
+      Write-Host "Stopping stale DeepSeek Gateway process (PID: $processId)."
+      Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+      Start-Sleep -Milliseconds 300
+    }
+  }
+}
+
+Stop-StaleGateway -Port $port -GatewayJs $gatewayJs
+
 $env:DS_GATEWAY_PORT = $port
 $gw = Start-Process node -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden
 try {
