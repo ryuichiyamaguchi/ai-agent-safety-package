@@ -1,23 +1,23 @@
-@echo off
-chcp 932 >nul 2>&1
+ï»¿@echo off
+chcp 65001 >nul 2>&1
 setlocal EnableDelayedExpansion
 :: ============================================================
-:: ‹N“®-Claude-DeepSeek.bat
-:: uDeepSeek ‚ð— ‚ÅŽg‚¤ Claude Codev‚ðA–{ƒpƒbƒP[ƒW‚Ì•ÛŒìƒtƒbƒN
-:: iƒK[ƒhj‚ªŒø‚¢‚½‚Ü‚Ü‹N“®‚µ‚Ü‚·B–ˆ“ú‚±‚ê‚ðƒ_ƒuƒ‹ƒNƒŠƒbƒNB
+:: èµ·å‹•-Claude-DeepSeek.bat
+:: ã€ŒDeepSeek ã‚’è£ã§ä½¿ã† Claude Codeã€ã‚’ã€æœ¬ãƒ‘ãƒƒã‚±ãƒ¼ã‚¸ã®ä¿è­·ãƒ•ãƒƒã‚¯
+:: ï¼ˆã‚¬ãƒ¼ãƒ‰ï¼‰ãŒåŠ¹ã„ãŸã¾ã¾èµ·å‹•ã—ã¾ã™ã€‚æ¯Žæ—¥ã“ã‚Œã‚’ãƒ€ãƒ–ãƒ«ã‚¯ãƒªãƒƒã‚¯ã€‚
 :: ------------------------------------------------------------
-:: d—vi³’¼‚É‚¨“`‚¦‚·‚éŽ–ŽÀj:
-::   E‰ï˜b“à—e‚Í DeepSeeki’†‘ŠÇŠ‚ÌƒT[ƒo[j‚É‘—M‚³‚ê‚Ü‚·B
-::     –{ƒpƒbƒP[ƒW‚ÌƒK[ƒh‚ÍuAI ‚Ìƒc[ƒ‹‘€ìiƒtƒ@ƒCƒ‹íœEŠëŒ¯‚È
-::     ƒRƒ}ƒ“ƒhŽÀs‚È‚Çj‚Ì–\‘–v‚ðŽ~‚ß‚Ü‚·B‚³‚ç‚É‘—MŒŸ¸ Gateway ‚ª
-::     DeepSeek ‚Ö‘—‚é‘O‚ÉŠù’mƒpƒ^[ƒ“‚Ì‹@”÷î•ñiAPI ƒL[EƒpƒXƒ[ƒh“™j‚ð
-::     Ž©“®ƒ}ƒXƒLƒ“ƒO‚µ‚Ü‚·B‚½‚¾‚µŒŸo‚Å‚«‚éƒpƒ^[ƒ“‚ÉŒÀ‚ç‚êAŠ®‘S‚È•ÛØ‚Å‚Í
-::     ‚È‚¢‚½‚ßA–{“–‚É—¬o‚µ‚Ä¢‚éî•ñ‚Í“ü—Í‚µ‚È‚¢‚±‚ÆB
-::   E‚±‚Ìƒtƒ@ƒCƒ‹‚Í‘f‚Ì claude ‚ðŒÄ‚Ñ‚Ü‚¹‚ñB•K‚¸
-::     launch-claude-safe.ps1 ‚ðŒo—R‚µ‚Ü‚·iƒK[ƒhƒoƒCƒpƒX–hŽ~jB
+:: é‡è¦ï¼ˆæ­£ç›´ã«ãŠä¼ãˆã™ã‚‹äº‹å®Ÿï¼‰:
+::   ãƒ»ä¼šè©±å†…å®¹ã¯ DeepSeekï¼ˆä¸­å›½ç®¡è½„ã®ã‚µãƒ¼ãƒãƒ¼ï¼‰ã«é€ä¿¡ã•ã‚Œã¾ã™ã€‚
+::     æœ¬ãƒ‘ãƒƒã‚±ãƒ¼ã‚¸ã®ã‚¬ãƒ¼ãƒ‰ã¯ã€ŒAI ã®ãƒ„ãƒ¼ãƒ«æ“ä½œï¼ˆãƒ•ã‚¡ã‚¤ãƒ«å‰Šé™¤ãƒ»å±é™ºãª
+::     ã‚³ãƒžãƒ³ãƒ‰å®Ÿè¡Œãªã©ï¼‰ã®æš´èµ°ã€ã‚’æ­¢ã‚ã¾ã™ã€‚ã•ã‚‰ã«é€ä¿¡æ¤œæŸ» Gateway ãŒ
+::     DeepSeek ã¸é€ã‚‹å‰ã«æ—¢çŸ¥ãƒ‘ã‚¿ãƒ¼ãƒ³ã®æ©Ÿå¾®æƒ…å ±ï¼ˆAPI ã‚­ãƒ¼ãƒ»ãƒ‘ã‚¹ãƒ¯ãƒ¼ãƒ‰ç­‰ï¼‰ã‚’
+::     è‡ªå‹•ãƒžã‚¹ã‚­ãƒ³ã‚°ã—ã¾ã™ã€‚ãŸã ã—æ¤œå‡ºã§ãã‚‹ãƒ‘ã‚¿ãƒ¼ãƒ³ã«é™ã‚‰ã‚Œã€å®Œå…¨ãªä¿è¨¼ã§ã¯
+::     ãªã„ãŸã‚ã€æœ¬å½“ã«æµå‡ºã—ã¦å›°ã‚‹æƒ…å ±ã¯å…¥åŠ›ã—ãªã„ã“ã¨ã€‚
+::   ãƒ»ã“ã®ãƒ•ã‚¡ã‚¤ãƒ«ã¯ç´ ã® claude ã‚’å‘¼ã³ã¾ã›ã‚“ã€‚å¿…ãš
+::     launch-claude-safe.ps1 ã‚’çµŒç”±ã—ã¾ã™ï¼ˆã‚¬ãƒ¼ãƒ‰ãƒã‚¤ãƒ‘ã‚¹é˜²æ­¢ï¼‰ã€‚
 :: ============================================================
 
-:: -- 1. workspace ‚ð“Á’èiƒCƒ“ƒXƒg[ƒ‰Šù’è‚ÌêŠj ----------------
+:: -- 1. workspace ã‚’ç‰¹å®šï¼ˆã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ©æ—¢å®šã®å ´æ‰€ï¼‰ ----------------
 set "WORKSPACE=%USERPROFILE%\Documents\my-ai-workspace"
 set "HOOKS=%WORKSPACE%\.ai-safety\hooks\windows"
 set "LAUNCH_CLAUDE=%HOOKS%\launch-claude-safe.ps1"
@@ -25,71 +25,71 @@ set "DEEPSEEK_GATE=%HOOKS%\launch-deepseek-safe.ps1"
 
 if not exist "%LAUNCH_CLAUDE%" (
     echo.
-    echo yƒGƒ‰[zˆÀ‘Sƒ‰ƒ“ƒ`ƒƒ[‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñ:
+    echo ã€ã‚¨ãƒ©ãƒ¼ã€‘å®‰å…¨ãƒ©ãƒ³ãƒãƒ£ãƒ¼ãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“:
     echo   %LAUNCH_CLAUDE%
     echo.
-    echo   æ‚É install-one-click.bat ‚ÅˆÀ‘SƒpƒbƒP[ƒW‚ð
-    echo   ƒCƒ“ƒXƒg[ƒ‹‚µ‚Ä‚­‚¾‚³‚¢iworkspace ‚ª–¢ì¬‚Å‚·jB
+    echo   å…ˆã« install-one-click.bat ã§å®‰å…¨ãƒ‘ãƒƒã‚±ãƒ¼ã‚¸ã‚’
+    echo   ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«ã—ã¦ãã ã•ã„ï¼ˆworkspace ãŒæœªä½œæˆã§ã™ï¼‰ã€‚
     echo.
     pause
     exit /b 1
 )
 
-:: -- 2. DeepSeek ”O‰Ÿ‚µƒQ[ƒgiÔ˜gŒx + yes/noj -----------------
-:: workspace “à‚Ì launch-deepseek-safe.ps1 ‚ðŒÄ‚ÑAu’†‘ŠÇŠƒT[ƒo[‚É
-:: ‘—M‚³‚ê‚évŽ–ŽÀ‚Ö‚Ì“¯ˆÓ‚ðŽæ‚éByes ˆÈŠO‚È‚ç exit 1 ‚ª•Ô‚é‚Ì‚Å’†’fB
+:: -- 2. DeepSeek å¿µæŠ¼ã—ã‚²ãƒ¼ãƒˆï¼ˆèµ¤æž è­¦å‘Š + yes/noï¼‰ -----------------
+:: workspace å†…ã® launch-deepseek-safe.ps1 ã‚’å‘¼ã³ã€ã€Œä¸­å›½ç®¡è½„ã‚µãƒ¼ãƒãƒ¼ã«
+:: é€ä¿¡ã•ã‚Œã‚‹ã€äº‹å®Ÿã¸ã®åŒæ„ã‚’å–ã‚‹ã€‚yes ä»¥å¤–ãªã‚‰ exit 1 ãŒè¿”ã‚‹ã®ã§ä¸­æ–­ã€‚
 if exist "%DEEPSEEK_GATE%" (
     PowerShell -NoProfile -ExecutionPolicy Bypass -File "%DEEPSEEK_GATE%" -ConsentOnly
     if errorlevel 1 (
         echo.
-        echo ‹N“®‚ðƒLƒƒƒ“ƒZƒ‹‚µ‚Ü‚µ‚½B
+        echo èµ·å‹•ã‚’ã‚­ãƒ£ãƒ³ã‚»ãƒ«ã—ã¾ã—ãŸã€‚
         pause
         exit /b 1
     )
 ) else (
     echo.
-    echo y’ˆÓzDeepSeek “¯ˆÓƒQ[ƒgilaunch-deepseek-safe.ps1j‚ª
-    echo   Œ©‚Â‚©‚è‚Ü‚¹‚ñ‚Å‚µ‚½B‰ï˜b“à—e‚Í DeepSeeki’†‘ŠÇŠj‚É
-    echo   ‘—M‚³‚ê‚Ü‚·B—¬o‚µ‚Ä¢‚éî•ñ‚Í‘‚©‚È‚¢‚Å‚­‚¾‚³‚¢B
+    echo ã€æ³¨æ„ã€‘DeepSeek åŒæ„ã‚²ãƒ¼ãƒˆï¼ˆlaunch-deepseek-safe.ps1ï¼‰ãŒ
+    echo   è¦‹ã¤ã‹ã‚Šã¾ã›ã‚“ã§ã—ãŸã€‚ä¼šè©±å†…å®¹ã¯ DeepSeekï¼ˆä¸­å›½ç®¡è½„ï¼‰ã«
+    echo   é€ä¿¡ã•ã‚Œã¾ã™ã€‚æµå‡ºã—ã¦å›°ã‚‹æƒ…å ±ã¯æ›¸ã‹ãªã„ã§ãã ã•ã„ã€‚
     echo.
-    set /p AGREE=‚±‚Ì“_‚ð—‰ð‚µ‚½ã‚Å‘±s‚µ‚Ü‚·‚©H iyes/noj:
+    set /p AGREE=ã“ã®ç‚¹ã‚’ç†è§£ã—ãŸä¸Šã§ç¶šè¡Œã—ã¾ã™ã‹ï¼Ÿ ï¼ˆyes/noï¼‰:
     if /i not "!AGREE!"=="yes" (
-        echo ‹N“®‚ðƒLƒƒƒ“ƒZƒ‹‚µ‚Ü‚µ‚½B
+        echo èµ·å‹•ã‚’ã‚­ãƒ£ãƒ³ã‚»ãƒ«ã—ã¾ã—ãŸã€‚
         pause
         exit /b 1
     )
 )
 
-:: -- 3. DeepSeek ƒoƒbƒNƒGƒ“ƒh‚ÖŒü‚¯‚éŠÂ‹«•Ï”‚ð‘O·‚µ --------------
-:: ANTHROPIC_AUTH_TOKEN ‚Íu“o˜^-‰‰ñ‚¾‚¯.batv‚Å setx Ï‚Ýi‚±‚±‚É‚Í‘‚©‚È‚¢jB
+:: -- 3. DeepSeek ãƒãƒƒã‚¯ã‚¨ãƒ³ãƒ‰ã¸å‘ã‘ã‚‹ç’°å¢ƒå¤‰æ•°ã‚’å‰å·®ã— --------------
+:: ANTHROPIC_AUTH_TOKEN ã¯ã€Œç™»éŒ²-åˆå›žã ã‘.batã€ã§ setx æ¸ˆã¿ï¼ˆã“ã“ã«ã¯æ›¸ã‹ãªã„ï¼‰ã€‚
 :: BASE_URL is set by the gateway launcher (launch-deepseek-gateway.ps1)
 set "ANTHROPIC_MODEL=deepseek-v4-pro"
 set "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash"
 set "GATEWAY_LAUNCH=%HOOKS%\deepseek\launch-deepseek-gateway.ps1"
 
-:: ª ‚à‚µ‹N“®Žž‚Éuƒ‚ƒfƒ‹–¼‚ª–³ŒøvƒGƒ‰[‚ªo‚éŠÂ‹«‚Å‚ÍiGitHub Issue #56990jA
-::   ã‚Ì ANTHROPIC_MODEL s‚ðŽŸ‚Ì‚Ç‚¿‚ç‚©‚É·‚µ‘Ö‚¦‚Ä‚­‚¾‚³‚¢:
-::   AˆÄi•\Ž¦‚à deepseek ‚É‚µ‚½‚¢EŒŸØƒXƒLƒbƒvj:
+:: â†‘ ã‚‚ã—èµ·å‹•æ™‚ã«ã€Œãƒ¢ãƒ‡ãƒ«åãŒç„¡åŠ¹ã€ã‚¨ãƒ©ãƒ¼ãŒå‡ºã‚‹ç’°å¢ƒã§ã¯ï¼ˆGitHub Issue #56990ï¼‰ã€
+::   ä¸Šã® ANTHROPIC_MODEL è¡Œã‚’æ¬¡ã®ã©ã¡ã‚‰ã‹ã«å·®ã—æ›¿ãˆã¦ãã ã•ã„:
+::   Aæ¡ˆï¼ˆè¡¨ç¤ºã‚‚ deepseek ã«ã—ãŸã„ãƒ»æ¤œè¨¼ã‚¹ã‚­ãƒƒãƒ—ï¼‰:
 ::     set "ANTHROPIC_CUSTOM_MODEL_OPTION=deepseek-v4-pro"
-::   BˆÄi“®‚¯‚Î‚æ‚¢E•\Ž¦‚Í Opusj: ANTHROPIC_MODEL s‚ðÁ‚µA
-::     ‹N“®Œã‚É /model ‚Å opus ‚ð‘I‚ÔiƒT[ƒo‘¤‚Å v4 ‚ÉU‚è•ª‚¯jB
+::   Bæ¡ˆï¼ˆå‹•ã‘ã°ã‚ˆã„ãƒ»è¡¨ç¤ºã¯ Opusï¼‰: ANTHROPIC_MODEL è¡Œã‚’æ¶ˆã—ã€
+::     èµ·å‹•å¾Œã« /model ã§ opus ã‚’é¸ã¶ï¼ˆã‚µãƒ¼ãƒå´ã§ v4 ã«æŒ¯ã‚Šåˆ†ã‘ï¼‰ã€‚
 
 if "%ANTHROPIC_AUTH_TOKEN%"=="" (
     echo.
-    echo y’ˆÓzANTHROPIC_AUTH_TOKEN ‚ª–¢“o˜^‚Ì‚æ‚¤‚Å‚·B
-    echo   æ‚Éu“o˜^-‰‰ñ‚¾‚¯.batv‚ðŽÀs‚µ‚Ä‚©‚çA‚±‚Ì
-    echo   ƒEƒBƒ“ƒhƒE‚ðˆê“x•Â‚¶A‚à‚¤ˆê“x‚±‚Ì .bat ‚ðŠJ‚¢‚Ä‚­‚¾‚³‚¢B
-    echo   iŠÂ‹«•Ï”‚ÍV‚µ‚¢ƒEƒBƒ“ƒhƒE‚©‚ç”½‰f‚³‚ê‚Ü‚·j
+    echo ã€æ³¨æ„ã€‘ANTHROPIC_AUTH_TOKEN ãŒæœªç™»éŒ²ã®ã‚ˆã†ã§ã™ã€‚
+    echo   å…ˆã«ã€Œç™»éŒ²-åˆå›žã ã‘.batã€ã‚’å®Ÿè¡Œã—ã¦ã‹ã‚‰ã€ã“ã®
+    echo   ã‚¦ã‚£ãƒ³ãƒ‰ã‚¦ã‚’ä¸€åº¦é–‰ã˜ã€ã‚‚ã†ä¸€åº¦ã“ã® .bat ã‚’é–‹ã„ã¦ãã ã•ã„ã€‚
+    echo   ï¼ˆç’°å¢ƒå¤‰æ•°ã¯æ–°ã—ã„ã‚¦ã‚£ãƒ³ãƒ‰ã‚¦ã‹ã‚‰åæ˜ ã•ã‚Œã¾ã™ï¼‰
     echo.
 )
 
-:: -- 4. ƒK[ƒh•t‚« Claude Code ‚ð‹N“®i‘f‚Ì claude ‚ÍŒÄ‚Î‚È‚¢j -----
-:: workspace ‚ÉˆÚ“®‚µ‚Ä‚©‚ç launch-claude-safe.ps1 ‚ðŒÄ‚ÔB‚±‚ê‚É‚æ‚è
-:: .claude\settings.json ‚Ì PreToolUse hookiƒK[ƒhj‚ªŒø‚¢‚½‚Ü‚ÜA
-:: ƒoƒbƒNƒGƒ“ƒh‚¾‚¯ DeepSeek ‚ÉŒü‚¢‚½ Claude Code ‚ª‹N“®‚·‚éB
+:: -- 4. ã‚¬ãƒ¼ãƒ‰ä»˜ã Claude Code ã‚’èµ·å‹•ï¼ˆç´ ã® claude ã¯å‘¼ã°ãªã„ï¼‰ -----
+:: workspace ã«ç§»å‹•ã—ã¦ã‹ã‚‰ launch-claude-safe.ps1 ã‚’å‘¼ã¶ã€‚ã“ã‚Œã«ã‚ˆã‚Š
+:: .claude\settings.json ã® PreToolUse hookï¼ˆã‚¬ãƒ¼ãƒ‰ï¼‰ãŒåŠ¹ã„ãŸã¾ã¾ã€
+:: ãƒãƒƒã‚¯ã‚¨ãƒ³ãƒ‰ã ã‘ DeepSeek ã«å‘ã„ãŸ Claude Code ãŒèµ·å‹•ã™ã‚‹ã€‚
 echo.
-echo DeepSeek ƒoƒbƒNƒGƒ“ƒh‚Å Claude Code ‚ð‹N“®‚µ‚Ü‚·...
-echo i‰æ–Ê‚Ìƒ‚ƒfƒ‹•\Ž¦‚ª deepseek-v4-pro ‚É‚È‚Á‚Ä‚¢‚ê‚ÎOKj
+echo DeepSeek ãƒãƒƒã‚¯ã‚¨ãƒ³ãƒ‰ã§ Claude Code ã‚’èµ·å‹•ã—ã¾ã™...
+echo ï¼ˆç”»é¢ã®ãƒ¢ãƒ‡ãƒ«è¡¨ç¤ºãŒ deepseek-v4-pro ã«ãªã£ã¦ã„ã‚Œã°OKï¼‰
 echo.
 pushd "%WORKSPACE%"
 PowerShell -NoProfile -ExecutionPolicy Bypass -File "%GATEWAY_LAUNCH%" -Workspace "%WORKSPACE%"
@@ -97,9 +97,9 @@ set "EXITCODE=%ERRORLEVEL%"
 popd
 
 echo.
-echo Claude CodeiDeepSeekj‚ðI—¹‚µ‚Ü‚µ‚½B
-echo Šm”F: https://platform.deepseek.com/ ‚Ì Usage / Billing ‚Å
-echo       Žc‚‚ªŒ¸‚Á‚Ä‚¢‚ê‚ÎAŠmŽÀ‚É DeepSeek ‚ª“®‚¢‚Ä‚¢‚Ü‚µ‚½B
+echo Claude Codeï¼ˆDeepSeekï¼‰ã‚’çµ‚äº†ã—ã¾ã—ãŸã€‚
+echo ç¢ºèª: https://platform.deepseek.com/ ã® Usage / Billing ã§
+echo       æ®‹é«˜ãŒæ¸›ã£ã¦ã„ã‚Œã°ã€ç¢ºå®Ÿã« DeepSeek ãŒå‹•ã„ã¦ã„ã¾ã—ãŸã€‚
 echo.
 pause
 endlocal

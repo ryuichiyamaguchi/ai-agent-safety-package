@@ -1,23 +1,23 @@
-@echo off
-chcp 932 >nul 2>&1
+﻿@echo off
+chcp 65001 >nul 2>&1
 :: ============================================================
-:: �L�[�폜.bat
-:: ���ƌ�̂��Еt���p�BPC ���ɓo�^���� DeepSeek �� API �L�[�������܂��B
+:: キー削除.bat
+:: 授業後のお片付け用。PC 側に登録した DeepSeek の API キーを消します。
 :: ------------------------------------------------------------
-:: �E�_�u���N���b�N1��ŁAWindows ���[�U�[�̈��
-::   ANTHROPIC_AUTH_TOKEN ���폜���܂��B
-:: �EPC �������������ł͕s�\���ł��BDeepSeek �̊Ǘ����
-::   �ihttps://platform.deepseek.com/ �� API keys�j�ł��A
-::   �g�����L�[��K�� Delete ���Ă��������B
+:: ・ダブルクリック1回で、Windows ユーザー領域の
+::   ANTHROPIC_AUTH_TOKEN を削除します。
+:: ・PC 側を消すだけでは不十分です。DeepSeek の管理画面
+::   （https://platform.deepseek.com/ の API keys）でも、
+::   使ったキーを必ず Delete してください。
 :: ============================================================
 echo.
-echo PC ���� DeepSeek �L�[�iANTHROPIC_AUTH_TOKEN�j���폜���܂�...
+echo PC 側の DeepSeek キー（ANTHROPIC_AUTH_TOKEN）を削除します...
 reg delete HKCU\Environment /v ANTHROPIC_AUTH_TOKEN /f >nul 2>&1
 echo.
-echo PC ���̃L�[���폜���܂����B
+echo PC 側のキーを削除しました。
 echo.
-echo �y�܂��I���ł͂���܂���z
-echo   DeepSeek �Ǘ���ʁihttps://platform.deepseek.com/ �� API keys�j�ł�
-echo   �g�����L�[�� Delete ���Ă��������B����ŘR�����΍�͊����ł��B
+echo 【まだ終わりではありません】
+echo   DeepSeek 管理画面（https://platform.deepseek.com/ の API keys）でも
+echo   使ったキーを Delete してください。これで漏えい対策は完了です。
 echo.
 pause
