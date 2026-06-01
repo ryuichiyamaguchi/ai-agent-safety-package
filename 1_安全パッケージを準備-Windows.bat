@@ -9,4 +9,9 @@ if not exist "%TARGET%" (
   exit /b 1
 )
 call "%TARGET%"
-exit /b %ERRORLEVEL%
+set "INSTALL_RC=%ERRORLEVEL%"
+echo.
+echo Installer finished. Exit code: %INSTALL_RC%
+echo Press any key to close this window.
+pause >nul
+exit /b %INSTALL_RC%
