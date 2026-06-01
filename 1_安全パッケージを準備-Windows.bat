@@ -8,5 +8,6 @@ if not exist "%TARGET%" (
   pause
   exit /b 1
 )
-start "AI Safety Installer" cmd /k call "%TARGET%"
-exit /b 0
+echo Starting AI Safety Installer...
+echo This window should stay open.
+"%ComSpec%" /k call "%TARGET%"

@@ -27,7 +27,7 @@ grep -q 'show-win' "$HTML" && grep -q 'show-mac' "$HTML" || { note "FAIL: OS ト
 [ -f "$ROOT/1_安全パッケージを準備-Mac.command" ] || { note "FAIL: Step1 Mac ラッパーがない"; fail=1; }
 [ -f "$ROOT/1_安全パッケージを準備-Windows.bat" ] || { note "FAIL: Step1 Win ラッパーがない"; fail=1; }
 bash -n "$ROOT/1_安全パッケージを準備-Mac.command" || { note "FAIL: Step1 Mac 構文"; fail=1; }
-grep -q 'cmd /k call "%TARGET%"' "$ROOT/1_安全パッケージを準備-Windows.bat" || { note "FAIL: Step1 Win ラッパーが cmd /k の残る画面で installer を起動しない"; fail=1; }
+grep -q '"%ComSpec%" /k call "%TARGET%"' "$ROOT/1_安全パッケージを準備-Windows.bat" || { note "FAIL: Step1 Win ラッパーが同じ画面に残る cmd /k で installer を起動しない"; fail=1; }
 
 # 6) workspace 内ラッパー（.command）構文 + 相対 ws 解決
 for f in "$START_DIR/"*.command; do
