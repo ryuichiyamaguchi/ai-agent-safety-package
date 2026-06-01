@@ -4,17 +4,17 @@ setlocal
 set "HERE=%~dp0"
 set "TARGET=%HERE%scripts\windows\install-one-click.bat"
 if not exist "%TARGET%" (
-  echo ƒCƒ“ƒXƒg[ƒ‰‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñ: %TARGET%
+  echo ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ©ãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“: %TARGET%
   pause
   exit /b 1
 )
 call "%TARGET%"
 
-REM €”õ‚ªI‚í‚Á‚½‚çAŽŸ‚ÉŽg‚¤uƒXƒ^[ƒgvƒtƒHƒ‹ƒ_‚ðŽ©“®‚ÅŠJ‚­i–À‚í‚¹‚È‚¢jB
-set "START_DIR=%USERPROFILE%\Documents\my-ai-workspace\ƒXƒ^[ƒg"
+REM æº–å‚™ãŒçµ‚ã‚ã£ãŸã‚‰ã€æ¬¡ã«ä½¿ã†ã€Œã‚¹ã‚¿ãƒ¼ãƒˆã€ãƒ•ã‚©ãƒ«ãƒ€ã‚’è‡ªå‹•ã§é–‹ãï¼ˆè¿·ã‚ã›ãªã„ï¼‰ã€‚
+set "START_DIR=%USERPROFILE%\Documents\my-ai-workspace\ã‚¹ã‚¿ãƒ¼ãƒˆ"
 if exist "%START_DIR%" (
   echo.
-  echo ŽŸ‚ÉŽg‚¤ƒtƒ@ƒCƒ‹‚Í‚±‚ÌƒtƒHƒ‹ƒ_‚Ì’†‚É‚ ‚è‚Ü‚·:
+  echo æ¬¡ã«ä½¿ã†ãƒ•ã‚¡ã‚¤ãƒ«ã¯ã“ã®ãƒ•ã‚©ãƒ«ãƒ€ã®ä¸­ã«ã‚ã‚Šã¾ã™:
   echo   %START_DIR%
   start "" explorer "%START_DIR%"
 )
