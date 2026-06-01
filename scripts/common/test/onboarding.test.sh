@@ -27,8 +27,7 @@ grep -q 'show-win' "$HTML" && grep -q 'show-mac' "$HTML" || { note "FAIL: OS ト
 [ -f "$ROOT/1_安全パッケージを準備-Mac.command" ] || { note "FAIL: Step1 Mac ラッパーがない"; fail=1; }
 [ -f "$ROOT/1_安全パッケージを準備-Windows.bat" ] || { note "FAIL: Step1 Win ラッパーがない"; fail=1; }
 bash -n "$ROOT/1_安全パッケージを準備-Mac.command" || { note "FAIL: Step1 Mac 構文"; fail=1; }
-grep -q 'set "INSTALL_RC=%ERRORLEVEL%"' "$ROOT/1_安全パッケージを準備-Windows.bat" || { note "FAIL: Step1 Win ラッパーが call 後の戻り値を保持しない"; fail=1; }
-grep -q 'Press any key to close this window' "$ROOT/1_安全パッケージを準備-Windows.bat" || { note "FAIL: Step1 Win ラッパーが通常終了前に pause しない"; fail=1; }
+grep -q 'cmd /k call "%TARGET%"' "$ROOT/1_安全パッケージを準備-Windows.bat" || { note "FAIL: Step1 Win ラッパーが cmd /k の残る画面で installer を起動しない"; fail=1; }
 
 # 6) workspace 内ラッパー（.command）構文 + 相対 ws 解決
 for f in "$START_DIR/"*.command; do
@@ -45,7 +44,9 @@ done
 for f in "$ROOT"/0_*.bat "$ROOT"/1_*.bat "$START_DIR/"*.bat; do
   [ -f "$f" ] || continue
   iconv -f UTF-8 -t UTF-8 "$f" >/dev/null 2>&1 || { note "FAIL: UTF-8 ではない: $f"; fail=1; }
-  grep -q 'chcp 65001' "$f" || { note "FAIL: chcp 65001 ではない: $f"; fail=1; }
+  if LC_ALL=C tr -d '\000-\177' < "$f" | grep -q .; then
+    grep -q 'chcp 65001' "$f" || { note "FAIL: 非ASCII .bat なのに chcp 65001 ではない: $f"; fail=1; }
+  fi
 done
 
 # 8) install が スタート/ を配置する追記を含む（両 OS）
