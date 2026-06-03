@@ -84,12 +84,12 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"
 # -- 送信検査 Gateway 経由でガード付き Claude Code を起動 ----------
 # launch-deepseek-gateway.sh が ds-gateway を起動し、health 確認後に
 # ANTHROPIC_BASE_URL をプロキシへ向けてから launch-claude-safe.sh を呼ぶ。
-# 送信プロンプトは DeepSeek 到達前に機微情報マスキングされ、ガード
-# （PreToolUse hook）も継続して効く。
+# 送信プロンプトは DeepSeek 到達前に「主要な API キー・一部 PII」をマスキングし、
+# ガード（PreToolUse hook）も継続して効く。氏名・住所など拾えないものは自分で消すこと。
 GATEWAY_LAUNCH="$HOOKS/deepseek/launch-deepseek-gateway.sh"
 echo ""
 echo "送信検査 Gateway 経由で DeepSeek バックエンドの Claude Code を起動します..."
-echo "（送信プロンプトは DeepSeek 到達前に機微情報マスキングされます）"
+echo "（主要な API キー・一部 PII を送信前にマスク。氏名・住所など拾えないものは送る前に自分で消してください）"
 echo ""
 if [ -f "$GATEWAY_LAUNCH" ]; then
   bash "$GATEWAY_LAUNCH" "$WORKSPACE"
