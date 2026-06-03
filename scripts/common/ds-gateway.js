@@ -8,17 +8,21 @@ const path = require('node:path');
 const { URL } = require('node:url');
 const { maskText } = require('./secret-patterns.js');
 const { createTokenMap } = require('./token-map.js');
-const { loadDenylist } = require('./denylist.js');
+const { loadDenylistResult } = require('./denylist.js');
 
 const DEFAULT_PORT = Number(process.env.DS_GATEWAY_PORT || 8788);
 const DEFAULT_UPSTREAM = process.env.DS_GATEWAY_UPSTREAM || 'https://api.deepseek.com/anthropic';
 const DEFAULT_MAX_BODY = Number(process.env.DS_GATEWAY_MAX_BODY || 10 * 1024 * 1024); // 10MB（M2: ReDoS/メモリ枯渇の上限）
 
 function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT,
-                        tokenMap = createTokenMap(), denylistTerms = loadDenylist(),
+                        tokenMap = createTokenMap(), denylistTerms = loadDenylistResult(),
                         maxBody = DEFAULT_MAX_BODY } = {}) {
   const upstreamUrl = new URL(upstream);
-  const session = { tokenMap, denylistTerms, maxBody };
+  // F-4: denylist が「設定あり×読込失敗」なら fail-closed sentinel が来る。
+  // その場合 denylist 語句が漏れ得るため、当該 gateway は全リクエストを転送拒否する。
+  const denylistFailClosed = !!(denylistTerms && denylistTerms.failClosed === true);
+  const terms = Array.isArray(denylistTerms) ? denylistTerms : [];
+  const session = { tokenMap, denylistTerms: terms, denylistFailClosed, maxBody };
   const server = http.createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -80,8 +84,36 @@ function maskValue(v, counts, ctx) {
     return v.map((item) => maskValue(item, counts, ctx));
   }
   if (v && typeof v === 'object') {
+    // F-7/F-9/F-9fin: Anthropic content block の base64 メディアデータ（image/document 等の source.data）は
+    // バイナリを base64 エンコードした文字列であり、secret パターンに偶然一致し得るが
+    // 実際には機微情報ではない。ただし除外条件を厳格化して偽装漏洩穴を塞ぐ。
+    //
+    // data をマスク除外するのは以下をすべて満たす場合のみ（4条件・全て必須）:
+    //   1. v.type === 'base64'
+    //   2. v.media_type が既知バイナリ MIME ホワイトリストに含まれる（非空文字列だけでは不可）
+    //      text/plain 等は除外対象外 → マスクされる
+    //   3. v.data が厳格な base64 charset のみ（A-Za-z0-9+/= と空白のみ）
+    //      ハイフン・アンダースコアを含む値（sk-ant-... 等）は除外されずマスクされる。
+    //      ※ '-' '_' は base64url の拡張。標準 base64 の Anthropic スキーマには現れないため許可しない。
+    //   4. v.data.length > 512 — 本物のメディアは圧倒的に大きい。
+    //      短い secret 偽装（AKIA系20字等）を弾く。
+    const BINARY_MIME = new Set([
+      'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf',
+    ]);
+    const isLegitimateBase64Source = (
+      v.type === 'base64' &&
+      typeof v.media_type === 'string' && BINARY_MIME.has(String(v.media_type).split(';')[0].trim()) &&
+      typeof v.data === 'string' && /^[A-Za-z0-9+/\s]+=*$/.test(v.data) &&
+      v.data.length > 512
+    );
     const out = {};
-    for (const k of Object.keys(v)) out[k] = maskValue(v[k], counts, ctx);
+    for (const k of Object.keys(v)) {
+      if (isLegitimateBase64Source && k === 'data') {
+        out[k] = v[k]; // 正規バイナリ媒体データはそのまま通す（マスクしない）
+      } else {
+        out[k] = maskValue(v[k], counts, ctx);
+      }
+    }
     return out;
   }
   return v; // numbers, booleans, null
@@ -89,16 +121,11 @@ function maskValue(v, counts, ctx) {
 
 function maskRequestBody(json, ctx) {
   const counts = {};
-  // v1: only messages/system are scanned (Anthropic Messages API shape). Audit this when adding endpoints whose payloads carry user text in other fields.
-  if (!json || (json.messages === undefined && json.system === undefined)) {
-    return { json, counts, changed: false };
-  }
-  if (json.system !== undefined) json.system = maskValue(json.system, counts, ctx);
-  if (Array.isArray(json.messages)) {
-    json.messages = json.messages.map((m) =>
-      (m && m.content !== undefined) ? { ...m, content: maskValue(m.content, counts, ctx) } : m);
-  }
-  return { json, counts, changed: true };
+  // F-1: parsed body 全体を deep-walk して全文字列リーフに generic+PII マスクを適用する。
+  // messages/system に限らず metadata/tools/任意トップレベル文字列・非配列 messages も網羅。
+  // maskValue は文字列リーフのみ変換し、model 名・数値・真偽値は無傷なので API は壊れない。
+  const masked = maskValue(json, counts, ctx);
+  return { json: masked, counts, changed: true };
 }
 
 function logDetection(reqUrl, counts) {
@@ -126,7 +153,60 @@ function logDetection(reqUrl, counts) {
   } catch (_) { /* ログ失敗で送信は止めない */ }
 }
 
+// URL クエリ値をマスクして再構築。?key=value の value のみ generic+PII マスク（key 名は保全）。
+// マスク不能（パース不可・不正 percent-encoding）なら null を返し、呼び出し側で fail-closed させる。
+//
+// F-8: URLSearchParams は不正な percent-encoding（例: %E0%A4%A）を黙って U+FFFD に置換する。
+// これは「silently rewrite して upstream に届ける」= fail-open と等価なため許容しない。
+// 対策: raw query 文字列の各値を decodeURIComponent で直接デコードし、
+// 例外（URIError）が出た場合は fail-closed（null を返す）。
+function maskUrlQuery(reqUrl, counts, ctx) {
+  const qIdx = reqUrl.indexOf('?');
+  if (qIdx === -1) return reqUrl;
+  const base = reqUrl.slice(0, qIdx);
+  const query = reqUrl.slice(qIdx + 1);
+  if (!query) return reqUrl;
+
+  // F-8: URLSearchParams のサイレント正規化を避けるため raw query を手動 split。
+  // 各トークンを decodeURIComponent して不正 percent-encoding を事前検出する。
+  const pairs = query.split('&');
+  const out = [];
+  for (const pair of pairs) {
+    const eqIdx = pair.indexOf('=');
+    const rawKey = eqIdx === -1 ? pair : pair.slice(0, eqIdx);
+    const rawVal = eqIdx === -1 ? '' : pair.slice(eqIdx + 1);
+    // キーと値の両方をデコード試行。失敗 = 不正 percent-encoding → fail-closed。
+    try {
+      decodeURIComponent(rawKey);
+      decodeURIComponent(rawVal);
+    } catch (_) {
+      return null; // 不正 percent-encoding → fail-closed
+    }
+    // マスクは URLSearchParams 経由でデコード→マスク→再エンコード。
+    let decodedVal;
+    try {
+      // URLSearchParams で個々のパラメータをパース（+ を空白に変換する挙動も含む）。
+      decodedVal = new URLSearchParams(pair).get(rawKey) ?? rawVal;
+    } catch (_) {
+      return null;
+    }
+    const maskedVal = maskValue(decodedVal, counts, ctx);
+    // 再エンコード: encodeURIComponent で RFC3986 準拠に戻す。
+    out.push(rawKey + (eqIdx === -1 ? '' : '=' + encodeURIComponent(maskedVal)));
+  }
+  const rebuilt = out.join('&');
+  return rebuilt ? `${base}?${rebuilt}` : base;
+}
+
 async function handleProxy(req, res, upstreamUrl, session) {
+  // F-4: denylist が設定あり×読込失敗 → 検査が信頼できないため全リクエスト転送拒否（fail-closed）。
+  if (session.denylistFailClosed) {
+    req.resume();
+    res.writeHead(503, { 'content-type': 'application/json' });
+    res.end('{"error":"ds-gateway: denylist configured but unreadable; not forwarded (fail-closed)"}');
+    return;
+  }
+
   let raw;
   try {
     raw = await readBody(req, session.maxBody);
@@ -143,13 +223,16 @@ async function handleProxy(req, res, upstreamUrl, session) {
   let outBody = raw;
   // RED-A: このリクエストで採番したトークンのみを記録。復元はこの集合に限定し横断 PII 漏えいを封鎖。
   const allocated = new Set();
+  const counts = {};
+  const alloc = (v, c) => { const t = session.tokenMap.alloc(v, c); allocated.add(t); return t; };
+  const ctx = { alloc, denylistTerms: session.denylistTerms };
 
-  // v1: POST bodies must be application/json so we can inspect them.
-  // A non-empty POST with a non-JSON content-type is NOT inspectable → fail-closed (415).
-  if (req.method === 'POST' && raw.length) {
+  // F-2: body を持つあらゆるメソッド（POST/PUT/PATCH/DELETE 等）の JSON body を検査。
+  // 非JSON body は全メソッドで検査不能 → 415 fail-closed。
+  if (raw.length) {
     if (!ct.includes('application/json')) {
       res.writeHead(415, { 'content-type': 'application/json' });
-      res.end('{"error":"ds-gateway: non-JSON POST body not inspectable; not forwarded (fail-closed)"}');
+      res.end('{"error":"ds-gateway: non-JSON body not inspectable; not forwarded (fail-closed)"}');
       return;
     }
     let parsed;
@@ -160,16 +243,26 @@ async function handleProxy(req, res, upstreamUrl, session) {
       res.end('{"error":"ds-gateway: unparseable JSON; not forwarded (fail-closed)"}');
       return;
     }
-    const alloc = (v, c) => { const t = session.tokenMap.alloc(v, c); allocated.add(t); return t; };
-    const ctx = { alloc, denylistTerms: session.denylistTerms };
-    const { json, counts, changed } = maskRequestBody(parsed, ctx);
-    if (changed) {
-      outBody = Buffer.from(JSON.stringify(json), 'utf8');
-      logDetection(req.url.split('?')[0], counts);
-    }
+    const { json, counts: bodyCounts } = maskRequestBody(parsed, ctx);
+    addCounts(counts, bodyCounts);
+    outBody = Buffer.from(JSON.stringify(json), 'utf8');
   }
 
-  forward(req, res, upstreamUrl, outBody, session, allocated);
+  // F-2: URL クエリ値もマスク。マスク不能（パース不可）なら fail-closed。
+  let outUrl = req.url;
+  if (req.url.indexOf('?') !== -1) {
+    const masked = maskUrlQuery(req.url, counts, ctx);
+    if (masked === null) {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end('{"error":"ds-gateway: unparseable URL query; not forwarded (fail-closed)"}');
+      return;
+    }
+    outUrl = masked;
+  }
+
+  if (counts.total) logDetection(req.url.split('?')[0], counts);
+
+  forward(req, res, upstreamUrl, outBody, session, allocated, outUrl);
 }
 
 function jsonEscape(s) { const j = JSON.stringify(String(s)); return j.slice(1, -1); }
@@ -196,17 +289,46 @@ function makeRestorer(tokenMap, allowed) {
   };
 }
 
-function forward(req, res, upstreamUrl, body, session, allocated) {
+// F-3: 転送 header 値の PII/secret をマスクする。ただし upstream 認証・転送に必須の
+// 標準 header はマスクすると認証/配送が壊れるため保全（ホワイトリスト）。
+const HEADER_PRESERVE = new Set([
+  'authorization', 'x-api-key', 'api-key', 'content-type', 'content-length',
+  'host', 'accept', 'accept-encoding', 'accept-language', 'user-agent',
+  'anthropic-version', 'anthropic-beta', 'x-stainless-os', 'x-stainless-lang',
+  'x-stainless-package-version', 'x-stainless-runtime', 'x-stainless-runtime-version',
+  'x-stainless-arch', 'x-stainless-retry-count',
+]);
+
+function maskHeaders(headers, session) {
+  // header マスクは可逆トークン化しない（応答 header に header 由来トークンが混ざらないよう、
+  // 不可逆の [MASKED:*] 固定で alloc を渡さない）。
+  const ctx = { denylistTerms: session.denylistTerms }; // alloc なし → 不可逆
+  const out = {};
+  for (const k of Object.keys(headers)) {
+    const v = headers[k];
+    if (HEADER_PRESERVE.has(k.toLowerCase())) { out[k] = v; continue; }
+    if (typeof v === 'string') {
+      out[k] = maskText(v, ctx).masked;
+    } else if (Array.isArray(v)) {
+      out[k] = v.map((item) => (typeof item === 'string' ? maskText(item, ctx).masked : item));
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function forward(req, res, upstreamUrl, body, session, allocated, outUrl) {
   const isHttps = upstreamUrl.protocol === 'https:';
   const lib = isHttps ? https : http;
-  const headers = { ...req.headers };
+  const headers = maskHeaders(req.headers, session);
   headers.host = upstreamUrl.host;
   headers['content-length'] = Buffer.byteLength(body);
   delete headers['accept-encoding'];
   const HOP_BY_HOP = ['connection','keep-alive','proxy-authenticate','proxy-authorization','te','trailer','transfer-encoding','upgrade'];
   for (const h of HOP_BY_HOP) delete headers[h];
   const basePath = upstreamUrl.pathname.replace(/\/$/, '');
-  const reqPath = basePath + req.url;
+  const reqPath = basePath + (outUrl !== undefined ? outUrl : req.url);
 
   const upReq = lib.request(
     { protocol: upstreamUrl.protocol, host: upstreamUrl.hostname, port: upstreamUrl.port || (isHttps ? 443 : 80), method: req.method, path: reqPath, headers },

@@ -22,7 +22,7 @@ stop_stale_gateway() {
     cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
     case "$cmd" in
       *"$GATEWAY_JS"*)
-        echo "古い DeepSeek Gateway を停止します（PID: $pid）。"
+        echo "古い DeepSeek Gateway を停止します（PID: ${pid}）。"
         kill "$pid" 2>/dev/null || true
         for _ in $(seq 1 20); do
           kill -0 "$pid" 2>/dev/null || break
