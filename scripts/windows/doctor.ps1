@@ -167,6 +167,38 @@ if (Test-Path -LiteralPath $policyPath) {
     }
 }
 
+# Phase 1: html-write drill (自己完結型)
+# stale な now.html を先に削除してから guard を走らせ、now.html が「今回」
+# 新規生成されることを確認する。clean HOME 環境でも正しく PASS/FAIL する。
+$htmlDrillLogDir = Join-Path $env:AI_SAFE_LOG_DIR ("html-drill-" + [System.Diagnostics.Process]::GetCurrentProcess().Id)
+if (-not (Test-Path -LiteralPath $htmlDrillLogDir)) {
+    New-Item -ItemType Directory -Force -Path $htmlDrillLogDir | Out-Null
+}
+$nowHtml = Join-Path $htmlDrillLogDir "now.html"
+# stale 排除: drill 専用ディレクトリなので常に空だが明示
+if (Test-Path -LiteralPath $nowHtml) { Remove-Item -LiteralPath $nowHtml -Force }
+# カード解決: installed レイアウト優先、無ければ dev fallback を明示設定
+$htmlDrillCards = $env:AI_SAFE_CARDS_DIR
+if ([string]::IsNullOrWhiteSpace($htmlDrillCards)) {
+    $devCards = [System.IO.Path]::GetFullPath((Join-Path $script:hookRoot "..\..\configs\safety\cards"))
+    if (Test-Path -LiteralPath $devCards) { $htmlDrillCards = $devCards }
+}
+$htmlJson = New-HookJson "Bash" @{ command = "echo html-drill" }
+$savedLogDir = $env:AI_SAFE_LOG_DIR
+$env:AI_SAFE_LOG_DIR = $htmlDrillLogDir
+if (-not [string]::IsNullOrWhiteSpace($htmlDrillCards)) { $env:AI_SAFE_CARDS_DIR = $htmlDrillCards }
+[void](Invoke-Guard "guard-bash.ps1" $htmlJson)
+$env:AI_SAFE_LOG_DIR = $savedLogDir
+$htmlOk = $false
+if (Test-Path -LiteralPath $nowHtml) {
+    $htmlContent = Get-Content -LiteralPath $nowHtml -Raw -Encoding UTF8
+    $htmlOk = ($htmlContent -match '<meta charset="utf-8">') -and
+              ($htmlContent -match '<meta http-equiv="refresh"') -and
+              ($htmlContent -match 'setInterval')
+}
+Add-Result "html-write now.html has charset + refresh + JS-reload tags" $htmlOk ("path=" + $nowHtml)
+try { Remove-Item -LiteralPath $htmlDrillLogDir -Recurse -Force -ErrorAction SilentlyContinue } catch { }
+
 $results | Format-Table -AutoSize
 $failed = @($results | Where-Object { $_.Status -ne "PASS" -and $_.Status -ne "SKIP" })
 if ($failed.Count -gt 0) {

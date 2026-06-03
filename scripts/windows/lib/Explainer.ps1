@@ -122,6 +122,172 @@ function Get-CardBody {
     return ($body -join "`n")
 }
 
+# ----- now.html 書き出し (Phase 1: HTML モニター足場) ---------------------
+# now.md と「並立」する追加出力。now.md の挙動は一切変えない。
+# meta refresh による file:// 直開きの自動更新を前提に、自己完結 HTML を
+# 原子書換 (tmp -> Move-Item -Force) で吐く。文字コードは UTF8。
+
+function ConvertTo-HtmlEscaped([string]$Text) {
+    if ($null -eq $Text) { return "" }
+    $t = $Text -replace "&", "&amp;"
+    $t = $t -replace "<", "&lt;"
+    $t = $t -replace ">", "&gt;"
+    $t = $t -replace '"', "&quot;"
+    return $t
+}
+
+# decision -> (cssClass, icon)
+function Get-DecisionStyle([string]$Decision) {
+    switch ($Decision) {
+        "block" { return @("d-block", "⛔") }
+        "allow" { return @("d-allow", "✅") }
+        "explain" { return @("d-explain", "💬") }
+        default { return @("d-other", "•") }
+    }
+}
+
+# カード本文 (markdown) を最小限の HTML に変換する。
+#   '# 見出し' -> <h2>、'- 項目' -> <ul><li>、空行 -> 段落区切り、その他 -> <p>。
+function ConvertTo-CardHtml([string]$Body) {
+    $sb = New-Object System.Text.StringBuilder
+    $inList = $false
+    foreach ($raw in ($Body -split "`n")) {
+        $line = $raw.TrimEnd()
+        if ($line -match '^#+\s') {
+            if ($inList) { [void]$sb.Append("</ul>`n"); $inList = $false }
+            $h = $line -replace '^#+\s+', ''
+            [void]$sb.Append("<h2>" + (ConvertTo-HtmlEscaped $h) + "</h2>`n")
+            continue
+        }
+        if ($line -match '^[-*]\s') {
+            if (-not $inList) { [void]$sb.Append("<ul>`n"); $inList = $true }
+            $item = $line -replace '^[-*]\s+', ''
+            [void]$sb.Append("<li>" + (ConvertTo-HtmlEscaped $item) + "</li>`n")
+            continue
+        }
+        if ($line -match '^\s*$') {
+            if ($inList) { [void]$sb.Append("</ul>`n"); $inList = $false }
+            continue
+        }
+        if ($inList) { [void]$sb.Append("</ul>`n"); $inList = $false }
+        [void]$sb.Append("<p>" + (ConvertTo-HtmlEscaped $line) + "</p>`n")
+    }
+    if ($inList) { [void]$sb.Append("</ul>`n") }
+    return $sb.ToString()
+}
+
+# 本日の events-YYYY-MM-DD.jsonl の末尾 N 件を HTML テーブル行に変換する。
+function Get-EventsHtmlRows([string]$LogDir) {
+    $tailN = 12
+    if ($env:AI_SAFE_MONITOR_TAIL) { try { $tailN = [int]$env:AI_SAFE_MONITOR_TAIL } catch { $tailN = 12 } }
+    $day = Get-Date -Format "yyyy-MM-dd"
+    $eventsPath = Join-Path $LogDir ("events-" + $day + ".jsonl")
+    if (-not (Test-Path -LiteralPath $eventsPath)) { return "" }
+    $lines = @(Get-Content -LiteralPath $eventsPath -Encoding UTF8 -Tail $tailN)
+    if ($lines.Count -eq 0) { return "" }
+    [array]::Reverse($lines)
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($line in $lines) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        try {
+            $obj = $line | ConvertFrom-Json
+        } catch {
+            continue
+        }
+        $ts = [string]$obj.ts
+        $short = $ts -replace ".*T", "" -replace "\..*", "" -replace "Z$", "" -replace "([+-]\d{2}:?\d{2})$", ""
+        $decision = [string]$obj.decision
+        $mode = [string]$obj.mode
+        $reason = [string]$obj.reason
+        $style = Get-DecisionStyle $decision
+        $cls = $style[0]; $icon = $style[1]
+        [void]$sb.Append('<tr class="' + $cls + '"><td class="ev-ts">' + (ConvertTo-HtmlEscaped $short) + '</td><td class="ev-dec">' + $icon + ' ' + (ConvertTo-HtmlEscaped $decision) + '</td><td class="ev-mode">' + (ConvertTo-HtmlEscaped $mode) + '</td><td class="ev-reason">' + (ConvertTo-HtmlEscaped $reason) + "</td></tr>`n")
+    }
+    return $sb.ToString()
+}
+
+function Write-NowHtml {
+    param([string]$Icon, [string]$Title, [string]$BodyRisk, [string]$Ts, [string]$CardId, [string]$Mode, [string]$Body, [string]$LogDir)
+    try {
+        $refresh = 1
+        if ($env:AI_SAFE_MONITOR_INTERVAL -match '^\d+$') { $refresh = [int]$env:AI_SAFE_MONITOR_INTERVAL }
+        $cardcls = switch ($BodyRisk) {
+            "high" { "card-high" }
+            "medium" { "card-medium" }
+            default { "card-low" }
+        }
+        $cardHtml = ConvertTo-CardHtml $Body
+        $rows = Get-EventsHtmlRows $LogDir
+        $day = Get-Date -Format "yyyy-MM-dd"
+
+        $sb = New-Object System.Text.StringBuilder
+        [void]$sb.Append("<!DOCTYPE html>`n<html lang=`"ja`">`n<head>`n")
+        [void]$sb.Append("<meta charset=`"utf-8`">`n")
+        [void]$sb.Append("<meta http-equiv=`"refresh`" content=`"$refresh`">`n")
+        [void]$sb.Append("<meta name=`"viewport`" content=`"width=device-width, initial-scale=1`">`n")
+        [void]$sb.Append("<title>agent-monitor — AI の動きを見る</title>`n")
+        [void]$sb.Append("<style>`n")
+        [void]$sb.Append("*{box-sizing:border-box}`n")
+        [void]$sb.Append("body{margin:0;padding:16px;font-family:'Yu Gothic','Meiryo',sans-serif;background:#0f1115;color:#e6e6e6;word-break:keep-all;line-height:1.7}`n")
+        [void]$sb.Append(".wrap{max-width:880px;margin:0 auto}`n")
+        [void]$sb.Append("h1.hdr{font-size:18px;margin:0 0 14px;color:#9ad}`n")
+        [void]$sb.Append(".card{border-radius:12px;padding:18px 20px;margin-bottom:20px;border-left:8px solid #888;background:#1a1d24}`n")
+        [void]$sb.Append(".card-high{border-left-color:#e5534b;background:#2a1718}`n")
+        [void]$sb.Append(".card-medium{border-left-color:#e0b341;background:#2a2417}`n")
+        [void]$sb.Append(".card-low{border-left-color:#3fb950;background:#15241a}`n")
+        [void]$sb.Append(".card .ctitle{font-size:22px;font-weight:700;margin:0 0 6px}`n")
+        [void]$sb.Append(".card .cmeta{font-size:12px;opacity:.7;margin-bottom:10px}`n")
+        [void]$sb.Append(".card h2{font-size:15px;margin:14px 0 6px;color:#cfd}`n")
+        [void]$sb.Append(".card ul{margin:4px 0 4px 1.2em;padding:0}`n")
+        [void]$sb.Append(".card li{margin:3px 0}`n")
+        [void]$sb.Append(".card p{margin:6px 0}`n")
+        [void]$sb.Append(".events h2{font-size:15px;color:#9ad;margin:0 0 8px}`n")
+        [void]$sb.Append("table{width:100%;border-collapse:collapse;font-size:13px}`n")
+        [void]$sb.Append("th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #2a2f3a;vertical-align:top}`n")
+        [void]$sb.Append("th{color:#9aa;font-weight:600}`n")
+        [void]$sb.Append(".ev-ts{white-space:nowrap;opacity:.8}`n")
+        [void]$sb.Append(".ev-mode{white-space:nowrap;opacity:.85}`n")
+        [void]$sb.Append("tr.d-block .ev-dec{color:#ff7b72}`n")
+        [void]$sb.Append("tr.d-allow .ev-dec{color:#56d364}`n")
+        [void]$sb.Append("tr.d-explain .ev-dec{color:#79c0ff}`n")
+        [void]$sb.Append(".empty{opacity:.6;font-size:13px}`n")
+        [void]$sb.Append(".foot{margin-top:18px;font-size:11px;opacity:.5}`n")
+        [void]$sb.Append("</style>`n")
+        # JS リロード: meta refresh が file:// で効かないブラウザ向けの補完。
+        # ユーザ値を JS 内に一切流し込まない (XSS 不発生)。
+        # JS が無効な環境では meta refresh にフォールバックする。
+        [void]$sb.Append("<script>setInterval(function(){ location.reload(); }, 1000);</script>`n")
+        [void]$sb.Append("</head>`n<body>`n<div class=`"wrap`">`n")
+        [void]$sb.Append("<h1 class=`"hdr`">agent-monitor — いま AI がやろうとしていること</h1>`n")
+        [void]$sb.Append("<div class=`"card $cardcls`">`n")
+        [void]$sb.Append("<div class=`"ctitle`">" + (ConvertTo-HtmlEscaped $Icon) + " " + (ConvertTo-HtmlEscaped $Title) + "</div>`n")
+        [void]$sb.Append("<div class=`"cmeta`">" + (ConvertTo-HtmlEscaped $Ts) + " ・ tool=" + (ConvertTo-HtmlEscaped $Mode) + " ・ risk=" + (ConvertTo-HtmlEscaped $BodyRisk) + " ・ card=" + (ConvertTo-HtmlEscaped $CardId) + "</div>`n")
+        [void]$sb.Append($cardHtml)
+        [void]$sb.Append("</div>`n")
+        [void]$sb.Append("<div class=`"events`">`n<h2>直近の出来事 (events-$day.jsonl)</h2>`n")
+        if (-not [string]::IsNullOrWhiteSpace($rows)) {
+            [void]$sb.Append("<table>`n<thead><tr><th>時刻</th><th>判定</th><th>種類</th><th>理由</th></tr></thead>`n<tbody>`n")
+            [void]$sb.Append($rows)
+            [void]$sb.Append("</tbody>`n</table>`n")
+        } else {
+            [void]$sb.Append("<p class=`"empty`">本日の監査ログはまだありません。AI が tool を呼ぶとここに出ます。</p>`n")
+        }
+        [void]$sb.Append("</div>`n")
+        [void]$sb.Append("<div class=`"foot`">この画面は $refresh 秒ごとに自動更新されます (JS reload + meta refresh フォールバック)。判断はこの画面ではなくターミナル側で行ってください。</div>`n")
+        [void]$sb.Append("</div>`n</body>`n</html>`n")
+
+        $out = Join-Path $LogDir "now.html"
+        $tmp = Join-Path $LogDir ("now.html.tmp." + [System.Diagnostics.Process]::GetCurrentProcess().Id)
+        # BOM 無し UTF-8 で書く (一部ブラウザの BOM 表示崩れ回避。impl-notes 参照)。
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($tmp, $sb.ToString(), $enc)
+        # 原子書換: 同一ディレクトリ内 tmp -> Move-Item -Force で rename。
+        Move-Item -LiteralPath $tmp -Destination $out -Force
+    } catch {
+        # フェイルセーフ: now.html 失敗は now.md / 判定に影響させない
+    }
+}
+
 function Write-NowCard {
     param([string]$CardId, [string]$RiskDefault, [string]$Mode, [string]$CardsDir)
     $bodyPath = Join-Path $CardsDir ($CardId + ".md")
@@ -150,6 +316,9 @@ function Write-NowCard {
     $sep = ("─" * 41)
     $header = "$icon $title  (risk: $risk)`n$sep`n[$ts  tool=$Mode  card=$CardId]`n`n"
     Set-Content -LiteralPath $out -Value ($header + $body) -Encoding UTF8
+
+    # now.html を「並立」出力 (now.md は上で確定済み・不変)。失敗しても判定は止めない。
+    Write-NowHtml -Icon $icon -Title $title -BodyRisk $risk -Ts $ts -CardId $CardId -Mode $Mode -Body $body -LogDir $logDir
 
     return $CardId
 }

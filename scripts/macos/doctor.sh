@@ -160,5 +160,45 @@ with open('$drill_policy', 'w') as f:
   fi
 fi
 
+# Phase 1: html-write drill (自己完結型)
+# stale な now.html を先に削除してから guard を走らせ、now.html が「今回」
+# 新規生成されることを確認する。clean HOME 環境でも正しく PASS/FAIL する。
+#
+# カード解決の保証:
+#   installed レイアウト ($hook_root/.../cards) を explainer.sh の cards_dir() が
+#   自動解決する。dev レイアウトでは fallback が $hook_root/../../../../configs/safety/cards
+#   を指すが、実在しない場合に備え AI_SAFE_CARDS_DIR を明示設定する。
+html_drill_log_dir="$AI_SAFE_LOG_DIR/html-drill-$$"
+mkdir -p "$html_drill_log_dir"
+now_html="$html_drill_log_dir/now.html"
+# stale 排除 (念のため削除。drill 専用ディレクトリなので常に空だが明示)
+rm -f "$now_html"
+# カード解決: installed レイアウト優先、無ければ dev fallback を明示設定
+html_drill_cards="${AI_SAFE_CARDS_DIR:-}"
+if [ -z "$html_drill_cards" ]; then
+  # dev レイアウト: hook_root = scripts/macos → configs/safety/cards
+  _dev_cards="$(cd "$hook_root/../.." 2>/dev/null && pwd)/configs/safety/cards"
+  if [ -d "$_dev_cards" ]; then
+    html_drill_cards="$_dev_cards"
+  fi
+fi
+html_json="{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"cwd\":\"$workspace\",\"tool_input\":{\"command\":\"echo html-drill\"}}"
+set +e
+printf '%s' "$html_json" \
+  | AI_SAFE_LOG_DIR="$html_drill_log_dir" AI_SAFE_CARDS_DIR="$html_drill_cards" \
+    "$hook_root/guard-bash.sh" >/tmp/ai-safe-doctor-html.out 2>/tmp/ai-safe-doctor-html.err
+set -e
+if [ -r "$now_html" ] \
+  && grep -q '<meta charset="utf-8">' "$now_html" \
+  && grep -q '<meta http-equiv="refresh"' "$now_html" \
+  && grep -q 'setInterval' "$now_html"; then
+  echo "PASS html-write now.html has charset + refresh + JS-reload tags"
+  pass=$((pass + 1))
+else
+  echo "FAIL html-write now.html missing or lacks required tags ($now_html)"
+  fail=$((fail + 1))
+fi
+rm -rf "$html_drill_log_dir"
+
 echo "doctor summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]
