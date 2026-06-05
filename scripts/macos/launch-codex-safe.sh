@@ -73,7 +73,11 @@ if [ "$auto" -eq 1 ]; then
   # `or exit 127`: exec 失敗(doctor 不在/実行ビット無し/パスがディレクトリ等)時に
   # perl が exit 0 で抜けて green に倒れる(フェイルオープン)のを防ぐ。失敗時は 127 → else。
   if command -v perl >/dev/null 2>&1; then
-    isolation_ok() { perl -e 'alarm shift; exec @ARGV or exit 127' 60 "$doctor" --isolation-check codex >/dev/null 2>&1; }
+    # SIG{ALRM} でクリーンに exit(非0)する。shell が "Alarm clock: 14" を表示する
+    # のは perl が alarm シグナルを自分で処理せず shell に伝播させる場合のみ。
+    # `$SIG{ALRM}=sub{exit 1}` で perl 内部処理にすることで表示を抑制する。
+    # exec 失敗(doctor 不在等)は `or exit 127` で非0保証(フェイルクローズ)。
+    isolation_ok() { perl -e '$SIG{ALRM}=sub{exit 1};alarm shift;exec @ARGV or exit 127' 60 "$doctor" --isolation-check codex >/dev/null 2>&1; }
   else
     isolation_ok() { "$doctor" --isolation-check codex >/dev/null 2>&1; }
   fi

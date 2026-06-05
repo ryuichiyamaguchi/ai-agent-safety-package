@@ -158,13 +158,18 @@ drill_agy_declaration() {
 # classify_net_result <baseline> <blocked>
 # 2 段プローブの結果を金庫判定に写像する(テスト容易性のため分離)。
 #   <baseline> : ベースライン疎通(ネット許可)プローブの結果 connected/refused/timeout
-#   <blocked>  : 遮断プロファイルでのプローブ結果 connected/refused/timeout
+#   <blocked>  : 遮断プロファイルでのプローブ結果
+#                 sandbox-blocked  = EPERM 系(sandbox 由来の遮断を実証)
+#                 general-refused  = ECONNREFUSED 等(一般的な拒否。sandbox の実証にならない)
+#                 connected / timeout その他
 # 判定(フェイルクローズ):
 #   baseline が connected でない = この環境はオフライン/到達不能 → 遮断を実証できない → HOLD(20)
-#   baseline=connected かつ blocked=refused  → 遮断を実証 = PASS(0)
-#   baseline=connected かつ blocked=connected → 金庫に穴 = FAIL(10)
-#   それ以外(blocked=timeout 等の判定不能)   → HOLD(20)
+#   baseline=connected かつ blocked=sandbox-blocked → sandbox 遮断を実証 = PASS(0)
+#   baseline=connected かつ blocked=connected        → 金庫に穴 = FAIL(10)
+#   baseline=connected かつ blocked=general-refused  → sandbox 由来でない拒否 → HOLD(20)
+#   それ以外(blocked=timeout 等の判定不能)          → HOLD(20)
 # 後方互換: 引数 1 個で呼ばれた旧シグネチャ(connected/refused/timeout)も受ける。
+#   この場合 refused が sandbox-blocked か general-refused か不明なので HOLD(fail-closed)。
 classify_net_result() {
   if [ "$#" -eq 1 ]; then
     # 旧シグネチャ(ベースライン無し)。ベースライン未確認では PASS にしない。
@@ -179,9 +184,10 @@ classify_net_result() {
     echo "HOLD network baseline not reachable (baseline=$baseline); cannot prove egress block (offline?)"; return 20
   fi
   case "$blocked" in
-    refused)   echo "PASS egress blocked by sandbox (baseline reachable)"; return 0 ;;
-    connected) echo "FAIL egress connection succeeded despite block profile"; return 10 ;;
-    *)         echo "HOLD egress block result indeterminate (blocked=$blocked)"; return 20 ;;
+    sandbox-blocked) echo "PASS egress blocked by sandbox (EPERM/operation not permitted; baseline reachable)"; return 0 ;;
+    connected)       echo "FAIL egress connection succeeded despite block profile"; return 10 ;;
+    general-refused) echo "HOLD egress refused (ECONNREFUSED — not sandbox-derived; cannot prove isolation)"; return 20 ;;
+    *)               echo "HOLD egress block result indeterminate (blocked=$blocked)"; return 20 ;;
   esac
 }
 
@@ -200,14 +206,25 @@ _probe_egress() {
       probe_home="$(_codex_probe_home)" || { echo timeout; return; }
       inside="$(mktemp -d 2>/dev/null)" || { echo timeout; return; }
       ( cd "$inside" && git init -q >/dev/null 2>&1 )
-      # perl で TCP connect(6 秒 alarm)。CONNECTED=接続成功 / REFUSED=拒否 / TIMEOUT=判定不能。
+      # perl で TCP connect(6 秒 alarm)。結果を errno 文字列付きで出力して caller が種別判定できるようにする。
+      # CONNECTED=接続成功 / REFUSED <errno>=拒否 / TIMEOUT=判定不能。
+      # caller は REFUSED の errno を見て sandbox-blocked / general-refused に分類する。
       local perl_probe out
       perl_probe='use IO::Socket::INET;$SIG{ALRM}=sub{print "TIMEOUT\n";exit 2};alarm(6);'
       perl_probe="${perl_probe}my \$s=IO::Socket::INET->new(PeerAddr=>\"$host\",PeerPort=>$port,Proto=>\"tcp\");"
       perl_probe="${perl_probe}if(\$s){print \"CONNECTED\\n\";exit 0}else{print \"REFUSED \$!\\n\";exit 1}"
       out="$( CODEX_HOME="$probe_home" codex sandbox --permissions-profile "$profile" -C "$inside" /usr/bin/perl -e "$perl_probe" 2>&1 )"
       if printf '%s' "$out" | grep -q "CONNECTED"; then echo connected; return; fi
-      if printf '%s' "$out" | grep -q "REFUSED"; then echo refused; return; fi
+      if printf '%s' "$out" | grep -q "REFUSED"; then
+        # errno 文字列で sandbox 由来(EPERM 系)か一般拒否(ECONNREFUSED)かを区別する。
+        # sandbox による seatbelt 遮断は "Operation not permitted" / "permission denied" で現れる。
+        # 一般的な Connection refused(ECONNREFUSED)は sandbox の実証にならない → general-refused。
+        if printf '%s' "$out" | grep -iqE "operation not permitted|permission denied"; then
+          echo sandbox-blocked; return
+        else
+          echo general-refused; return
+        fi
+      fi
       echo timeout
       ;;
     *) echo timeout ;;

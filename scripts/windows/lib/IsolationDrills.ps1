@@ -186,15 +186,18 @@ function Test-WriteOutside([string]$Engine) {
 # 2 段プローブの結果を金庫判定に写像する(テスト容易性のため分離)。
 # mac の classify_net_result <baseline> <blocked> に対応。
 #   $Baseline : ベースライン疎通(ネット許可)プローブの結果 connected/refused/timeout
-#   $Blocked  : 遮断プロファイルでのプローブ結果 connected/refused/timeout/skipped
+#   $Blocked  : 遮断プロファイルでのプローブ結果
+#                sandbox-blocked  = sandbox 由来の遮断(EPERM 相当 / アクセス拒否)を実証
+#                general-refused  = 一般的な ConnectionRefused(sandbox の実証にならない)
+#                connected / timeout / skipped その他
 # 判定(フェイルクローズ):
 #   baseline が connected でない = この環境はオフライン/到達不能 → 遮断を実証できない → HOLD(20)
-#   baseline=connected かつ blocked=refused   → 遮断を実証 = PASS(0)
-#   baseline=connected かつ blocked=connected → 金庫に穴 = FAIL(10)
-#   それ以外(blocked=timeout 等の判定不能)    → HOLD(20)
+#   baseline=connected かつ blocked=sandbox-blocked → sandbox 遮断を実証 = PASS(0)
+#   baseline=connected かつ blocked=connected       → 金庫に穴 = FAIL(10)
+#   baseline=connected かつ blocked=general-refused → sandbox 由来でない拒否 → HOLD(20)
+#   それ以外(blocked=timeout 等の判定不能)         → HOLD(20)
 # 後方互換: $Blocked 省略の旧シグネチャ(connected/refused/timeout)も受ける。
 #   ベースライン未確認では refused 単独を PASS にせず HOLD(fail-closed)。
-# M-1: 'access' は誤検知が多いため除去。mac と語彙を揃える(operation not permitted|not permitted|denied|refused)。
 function Get-NetResultClass([string]$Baseline, [string]$Blocked = "") {
     if ([string]::IsNullOrEmpty($Blocked)) {
         # 旧シグネチャ(ベースライン無し)。ベースライン未確認では PASS にしない。
@@ -209,9 +212,10 @@ function Get-NetResultClass([string]$Baseline, [string]$Blocked = "") {
         return 20
     }
     switch ($Blocked) {
-        'refused'   { Write-Host "PASS egress blocked by sandbox (baseline reachable)"; return 0 }
-        'connected' { Write-Host "FAIL egress connection succeeded despite block profile"; return 10 }
-        default     { Write-Host "HOLD egress block result indeterminate (blocked=$Blocked)"; return 20 }
+        'sandbox-blocked' { Write-Host "PASS egress blocked by sandbox (access-denied/EPERM; baseline reachable)"; return 0 }
+        'connected'       { Write-Host "FAIL egress connection succeeded despite block profile"; return 10 }
+        'general-refused' { Write-Host "HOLD egress refused (ConnectionRefused — not sandbox-derived; cannot prove isolation)"; return 20 }
+        default           { Write-Host "HOLD egress block result indeterminate (blocked=$Blocked)"; return 20 }
     }
 }
 
@@ -241,10 +245,13 @@ function Get-EgressProbe([string]$Engine, [string]$ProfileName, [string]$TargetH
 
                 # PowerShell の TcpClient で TCP connect(5 秒タイムアウト)。
                 # 結果は stdout の文字列で判定する(exit code ではなく)。
-                # M-1: catch 節のキーワードは mac と揃える:
-                #   operation not permitted|not permitted|denied|refused → 'refused'
-                #   それ以外 → 'timeout'
-                # 'access' は WSA ネットワーク無効(WSAENETDOWN 等)でも出るため除去。
+                # F-A 修正: sandbox 由来の遮断(EPERM 相当 = AccessDenied / OperationNotPermitted)と
+                # 一般的な ConnectionRefused(ECONNREFUSED)を区別して返す。
+                #   sandbox-blocked → EPERM 系(seatbelt/AppContainer による遮断)
+                #   general-refused → ECONNREFUSED 等(sandbox でない一般拒否)
+                #   connected       → 接続成功(金庫に穴)
+                #   timeout         → 判定不能(fail-closed 側に倒す)
+                # SocketError プロパティが取れる場合はそちらを優先(より正確)。
                 $probeCmd = @"
 try {
     `$tc = New-Object System.Net.Sockets.TcpClient
@@ -252,16 +259,31 @@ try {
     `$ok = `$ar.AsyncWaitHandle.WaitOne(5000)
     if (`$ok) { `$tc.EndConnect(`$ar); Write-Output 'connected' } else { `$tc.Close(); Write-Output 'timeout' }
 } catch {
+    `$ex = `$_.Exception
+    # InnerException が SocketException なら SocketErrorCode で精密判定する。
+    `$se = `$ex.InnerException -as [System.Net.Sockets.SocketException]
+    if (-not `$se) { `$se = `$ex -as [System.Net.Sockets.SocketException] }
+    if (`$se) {
+        `$ec = `$se.SocketErrorCode.ToString()
+        # AccessDenied / OperationNotPermitted は sandbox 由来の EPERM 相当。
+        if (`$ec -match 'AccessDenied|OperationNotPermitted|NotPermitted') { Write-Output 'sandbox-blocked'; return }
+        # ConnectionRefused は一般的な拒否 — sandbox の実証にならない。
+        if (`$ec -match 'ConnectionRefused') { Write-Output 'general-refused'; return }
+    }
+    # SocketException 以外 / SocketErrorCode 不明: メッセージ文字列にフォールバック。
     `$msg = `$_.Exception.Message
-    if (`$msg -match 'operation not permitted|not permitted|denied|refused') { Write-Output 'refused' } else { Write-Output 'timeout' }
+    if (`$msg -match 'operation not permitted|not permitted') { Write-Output 'sandbox-blocked' }
+    elseif (`$msg -match 'connection refused') { Write-Output 'general-refused' }
+    else { Write-Output 'timeout' }
 }
 "@
                 $env:CODEX_HOME = $probeHome
                 $out = & codex sandbox --permissions-profile $ProfileName -C $inside powershell.exe -NoProfile -Command $probeCmd 2>&1
 
                 $joined = ($out -join ' ')
-                if ($joined -match 'connected') { Write-Output 'connected'; return }
-                if ($joined -match 'refused')   { Write-Output 'refused';   return }
+                if ($joined -match 'connected')       { Write-Output 'connected';       return }
+                if ($joined -match 'sandbox-blocked') { Write-Output 'sandbox-blocked'; return }
+                if ($joined -match 'general-refused') { Write-Output 'general-refused'; return }
                 Write-Output 'timeout'
             } finally {
                 if ($prevCodexHome) { $env:CODEX_HOME = $prevCodexHome } else { Remove-Item Env:\CODEX_HOME -ErrorAction SilentlyContinue }

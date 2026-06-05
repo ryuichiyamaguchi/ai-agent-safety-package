@@ -18,12 +18,13 @@ if type drill_write_outside >/dev/null 2>&1; then ok "drill_write_outside define
 if type drill_network_egress >/dev/null 2>&1; then ok "drill_network_egress defined"; else ng "drill_network_egress defined"; fi
 
 # 判定ロジックの単体検証: 2 段プローブ分類関数 classify_net_result <baseline> <blocked>。
-# フェイルクローズ: ベースライン疎通 (connected) が取れたときだけ遮断 (refused) を PASS とする。
-#   baseline=connected blocked=refused   -> 0  (PASS: ネット可の環境で遮断を実証)
-#   baseline=connected blocked=connected -> 10 (FAIL: 遮断プロファイルでも繋がる = 穴)
-#   baseline=connected blocked=timeout   -> 20 (HOLD: 遮断結果が判定不能)
-#   baseline!=connected (オフライン/到達不能) -> 20 (HOLD: 遮断を実証できない)
-classify_net_result connected refused   >/dev/null 2>&1; [ $? -eq 0 ]  && ok "classify baseline+blocked=PASS"        || ng "classify baseline+blocked=PASS"
+# フェイルクローズ: ベースライン疎通 (connected) + sandbox-blocked(EPERM系) のときだけ PASS。
+#   baseline=connected blocked=sandbox-blocked -> 0  (PASS: sandbox 由来の遮断を実証)
+#   baseline=connected blocked=general-refused -> 20 (HOLD: ECONNREFUSED は sandbox 実証にならない)
+#   baseline=connected blocked=connected       -> 10 (FAIL: 遮断プロファイルでも繋がる = 穴)
+#   baseline=connected blocked=timeout         -> 20 (HOLD: 遮断結果が判定不能)
+#   baseline!=connected (オフライン/到達不能)  -> 20 (HOLD: 遮断を実証できない)
+classify_net_result connected sandbox-blocked >/dev/null 2>&1; [ $? -eq 0 ]  && ok "classify baseline+blocked=PASS"        || ng "classify baseline+blocked=PASS"
 classify_net_result connected connected >/dev/null 2>&1; [ $? -eq 10 ] && ok "classify block-leak=FAIL"              || ng "classify block-leak=FAIL"
 classify_net_result connected timeout   >/dev/null 2>&1; [ $? -eq 20 ] && ok "classify block-indeterminate=HOLD"     || ng "classify block-indeterminate=HOLD"
 classify_net_result refused   skipped   >/dev/null 2>&1; [ $? -eq 20 ] && ok "classify offline-baseline=HOLD"        || ng "classify offline-baseline=HOLD"
@@ -103,6 +104,14 @@ printf '%s' "$out_miss_a" | grep -q -- "--dangerously-skip-permissions" && ng "a
 # agy: 実行ビット無しの doctor → フェイルクローズ。
 out_noexec_a="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$NOEXEC" AGY="$STUB_OK" bash "$LAUNCH_A" "$WS" "" --auto 2>/dev/null)"
 printf '%s' "$out_noexec_a" | grep -q -- "--dangerously-skip-permissions" && ng "agy noexec-doctor LEAKS skip-permissions" || ok "agy noexec-doctor -> no skip-permissions (fail-closed)"
+
+# --- Task 5b: F-A network drill — sandbox-blocked vs general refused 区別 ---
+# F-A: 一般的な Connection refused(ECONNREFUSED)は sandbox 実証にならないので HOLD。
+# classify_net_result に sandbox-blocked / general-refused の 2 値を渡して判定が正しいか確認。
+classify_net_result connected sandbox-blocked >/dev/null 2>&1; [ $? -eq 0 ]  && ok "classify sandbox-blocked=PASS"            || ng "classify sandbox-blocked=PASS"
+classify_net_result connected general-refused >/dev/null 2>&1; [ $? -eq 20 ] && ok "classify general-refused=HOLD (no false PASS)" || ng "classify general-refused=HOLD"
+# 後方互換(引数 1 個): refused 単独は sandbox 由来か不明なので HOLD のまま変わらないこと。
+classify_net_result refused >/dev/null 2>&1; [ $? -eq 20 ] && ok "classify 1arg-refused still HOLD (no false PASS)" || ng "classify 1arg-refused still HOLD"
 
 # --- Task 6: full doctor includes isolation drills ---
 full_out="$(bash "$HERE/../doctor.sh" "$WS" 2>/dev/null || true)"
