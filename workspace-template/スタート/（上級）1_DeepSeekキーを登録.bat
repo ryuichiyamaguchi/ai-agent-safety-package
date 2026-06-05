@@ -1,12 +1,12 @@
 @echo off
-chcp 65001 >nul
+chcp 932 >nul
 setlocal
 set "HERE=%~dp0"
 for %%I in ("%HERE%..") do set "WORKSPACE=%%~fI"
-set "TARGET=%WORKSPACE%\.ai-safety\hooks\windows\deepseek\ç™»éŒ²-åˆå›ã ã‘.bat"
+set "TARGET=%WORKSPACE%\.ai-safety\hooks\windows\deepseek\“o˜^-‰‰ñ‚¾‚¯.bat"
 if not exist "%TARGET%" (
-  echo DeepSeek èµ·å‹•ã‚¹ã‚¯ãƒªãƒ—ãƒˆãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“: %TARGET%
-  echo å…ˆã«ã€Œ1_å®‰å…¨ãƒ‘ãƒƒã‚±ãƒ¼ã‚¸ã‚’æº–å‚™ã€ã‚’å®Ÿè¡Œã—ã¦ãã ã•ã„ã€‚
+  echo DeepSeek ‹N“®ƒXƒNƒŠƒvƒg‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñ: %TARGET%
+  echo æ‚Éu1_ˆÀ‘SƒpƒbƒP[ƒW‚ğ€”õv‚ğÀs‚µ‚Ä‚­‚¾‚³‚¢B
   pause
   exit /b 1
 )
