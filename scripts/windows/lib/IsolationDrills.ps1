@@ -1,4 +1,4 @@
-# IsolationDrills.ps1 — OS 金庫(サンドボックス)が実際に効いているかを
+﻿# IsolationDrills.ps1 — OS 金庫(サンドボックス)が実際に効いているかを
 # 実証検証するドリル群(mac isolation_drills.sh の PowerShell 版)。
 # doctor.ps1 と test から dot-source される。
 #

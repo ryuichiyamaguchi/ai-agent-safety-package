@@ -60,6 +60,74 @@ extract_target() {
   esac
 }
 
+# ツール別に「AI が実際にしようとしていること」の文字列を組み立てる。
+# 結果はグローバル変数 ACTION_TEXT / ACTION_LABEL に格納する。
+# TAB/改行を含むコマンドでも round-trip を破壊しないよう戻り値を使わない。
+# XSS対策は呼び出し側(write_now_html)で html_escape するので、ここはプレーンテキスト。
+#
+# 切り捨て: perl -CSDA で Unicode 文字単位の 800 字。実際に切った時だけ「…(省略)」を付ける。
+# (macOS awk は バイト単位のため不使用。perl は isolation_drills.sh で既に前提)
+_limit_chars() {
+  # 引数: max_chars
+  # stdin からテキストを受け取り、max_chars 文字で切り捨てる（改行を除去してから）。
+  # -CSDA: stdin/stdout/stderr を Unicode として扱う。日本語を文字単位で正しく数える。
+  # 省略マーカーは \x{2026}\x{FF08}\x{7701}\x{7565}\x{FF09} = …(省略)
+  local max="${1:-800}"
+  perl -CSDA -0777 -ne '
+    s/[\r\n]+/ /g;
+    if (length($_) > '"$max"') {
+      print substr($_, 0, '"$max"') . "\x{2026}\x{FF08}\x{7701}\x{7565}\x{FF09}";
+    } else {
+      print $_;
+    }
+  ' 2>/dev/null
+}
+
+# グローバル変数（explain() から参照する）
+ACTION_TEXT=""
+ACTION_LABEL="操作"
+
+extract_action_text() {
+  local text label fp content_first
+  case "$MODE" in
+    bash)
+      text="$(extract_json_string "command")"
+      label="コマンド実行"
+      ;;
+    write)
+      fp="$(extract_json_string "file_path")"
+      # content 先頭を文字単位 120 字で切る（F-M: head -c はバイト切り）
+      content_first="$(extract_json_string "content" | _limit_chars 120)"
+      if [ -n "$content_first" ]; then
+        text="${fp} (内容: ${content_first})"
+      else
+        text="$fp"
+      fi
+      label="ファイル書き込み"
+      ;;
+    webfetch)
+      text="$(printf '%s' "$RAW_INPUT" | sed -nE 's/.*"url"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -n 1)"
+      label="Web アクセス"
+      ;;
+    prompt|post-output)
+      # プロンプトは先頭 300 字（F-M: head -c はバイト切り）
+      text="$(printf '%s' "$RAW_INPUT" | _limit_chars 300)"
+      label="プロンプト"
+      ;;
+    *)
+      text="$(printf '%s' "$RAW_INPUT" | _limit_chars 200)"
+      label="操作"
+      ;;
+  esac
+  # 空の場合は不明
+  [ -z "$text" ] && text="（取得できませんでした）"
+  # 800字で切り捨て（F-J: 実際に切ったときだけ「…(省略)」を付ける）
+  text="$(printf '%s' "$text" | _limit_chars 800)"
+  # グローバル変数に格納（F-K: TAB round-trip 破壊を避けるため戻り値を使わない）
+  ACTION_TEXT="$text"
+  ACTION_LABEL="$label"
+}
+
 # ----- index.tsv 走査 -----------------------------------------------------
 
 # 引数: target_text
@@ -249,6 +317,9 @@ now_html_head() {
   printf 'tr.d-explain .ev-dec{color:#79c0ff}\n'
   printf '.empty{opacity:.6;font-size:13px}\n'
   printf '.foot{margin-top:18px;font-size:11px;opacity:.5}\n'
+  printf '.action{background:#12161f;border:1px solid #2a3040;border-radius:8px;padding:12px 14px;margin:10px 0 14px}\n'
+  printf '.action-label{font-size:12px;color:#8ab;margin-bottom:6px;font-weight:600}\n'
+  printf '.action-cmd{margin:0;font-family:monospace,"Courier New",Courier;font-size:14px;color:#f0c080;white-space:pre-wrap;word-break:break-all;overflow-wrap:anywhere}\n'
   printf '</style>\n'
   # JS リロード: meta refresh が file:// で効かないブラウザ向けの補完。
   # ユーザ値を JS 内に一切流し込まない (XSS 不発生)。
@@ -294,9 +365,10 @@ write_now_html_placeholder() {
 }
 
 # now.html を原子書換で書き出す。
-# 引数: icon title body_risk ts card_id body_html_path
+# 引数: icon title body_risk ts card_id body_html_path action_text action_label
 write_now_html() {
   local icon="$1" title="$2" body_risk="$3" ts="$4" card_id="$5" body_html_path="$6"
+  local action_text="${7:-}" action_label="${8:-操作}"
   local dir out tmp refresh cardcls
   dir="$(log_dir)"
   out="$dir/now.html"
@@ -316,6 +388,12 @@ write_now_html() {
     printf '<div class="ctitle">%s %s</div>\n' "$(html_escape "$icon")" "$(html_escape "$title")"
     printf '<div class="cmeta">%s ・ tool=%s ・ risk=%s ・ card=%s</div>\n' \
       "$(html_escape "$ts")" "$(html_escape "$MODE")" "$(html_escape "$body_risk")" "$(html_escape "$card_id")"
+    if [ -n "$action_text" ]; then
+      printf '<div class="action">\n'
+      printf '<div class="action-label">🤖 AI がしようとしていること（%s）</div>\n' "$(html_escape "$action_label")"
+      printf '<pre class="action-cmd">%s</pre>\n' "$(html_escape "$action_text")"
+      printf '</div>\n'
+    fi
     if [ -r "$body_html_path" ]; then
       card_md_to_html < "$body_html_path"
     fi
@@ -344,9 +422,12 @@ write_now_html() {
 
 # ----- now.md 書き出し ---------------------------------------------------
 
+# 引数: card_id risk_default action_text action_label
 write_now_card() {
   local card_id="$1"
   local risk_default="$2"
+  local action_text="${3:-}"
+  local action_label="${4:-操作}"
   local cdir body_path
   cdir="$(cards_dir)"
   body_path="$cdir/$card_id.md"
@@ -372,14 +453,20 @@ write_now_card() {
   {
     printf '%s %s  (risk: %s)\n' "$icon" "$title" "$body_risk"
     printf -- '─────────────────────────────────────────\n'
-    printf '[%s  tool=%s  card=%s]\n\n' "$ts" "$MODE" "$card_id"
+    printf '[%s  tool=%s  card=%s]\n' "$ts" "$MODE" "$card_id"
+    # 実際の操作を最上部に表示（コンソール monitor が読む）。
+    if [ -n "$action_text" ]; then
+      printf '\n▶ %s:\n  %s\n' "$action_label" "$action_text"
+    fi
+    printf '\n'
     strip_frontmatter "$body_path"
   } > "$out"
   if [ -f "$out" ] && [ -O "$out" ]; then
     chmod 600 "$out" 2>/dev/null || true
   fi
   # now.html を「並立」出力 (now.md は上で確定済み・不変)。失敗しても explain を止めない。
-  write_now_html "$icon" "$title" "$body_risk" "$ts" "$card_id" "$body_path" 2>/dev/null || true
+  write_now_html "$icon" "$title" "$body_risk" "$ts" "$card_id" "$body_path" \
+    "$action_text" "$action_label" 2>/dev/null || true
   umask "$prev_umask"
   printf '%s' "$card_id"
 }
@@ -391,7 +478,7 @@ write_now_card() {
 # どこかで失敗してもポリシー判定を止めないように常に成功する。
 explain() {
   {
-    local target hit card_id risk written
+    local target hit card_id risk written action_raw action_text action_label
     target="$(extract_target)"
     hit="$(lookup_card "$target" 2>/dev/null)"
     if [ -n "$hit" ]; then
@@ -401,7 +488,11 @@ explain() {
       card_id="default-$MODE"
       risk="low"
     fi
-    written="$(write_now_card "$card_id" "$risk" 2>/dev/null || true)"
+    # 実際の操作文字列を抽出（グローバル変数 ACTION_TEXT/ACTION_LABEL に格納）。
+    # F-K: TAB round-trip 破壊を避けるためグローバル変数経由。
+    ACTION_TEXT=""; ACTION_LABEL="操作"
+    extract_action_text 2>/dev/null || true
+    written="$(write_now_card "$card_id" "$risk" "$ACTION_TEXT" "$ACTION_LABEL" 2>/dev/null || true)"
     if [ -n "$written" ]; then
       audit_log "explain" "card=$written risk=$risk"
     fi

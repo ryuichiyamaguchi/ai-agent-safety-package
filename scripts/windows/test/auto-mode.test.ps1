@@ -1,4 +1,4 @@
-# auto-mode.test.ps1 — Safe Auto Mode の Windows テストハーネス。
+﻿# auto-mode.test.ps1 — Safe Auto Mode の Windows テストハーネス。
 # mac の scripts/macos/test/auto-mode.test.sh に対応。
 # 実行: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\test\auto-mode.test.ps1
 #
