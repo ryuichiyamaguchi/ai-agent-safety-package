@@ -94,7 +94,7 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 |---------|---------|------|
 | policy/safety-policy.json | 42b0abdcb62b8677686e3051b702ca2c9fd2707d0426c40ba16df28b1ebb82ba | v1.5.0 で packageVersion を 1.5.0 に bump |
 | configs/codex/hooks.mac.json | 6f03deee71871c40dd81d098867a4860284700f98135fbb05730936738a729ca | v1.0.x から変更なし |
-| configs/codex/hooks.windows.json | 9e7292426dd844ebe4d6ffa20f92f2283e9c1f6e704412bb1321117d4eb62d6a | v1.0.x から変更なし |
+| configs/codex/hooks.windows.json | 4e55cf8fbffbe44f1023455c902934f00d4a81d2637ba54c495cfaded18ca97c | v1.7.2 で Codex 二重包み対策に -File 形式へ変更 |
 | configs/claude/settings.mac.json | 8dbfee7f872fa15d0695526035bc358f6a699065d10985f80c1fe3d15f05d629 | v1.5.0 で env の壊れた AI_SAFE_LOG_DIR 行を削除 |
 | configs/claude/settings.windows.json | ed5eb26a81f3fd803cc5b793d3ed30af22feee60c95457cf350a3cca56628d9e | v1.5.0 で env の壊れた AI_SAFE_LOG_DIR 行を削除 |
 | configs/gemini/settings.mac.json | b9f45bac5583930c6b44a07a2351c6bd21722503de82983e63cd5f38db2a6213 | v1.0.x から変更なし |
@@ -114,7 +114,7 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 |---------|---------|------|
 | policy/safety-policy.json | 92a525342e5bb79e6138f47f8e5189c8bdc6a76bb7d2953d716bc9696abc737a | v1.4.3 で packageVersion を 1.4.3 に bump |
 | configs/codex/hooks.mac.json | 6f03deee71871c40dd81d098867a4860284700f98135fbb05730936738a729ca | v1.0.x から変更なし |
-| configs/codex/hooks.windows.json | 9e7292426dd844ebe4d6ffa20f92f2283e9c1f6e704412bb1321117d4eb62d6a | v1.0.x から変更なし |
+| configs/codex/hooks.windows.json | 4e55cf8fbffbe44f1023455c902934f00d4a81d2637ba54c495cfaded18ca97c | v1.7.2 で Codex 二重包み対策に -File 形式へ変更 |
 | configs/claude/settings.mac.json | 38b720bbe14be938574c7411913ad7c01313bfb4c8ebefd02d0f5d8d6b4740d6 | v1.4.1 で env exfil deny 追加 |
 | configs/claude/settings.windows.json | 2886773553d02d868cb01501a1ce3683891bea2dc88e803654f4d8c24dc79661 | v1.4.1 で env exfil deny 追加 |
 | configs/gemini/settings.mac.json | b9f45bac5583930c6b44a07a2351c6bd21722503de82983e63cd5f38db2a6213 | v1.0.x から変更なし |

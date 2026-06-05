@@ -5,7 +5,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"try { $p = Join-Path (Get-Location) '.ai-safety\\hooks\\windows\\guard-prompt.ps1'; if (!(Test-Path -LiteralPath $p)) { throw ('AI Safety hook missing: ' + $p) }; & $p; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 2 }\""
+          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .ai-safety\\hooks\\windows\\guard-prompt.ps1"
         }
       ]
     }
@@ -16,7 +16,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"try { $p = Join-Path (Get-Location) '.ai-safety\\hooks\\windows\\guard-bash.ps1'; if (!(Test-Path -LiteralPath $p)) { throw ('AI Safety hook missing: ' + $p) }; & $p; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 2 }\""
+          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .ai-safety\\hooks\\windows\\guard-bash.ps1"
         }
       ]
     },
@@ -25,7 +25,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"try { $p = Join-Path (Get-Location) '.ai-safety\\hooks\\windows\\guard-write.ps1'; if (!(Test-Path -LiteralPath $p)) { throw ('AI Safety hook missing: ' + $p) }; & $p; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 2 }\""
+          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .ai-safety\\hooks\\windows\\guard-write.ps1"
         }
       ]
     },
@@ -34,7 +34,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"try { $p = Join-Path (Get-Location) '.ai-safety\\hooks\\windows\\guard-webfetch.ps1'; if (!(Test-Path -LiteralPath $p)) { throw ('AI Safety hook missing: ' + $p) }; & $p; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 2 }\""
+          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .ai-safety\\hooks\\windows\\guard-webfetch.ps1"
         }
       ]
     }
@@ -45,7 +45,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"try { $p = Join-Path (Get-Location) '.ai-safety\\hooks\\windows\\guard-post-output.ps1'; if (!(Test-Path -LiteralPath $p)) { throw ('AI Safety hook missing: ' + $p) }; & $p; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 2 }\""
+          "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .ai-safety\\hooks\\windows\\guard-post-output.ps1"
         }
       ]
     }
