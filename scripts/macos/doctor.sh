@@ -1,5 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+# Safe Auto Mode: 軽量隔離チェック。launcher が --auto 起動前に呼ぶ。
+# その engine の workspace外書込遮断 + 外部ネット送信遮断を実証し、
+# 全 PASS のときだけ exit 0。1つでも FAIL/HOLD なら非0(フェイルクローズ)。
+if [ "${1:-}" = "--isolation-check" ]; then
+  engine="${2:-}"
+  drills_lib="$(cd "$(dirname "$0")" && pwd)/lib/isolation_drills.sh"
+  if [ ! -f "$drills_lib" ]; then echo "FAIL isolation_drills.sh missing" >&2; exit 2; fi
+  # shellcheck disable=SC1090
+  . "$drills_lib"
+  rc_total=0
+  case "$engine" in
+    codex)
+      # Codex は実証ドリル①②。
+      # set -e 環境でコマンド置換の非0が伝播するのを防ぐため set +e で囲む。
+      for drill in drill_write_outside drill_network_egress; do
+        set +e; line="$("$drill" "$engine")"; rc=$?; set -e
+        echo "$line"
+        [ "$rc" -ne 0 ] && rc_total=1
+      done
+      ;;
+    agy)
+      # agy は宣言チェック④(実証ではない。spec §4 ④ / option B)。
+      set +e; line="$(drill_agy_declaration "$engine")"; rc=$?; set -e
+      echo "$line"
+      [ "$rc" -ne 0 ] && rc_total=1
+      ;;
+    *)
+      echo "HOLD unknown engine: $engine"; rc_total=1
+      ;;
+  esac
+  exit "$rc_total"
+fi
+
 workspace="${1:-$(pwd)}"
 workspace="$(cd "$workspace" && pwd)"
 hook_root="$workspace/.ai-safety/hooks/macos"
@@ -51,15 +85,12 @@ run_case "7 WebFetch unauthorized domain" "guard-webfetch.sh" "block" "{\"hook_e
 run_case "control allowed docs domain" "guard-webfetch.sh" "allow" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"WebFetch\",\"cwd\":\"$workspace\",\"tool_input\":{\"url\":\"https://docs.anthropic.com/en/docs/claude-code/hooks\",\"prompt\":\"summarize\"}}"
 
 if command -v codex >/dev/null 2>&1; then
-  temp_root="$(mktemp -d)"
-  inside="$temp_root/workspace"
-  outside="$temp_root/outside"
-  mkdir -p "$inside" "$outside"
-  outside_file="$outside/pwn.txt"
-  set +e
-  codex sandbox macos -C "$inside" /bin/sh -lc "echo pwn > '$outside_file'" >/tmp/ai-safe-sandbox.out 2>/tmp/ai-safe-sandbox.err
-  set -e
-  if [ ! -e "$outside_file" ]; then echo "PASS codex mac sandbox blocks outside write"; pass=$((pass + 1)); else echo "FAIL codex mac sandbox outside write"; fail=$((fail + 1)); fi
+  # codex 0.135 系の検証は lib/isolation_drills.sh の drill に一本化する
+  # (旧 `codex sandbox macos` 構文は 0.135 で動かず、偽 PASS の原因だった)。
+  # 実際の write+network 実証は下部の「隔離ドリル」セクションで集計するため、
+  # ここでは codex バイナリの存在のみを確認する。
+  echo "PASS codex command present (sandbox drills evaluated below)"
+  pass=$((pass + 1))
 else
   echo "FAIL codex command missing"
   fail=$((fail + 1))
@@ -235,6 +266,24 @@ else
   fail=$((fail + 1))
 fi
 rm -rf "$html_drill_log_dir"
+
+# Safe Auto Mode: 隔離ドリルをフル doctor にも組み込む(集計に反映)。
+# codex が無い等で HOLD のときは SKIP 扱い(集計から除外)。
+# フル doctor の HOLD=SKIP は表示専用。launcher の自動判定は --isolation-check(strict: HOLD=非0)を
+# 使うため、ここの SKIP が自動承認解放に影響することはない。
+drills_lib="$(cd "$(dirname "$0")" && pwd)/lib/isolation_drills.sh"
+if [ -f "$drills_lib" ]; then
+  # shellcheck disable=SC1090
+  . "$drills_lib"
+  for d in drill_write_outside drill_network_egress; do
+    set +e; line="$("$d" codex)"; rc=$?; set -e
+    case "$rc" in
+      0)  echo "PASS isolation: $line"; pass=$((pass+1)) ;;
+      10) echo "FAIL isolation: $line"; fail=$((fail+1)) ;;
+      *)  echo "SKIP isolation: $line" ;;
+    esac
+  done
+fi
 
 echo "doctor summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

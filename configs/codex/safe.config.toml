@@ -1,0 +1,12 @@
+# codex 0.135: `--profile safe` で重ねるプロファイル層。
+# 0.135 では config.toml 内の `[profiles.safe]` テーブルと `--profile safe` の併用が
+# fatal error になるため、プロファイル設定をこの $CODEX_HOME/safe.config.toml に分離する。
+# launch-codex-safe.sh が config.toml と一緒にこのファイルを $CODEX_HOME へ配置する。
+sandbox_mode = "workspace-write"
+approval_policy = "untrusted"
+model_reasoning_effort = "medium"
+
+[sandbox_workspace_write]
+network_access = false
+exclude_tmpdir_env_var = true
+exclude_slash_tmp = true

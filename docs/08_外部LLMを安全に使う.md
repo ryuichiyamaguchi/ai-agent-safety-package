@@ -243,6 +243,51 @@ Add-Content $PROFILE 'function deepseek-safe { powershell -File "$env:USERPROFIL
 
 > `Desktop\my-project` はインストール時に指定したワークスペースフォルダのパスに読み替えてください。
 
+## Safe Auto Mode（承認を省く自動モード）
+
+v1.6.0 で追加。`--auto` を付けて起動すると、doctor が「金庫（OS 隔離）が効いている」と確認できたときだけ承認プロンプトを省きます。確認できない場合は理由を表示して従来の都度承認モードで起動します（フェイルクローズ）。
+
+### 使い方
+
+**macOS:**
+
+```bash
+# Codex(実証ベース)
+bash .ai-safety/hooks/macos/launch-codex-safe.sh <workspace> "" --auto
+
+# agy(宣言ベース)
+bash .ai-safety/hooks/macos/launch-agy-safe.sh <workspace> "" --auto
+```
+
+**Windows（PowerShell）:**
+
+```powershell
+# Codex(実証ベース)
+powershell -File ".ai-safety\hooks\windows\launch-codex-safe.ps1" <workspace> "" --auto
+
+# agy(宣言ベース)
+powershell -File ".ai-safety\hooks\windows\launch-agy-safe.ps1" <workspace> "" --auto
+```
+
+### 対象エンジン別の強度
+
+| エンジン | 隔離の強さ | 承認解放の条件 | 解放後の承認モード |
+|---|---|---|---|
+| **Codex** | **強・実証** | doctor が「外部送信できない / 作業フォルダ外に書けない」を実際に試して確認 | `--ask-for-approval on-failure` |
+| **agy** | **弱・宣言ベース** | agy バイナリが存在するだけ（金庫を外から実証する手段がないため） | `--dangerously-skip-permissions`（`--sandbox` は維持） |
+| **Claude Code** | 対象外 | 基本 DeepSeek 駆動 + 普通の Windows では金庫がないため | — |
+
+### 重要な制限事項
+
+- **Codex のオート解放**は「外部ネット送信遮断」と「workspace 外書き込み遮断」が実証できた場合のみです。
+- **agy のオートは未実証**です。`--sandbox` フラグを信頼するもので、Codex のように独立した検証はされていません。重要な作業では手動承認の利用も検討してください。
+- 解放後も `--sandbox` などの OS 隔離は常時稼働します（承認の手間だけを省きます）。
+- doctor がハング・不在・例外など「判断できない」状況では必ず従来モード（都度承認）にフォールバックします。
+
+### トラブルシューティング
+
+「オートを有効にできません」と表示された場合は `doctor.sh`（macOS）または `doctor.ps1`（Windows）を実行して隔離ドリルの状況を確認してください。
+
 ## 関連ドキュメント
 
 - `docs/90_守れる-守れない.md` — 4 層防御のスコープ説明

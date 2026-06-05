@@ -2,6 +2,8 @@
 set -euo pipefail
 workspace="${1:-$(pwd)}"
 prompt="${2:-}"
+auto=0
+[ "${3:-}" = "--auto" ] && auto=1
 workspace="$(cd "$workspace" && pwd)"
 export AI_SAFE_ROOT="$workspace/.ai-safety"
 export AI_SAFE_POLICY="$AI_SAFE_ROOT/policy/safety-policy.json"
@@ -22,8 +24,19 @@ if [ -f "$WORKSPACE_CONFIG" ] && [ ! -f "$SAFE_CONFIG" ]; then
   cp "$WORKSPACE_CONFIG" "$SAFE_CONFIG"
 fi
 
+# codex 0.135: `--profile safe` が参照する $CODEX_HOME/safe.config.toml も配置する。
+# (config.toml に `[profiles.safe]` を残すと 0.135 では起動が fatal error になるため分離済み。)
+# config.toml が更新されたら safe.config.toml も追従させたいので、両者が揃うよう毎回上書きコピーする。
+WORKSPACE_SAFE_PROFILE="$workspace/.codex/safe.config.toml"
+SAFE_PROFILE="$SAFE_CODEX_HOME/safe.config.toml"
+if [ -f "$WORKSPACE_SAFE_PROFILE" ]; then
+  cp "$WORKSPACE_SAFE_PROFILE" "$SAFE_PROFILE"
+fi
+
 [ -f "$AI_SAFE_POLICY" ] || { echo "AI Safety package is not installed in workspace: $workspace" >&2; exit 2; }
-[ -f "$SAFE_CONFIG" ] || { echo "Codex safety config was not found: $SAFE_CONFIG" >&2; exit 2; }
+if [ "${AI_SAFE_DRY_RUN:-}" != "1" ]; then
+  [ -f "$SAFE_CONFIG" ] || { echo "Codex safety config was not found: $SAFE_CONFIG" >&2; exit 2; }
+fi
 
 # A-1: workspace 内 .codex/auth.json に物理ファイルが残っていれば削除する (旧バージョン残骸)。
 LEGACY_AUTH="$workspace/.codex/auth.json"
@@ -36,19 +49,58 @@ fi
 # symlink が既に正しく張られていれば何もしない。
 SRC_AUTH="$HOME/.codex/auth.json"
 SAFE_AUTH="$SAFE_CODEX_HOME/auth.json"
-if [ ! -f "$SRC_AUTH" ]; then
-  echo "Codex auth not found at $SRC_AUTH. Please run 'codex login' first." >&2
-  exit 2
+if [ "${AI_SAFE_DRY_RUN:-}" != "1" ]; then
+  if [ ! -f "$SRC_AUTH" ]; then
+    echo "Codex auth not found at $SRC_AUTH. Please run 'codex login' first." >&2
+    exit 2
+  fi
+  if [ ! -e "$SAFE_AUTH" ]; then
+    ln -sf "$SRC_AUTH" "$SAFE_AUTH"
+  fi
 fi
-if [ ! -e "$SAFE_AUTH" ]; then
-  ln -sf "$SRC_AUTH" "$SAFE_AUTH"
+
+# Safe Auto Mode: --auto かつ doctor の隔離チェックが green のときだけ承認を下げる。
+# フェイルクローズ: doctor が非0(HOLD/FAIL)なら理由を表示して従来の untrusted に留まる。
+approval="untrusted"
+if [ "$auto" -eq 1 ]; then
+  doctor="${AI_SAFE_DOCTOR:-}"
+  if [ -z "$doctor" ]; then
+    doctor="$(cd "$(dirname "$0")" && pwd)/doctor.sh"
+  fi
+  # codex sandbox 初期化がハングしても launcher が無限ブロックしないよう上限 60 秒。
+  # macOS に timeout コマンドは無いので perl の alarm でラップ(perl は macOS 標準)。
+  # alarm で殺された場合 perl は非0で返る → else(フォールバック)に落ちる = フェイルクローズ。
+  # `or exit 127`: exec 失敗(doctor 不在/実行ビット無し/パスがディレクトリ等)時に
+  # perl が exit 0 で抜けて green に倒れる(フェイルオープン)のを防ぐ。失敗時は 127 → else。
+  if command -v perl >/dev/null 2>&1; then
+    # SIG{ALRM} でクリーンに exit(非0)する。shell が "Alarm clock: 14" を表示する
+    # のは perl が alarm シグナルを自分で処理せず shell に伝播させる場合のみ。
+    # `$SIG{ALRM}=sub{exit 1}` で perl 内部処理にすることで表示を抑制する。
+    # exec 失敗(doctor 不在等)は `or exit 127` で非0保証(フェイルクローズ)。
+    isolation_ok() { perl -e '$SIG{ALRM}=sub{exit 1};alarm shift;exec @ARGV or exit 127' 60 "$doctor" --isolation-check codex >/dev/null 2>&1; }
+  else
+    isolation_ok() { "$doctor" --isolation-check codex >/dev/null 2>&1; }
+  fi
+  if isolation_ok; then
+    approval="on-failure"
+  else
+    echo "⚠ オートを有効にできません: OS 隔離(金庫)を確認できませんでした。" >&2
+    echo "  → 安全のため都度承認モードで起動します。直すには doctor を実行してください。" >&2
+    approval="untrusted"
+  fi
 fi
 
 # A-2: -c features.hooks=true を明示渡し。config.mac.toml の hooks=true と合わせて二重保証。
-cmd=(codex --cd "$workspace" --profile safe --sandbox workspace-write --ask-for-approval untrusted -c features.hooks=true)
+cmd=(codex --cd "$workspace" --profile safe --sandbox workspace-write --ask-for-approval "$approval" -c features.hooks=true)
 if command -v caffeinate >/dev/null 2>&1; then
   cmd=(caffeinate -dimsu "${cmd[@]}")
 fi
+
+if [ "${AI_SAFE_DRY_RUN:-}" = "1" ]; then
+  printf '%s ' "${cmd[@]}"; [ -n "$prompt" ] && printf '%q' "$prompt"; printf '\n'
+  exit 0
+fi
+
 if [ -n "$prompt" ]; then
   "${cmd[@]}" "$prompt"
 else

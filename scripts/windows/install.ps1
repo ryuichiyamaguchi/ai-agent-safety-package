@@ -80,6 +80,7 @@ switch ($Platform) {
         Test-DistributionHash "configs/claude/settings.windows.json"
         Test-DistributionHash "configs/gemini/settings.windows.json"
         Test-DistributionHash "configs/codex/config.windows.toml"
+        Test-DistributionHash "configs/codex/safe.config.toml"
     }
     'both' {
         Test-DistributionHash "configs/codex/hooks.mac.json"
@@ -89,6 +90,7 @@ switch ($Platform) {
         Test-DistributionHash "configs/gemini/settings.mac.json"
         Test-DistributionHash "configs/gemini/settings.windows.json"
         Test-DistributionHash "configs/codex/config.mac.toml"
+        Test-DistributionHash "configs/codex/safe.config.toml"
         Test-DistributionHash "configs/codex/config.windows.toml"
     }
 }
@@ -181,6 +183,12 @@ if ($Platform -eq 'mac') {
 
 Copy-WithBackup (Join-Path $packageRoot "configs\claude\settings.windows.json") (Join-Path $Workspace ".claude\settings.json")
 Copy-WithBackup (Join-Path $packageRoot "configs\codex\config.windows.toml") (Join-Path $Workspace ".codex\config.toml")
+# codex 0.135: safe.config.toml を workspace .codex\ に配置する。
+# launcher (launch-codex-safe.ps1) がこれを $CODEX_HOME へコピーして `--profile safe` に使う。
+$safeConfigSrc = Join-Path $packageRoot "configs\codex\safe.config.toml"
+if (Test-Path -LiteralPath $safeConfigSrc) {
+    Copy-WithBackup $safeConfigSrc (Join-Path $Workspace ".codex\safe.config.toml")
+}
 Copy-WithBackup (Join-Path $packageRoot "configs\codex\hooks.windows.json") (Join-Path $Workspace ".codex\hooks.json")
 Copy-WithBackup (Join-Path $packageRoot "configs\gemini\settings.windows.json") (Join-Path $Workspace ".gemini\settings.json")
 Copy-WithBackup (Join-Path $packageRoot "configs\gemini\policies\safety.toml") (Join-Path $Workspace ".gemini\policies\safety.toml")

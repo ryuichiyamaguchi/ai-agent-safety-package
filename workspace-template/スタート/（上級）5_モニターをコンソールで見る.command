@@ -1,9 +1,10 @@
 #!/bin/bash
-# 見守りモニター起動（薄いラッパー）。HTML モニター(now.html)を既定ブラウザで開く。
+# 見守りモニター（コンソール版）。ブラウザを使わずターミナル内で見る上級向け。
+# 通常は「5_見守りモニターを起動」を使ってください（ブラウザで見やすく表示）。
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="$(cd "$HERE/.." && pwd)"
-TARGET="$WORKSPACE/.ai-safety/hooks/macos/open-monitor.sh"
+TARGET="$WORKSPACE/.ai-safety/hooks/macos/monitor.sh"
 if [ ! -f "$TARGET" ]; then
   echo "起動スクリプトが見つかりません: $TARGET"
   echo "先に「1_安全パッケージを準備」を実行してください。"

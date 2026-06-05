@@ -212,6 +212,87 @@ events_to_html_rows() {
   done
 }
 
+# now.html の <head>（meta + style + JS reload）を出力する。
+# write_now_html と write_now_html_placeholder で共通利用し、体裁を一元化する。
+# 引数: refresh（自動更新間隔・秒）
+now_html_head() {
+  local refresh="$1"
+  printf '<!DOCTYPE html>\n<html lang="ja">\n<head>\n'
+  printf '<meta charset="utf-8">\n'
+  printf '<meta http-equiv="refresh" content="%s">\n' "$refresh"
+  printf '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+  printf '<title>agent-monitor — AI の動きを見る</title>\n'
+  printf '<style>\n'
+  printf '*{box-sizing:border-box}\n'
+  printf 'body{margin:0;padding:16px;font-family:-apple-system,"Hiragino Sans","Yu Gothic",sans-serif;background:#0f1115;color:#e6e6e6;word-break:keep-all;line-height:1.7}\n'
+  printf '.wrap{max-width:880px;margin:0 auto}\n'
+  printf 'h1.hdr{font-size:18px;margin:0 0 14px;color:#9ad}\n'
+  printf '.card{border-radius:12px;padding:18px 20px;margin-bottom:20px;border-left:8px solid #888;background:#1a1d24}\n'
+  printf '.card-high{border-left-color:#e5534b;background:#2a1718}\n'
+  printf '.card-medium{border-left-color:#e0b341;background:#2a2417}\n'
+  printf '.card-low{border-left-color:#3fb950;background:#15241a}\n'
+  printf '.card-wait{border-left-color:#6e7681;background:#1a1d24}\n'
+  printf '.card .ctitle{font-size:22px;font-weight:700;margin:0 0 6px}\n'
+  printf '.card .cmeta{font-size:12px;opacity:.7;margin-bottom:10px}\n'
+  printf '.card h2{font-size:15px;margin:14px 0 6px;color:#cfd}\n'
+  printf '.card ul{margin:4px 0 4px 1.2em;padding:0}\n'
+  printf '.card li{margin:3px 0}\n'
+  printf '.card p{margin:6px 0}\n'
+  printf '.events h2{font-size:15px;color:#9ad;margin:0 0 8px}\n'
+  printf 'table{width:100%%;border-collapse:collapse;font-size:13px}\n'
+  printf 'th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #2a2f3a;vertical-align:top}\n'
+  printf 'th{color:#9aa;font-weight:600}\n'
+  printf '.ev-ts{white-space:nowrap;opacity:.8}\n'
+  printf '.ev-mode{white-space:nowrap;opacity:.85}\n'
+  printf 'tr.d-block .ev-dec{color:#ff7b72}\n'
+  printf 'tr.d-allow .ev-dec{color:#56d364}\n'
+  printf 'tr.d-explain .ev-dec{color:#79c0ff}\n'
+  printf '.empty{opacity:.6;font-size:13px}\n'
+  printf '.foot{margin-top:18px;font-size:11px;opacity:.5}\n'
+  printf '</style>\n'
+  # JS リロード: meta refresh が file:// で効かないブラウザ向けの補完。
+  # ユーザ値を JS 内に一切流し込まない (XSS 不発生)。
+  # JS が無効な環境では meta refresh にフォールバックする。
+  printf '<script>setInterval(function(){ location.reload(); }, 1000);</script>\n'
+  printf '</head>\n<body>\n<div class="wrap">\n'
+  printf '<h1 class="hdr">agent-monitor — いま AI がやろうとしていること</h1>\n'
+}
+
+# 待機カード placeholder の now.html を書き出す。
+# ガード未発火（now.html がまだ無い）状態でモニター起動ボタンを押したとき、
+# 空白 / file-not-found を防ぐために本物 now.html と同じパス・同じ体裁で吐く。
+# ガード発火後は write_now_html が同じパスを上書きするので自動で切り替わる。
+# 引数: log_dir（明示。safety_policy.sh の source 不要で単体動作する）
+write_now_html_placeholder() {
+  local dir="$1"
+  local out tmp refresh
+  [ -n "$dir" ] || return 1
+  out="$dir/now.html"
+  # F-I: 本物 now.html が既に存在する場合は何もしない（レース安全化）。
+  # write_now_html（本物）は従来どおり上書きするが、placeholder は上書きしない。
+  [ -f "$out" ] && return 0
+  refresh="${AI_SAFE_MONITOR_INTERVAL:-1}"
+  case "$refresh" in (''|*[!0-9]*) refresh=1 ;; esac
+  mkdir -p "$dir" 2>/dev/null || return 1
+  tmp="$dir/now.html.tmp.$$"
+  {
+    now_html_head "$refresh"
+    printf '<div class="card card-wait">\n'
+    printf '<div class="ctitle">🟢 見守り中です</div>\n'
+    printf '<div class="cmeta">まだ承認待ちのアクションはありません</div>\n'
+    printf '<p>AI が tool（コマンド実行・ファイル書き込みなど）を呼ぶと、ここに「いま何をしようとしているか」が表示されます。</p>\n'
+    printf '<p>この画面は開いたままにしておいてください。AI が動き出すと自動で切り替わります。</p>\n'
+    printf '</div>\n'
+    printf '<div class="foot">この画面は %s 秒ごとに自動更新されます (JS reload + meta refresh フォールバック)。判断はこの画面ではなくターミナル側で行ってください。</div>\n' "$refresh"
+    printf '</div>\n</body>\n</html>\n'
+  } > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+  mv -f "$tmp" "$out" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+  if [ -f "$out" ] && [ -O "$out" ]; then
+    chmod 600 "$out" 2>/dev/null || true
+  fi
+  return 0
+}
+
 # now.html を原子書換で書き出す。
 # 引数: icon title body_risk ts card_id body_html_path
 write_now_html() {
@@ -230,44 +311,7 @@ write_now_html() {
   esac
   tmp="$dir/now.html.tmp.$$"
   {
-    printf '<!DOCTYPE html>\n<html lang="ja">\n<head>\n'
-    printf '<meta charset="utf-8">\n'
-    printf '<meta http-equiv="refresh" content="%s">\n' "$refresh"
-    printf '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-    printf '<title>agent-monitor — AI の動きを見る</title>\n'
-    printf '<style>\n'
-    printf '*{box-sizing:border-box}\n'
-    printf 'body{margin:0;padding:16px;font-family:-apple-system,"Hiragino Sans","Yu Gothic",sans-serif;background:#0f1115;color:#e6e6e6;word-break:keep-all;line-height:1.7}\n'
-    printf '.wrap{max-width:880px;margin:0 auto}\n'
-    printf 'h1.hdr{font-size:18px;margin:0 0 14px;color:#9ad}\n'
-    printf '.card{border-radius:12px;padding:18px 20px;margin-bottom:20px;border-left:8px solid #888;background:#1a1d24}\n'
-    printf '.card-high{border-left-color:#e5534b;background:#2a1718}\n'
-    printf '.card-medium{border-left-color:#e0b341;background:#2a2417}\n'
-    printf '.card-low{border-left-color:#3fb950;background:#15241a}\n'
-    printf '.card .ctitle{font-size:22px;font-weight:700;margin:0 0 6px}\n'
-    printf '.card .cmeta{font-size:12px;opacity:.7;margin-bottom:10px}\n'
-    printf '.card h2{font-size:15px;margin:14px 0 6px;color:#cfd}\n'
-    printf '.card ul{margin:4px 0 4px 1.2em;padding:0}\n'
-    printf '.card li{margin:3px 0}\n'
-    printf '.card p{margin:6px 0}\n'
-    printf '.events h2{font-size:15px;color:#9ad;margin:0 0 8px}\n'
-    printf 'table{width:100%%;border-collapse:collapse;font-size:13px}\n'
-    printf 'th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #2a2f3a;vertical-align:top}\n'
-    printf 'th{color:#9aa;font-weight:600}\n'
-    printf '.ev-ts{white-space:nowrap;opacity:.8}\n'
-    printf '.ev-mode{white-space:nowrap;opacity:.85}\n'
-    printf 'tr.d-block .ev-dec{color:#ff7b72}\n'
-    printf 'tr.d-allow .ev-dec{color:#56d364}\n'
-    printf 'tr.d-explain .ev-dec{color:#79c0ff}\n'
-    printf '.empty{opacity:.6;font-size:13px}\n'
-    printf '.foot{margin-top:18px;font-size:11px;opacity:.5}\n'
-    printf '</style>\n'
-    # JS リロード: meta refresh が file:// で効かないブラウザ向けの補完。
-    # ユーザ値を JS 内に一切流し込まない (XSS 不発生)。
-    # JS が無効な環境では meta refresh にフォールバックする。
-    printf '<script>setInterval(function(){ location.reload(); }, 1000);</script>\n'
-    printf '</head>\n<body>\n<div class="wrap">\n'
-    printf '<h1 class="hdr">agent-monitor — いま AI がやろうとしていること</h1>\n'
+    now_html_head "$refresh"
     printf '<div class="card %s">\n' "$cardcls"
     printf '<div class="ctitle">%s %s</div>\n' "$(html_escape "$icon")" "$(html_escape "$title")"
     printf '<div class="cmeta">%s ・ tool=%s ・ risk=%s ・ card=%s</div>\n' \

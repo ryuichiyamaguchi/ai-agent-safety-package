@@ -116,6 +116,7 @@ case "$PLATFORM" in
     verify_hash "configs/claude/settings.mac.json"
     verify_hash "configs/gemini/settings.mac.json"
     verify_hash "configs/codex/config.mac.toml"
+    verify_hash "configs/codex/safe.config.toml"
     ;;
   win)
     verify_hash "configs/codex/hooks.windows.json"
@@ -131,6 +132,7 @@ case "$PLATFORM" in
     verify_hash "configs/gemini/settings.mac.json"
     verify_hash "configs/gemini/settings.windows.json"
     verify_hash "configs/codex/config.mac.toml"
+    verify_hash "configs/codex/safe.config.toml"
     verify_hash "configs/codex/config.windows.toml"
     ;;
 esac
@@ -181,6 +183,7 @@ fi
 
 copy_with_backup "$package_root/configs/claude/settings.mac.json" "$workspace/.claude/settings.json"
 copy_with_backup "$package_root/configs/codex/config.mac.toml" "$workspace/.codex/config.toml"
+copy_with_backup "$package_root/configs/codex/safe.config.toml" "$workspace/.codex/safe.config.toml"
 copy_with_backup "$package_root/configs/codex/hooks.mac.json" "$workspace/.codex/hooks.json"
 copy_with_backup "$package_root/configs/gemini/settings.mac.json" "$workspace/.gemini/settings.json"
 copy_with_backup "$package_root/configs/gemini/policies/safety.toml" "$workspace/.gemini/policies/safety.toml"

@@ -206,6 +206,95 @@ function Get-EventsHtmlRows([string]$LogDir) {
     return $sb.ToString()
 }
 
+# now.html の <head>（meta + style + JS reload）+ ラッパ開始を返す。
+# Write-NowHtml と Write-NowHtmlPlaceholder で共通利用し、体裁を一元化する。
+function Get-NowHtmlHead([int]$Refresh) {
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append("<!DOCTYPE html>`n<html lang=`"ja`">`n<head>`n")
+    [void]$sb.Append("<meta charset=`"utf-8`">`n")
+    [void]$sb.Append("<meta http-equiv=`"refresh`" content=`"$Refresh`">`n")
+    [void]$sb.Append("<meta name=`"viewport`" content=`"width=device-width, initial-scale=1`">`n")
+    [void]$sb.Append("<title>agent-monitor — AI の動きを見る</title>`n")
+    [void]$sb.Append("<style>`n")
+    [void]$sb.Append("*{box-sizing:border-box}`n")
+    [void]$sb.Append("body{margin:0;padding:16px;font-family:'Yu Gothic','Meiryo',sans-serif;background:#0f1115;color:#e6e6e6;word-break:keep-all;line-height:1.7}`n")
+    [void]$sb.Append(".wrap{max-width:880px;margin:0 auto}`n")
+    [void]$sb.Append("h1.hdr{font-size:18px;margin:0 0 14px;color:#9ad}`n")
+    [void]$sb.Append(".card{border-radius:12px;padding:18px 20px;margin-bottom:20px;border-left:8px solid #888;background:#1a1d24}`n")
+    [void]$sb.Append(".card-high{border-left-color:#e5534b;background:#2a1718}`n")
+    [void]$sb.Append(".card-medium{border-left-color:#e0b341;background:#2a2417}`n")
+    [void]$sb.Append(".card-low{border-left-color:#3fb950;background:#15241a}`n")
+    [void]$sb.Append(".card-wait{border-left-color:#6e7681;background:#1a1d24}`n")
+    [void]$sb.Append(".card .ctitle{font-size:22px;font-weight:700;margin:0 0 6px}`n")
+    [void]$sb.Append(".card .cmeta{font-size:12px;opacity:.7;margin-bottom:10px}`n")
+    [void]$sb.Append(".card h2{font-size:15px;margin:14px 0 6px;color:#cfd}`n")
+    [void]$sb.Append(".card ul{margin:4px 0 4px 1.2em;padding:0}`n")
+    [void]$sb.Append(".card li{margin:3px 0}`n")
+    [void]$sb.Append(".card p{margin:6px 0}`n")
+    [void]$sb.Append(".events h2{font-size:15px;color:#9ad;margin:0 0 8px}`n")
+    [void]$sb.Append("table{width:100%;border-collapse:collapse;font-size:13px}`n")
+    [void]$sb.Append("th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #2a2f3a;vertical-align:top}`n")
+    [void]$sb.Append("th{color:#9aa;font-weight:600}`n")
+    [void]$sb.Append(".ev-ts{white-space:nowrap;opacity:.8}`n")
+    [void]$sb.Append(".ev-mode{white-space:nowrap;opacity:.85}`n")
+    [void]$sb.Append("tr.d-block .ev-dec{color:#ff7b72}`n")
+    [void]$sb.Append("tr.d-allow .ev-dec{color:#56d364}`n")
+    [void]$sb.Append("tr.d-explain .ev-dec{color:#79c0ff}`n")
+    [void]$sb.Append(".empty{opacity:.6;font-size:13px}`n")
+    [void]$sb.Append(".foot{margin-top:18px;font-size:11px;opacity:.5}`n")
+    [void]$sb.Append("</style>`n")
+    # JS リロード: meta refresh が file:// で効かないブラウザ向けの補完。
+    # ユーザ値を JS 内に一切流し込まない (XSS 不発生)。
+    # JS が無効な環境では meta refresh にフォールバックする。
+    [void]$sb.Append("<script>setInterval(function(){ location.reload(); }, 1000);</script>`n")
+    [void]$sb.Append("</head>`n<body>`n<div class=`"wrap`">`n")
+    [void]$sb.Append("<h1 class=`"hdr`">agent-monitor — いま AI がやろうとしていること</h1>`n")
+    return $sb.ToString()
+}
+
+# now.html を BOM 無し UTF-8 で原子書換 (tmp -> Move-Item -Force) する共通ヘルパ。
+function Write-NowHtmlFile([string]$LogDir, [string]$Html) {
+    $out = Join-Path $LogDir "now.html"
+    $tmp = Join-Path $LogDir ("now.html.tmp." + [System.Diagnostics.Process]::GetCurrentProcess().Id)
+    # BOM 無し UTF-8 で書く (一部ブラウザの BOM 表示崩れ回避。impl-notes 参照)。
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($tmp, $Html, $enc)
+    # 原子書換: 同一ディレクトリ内 tmp -> Move-Item -Force で rename。
+    Move-Item -LiteralPath $tmp -Destination $out -Force
+}
+
+# 待機カード placeholder の now.html を書き出す。
+# ガード未発火（now.html がまだ無い）状態でモニター起動ボタンを押したとき、
+# 空白 / file-not-found を防ぐために本物 now.html と同じパス・同じ体裁で吐く。
+# ガード発火後は Write-NowHtml が同じパスを上書きするので自動で切り替わる。
+function Write-NowHtmlPlaceholder([string]$LogDir) {
+    # F-I: 本物 now.html が既に存在する場合は何もしない（レース安全化）。
+    # Write-NowHtml（本物）は従来どおり上書きするが、placeholder は上書きしない。
+    $existingHtml = Join-Path $LogDir "now.html"
+    if (Test-Path -LiteralPath $existingHtml) { return $false }
+    try {
+        $refresh = 1
+        if ($env:AI_SAFE_MONITOR_INTERVAL -match '^\d+$') { $refresh = [int]$env:AI_SAFE_MONITOR_INTERVAL }
+        if (-not (Test-Path -LiteralPath $LogDir)) {
+            New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+        }
+        $sb = New-Object System.Text.StringBuilder
+        [void]$sb.Append((Get-NowHtmlHead $refresh))
+        [void]$sb.Append("<div class=`"card card-wait`">`n")
+        [void]$sb.Append("<div class=`"ctitle`">🟢 見守り中です</div>`n")
+        [void]$sb.Append("<div class=`"cmeta`">まだ承認待ちのアクションはありません</div>`n")
+        [void]$sb.Append("<p>AI が tool（コマンド実行・ファイル書き込みなど）を呼ぶと、ここに「いま何をしようとしているか」が表示されます。</p>`n")
+        [void]$sb.Append("<p>この画面は開いたままにしておいてください。AI が動き出すと自動で切り替わります。</p>`n")
+        [void]$sb.Append("</div>`n")
+        [void]$sb.Append("<div class=`"foot`">この画面は $refresh 秒ごとに自動更新されます (JS reload + meta refresh フォールバック)。判断はこの画面ではなくターミナル側で行ってください。</div>`n")
+        [void]$sb.Append("</div>`n</body>`n</html>`n")
+        Write-NowHtmlFile $LogDir $sb.ToString()
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 function Write-NowHtml {
     param([string]$Icon, [string]$Title, [string]$BodyRisk, [string]$Ts, [string]$CardId, [string]$Mode, [string]$Body, [string]$LogDir)
     try {
@@ -221,44 +310,7 @@ function Write-NowHtml {
         $day = Get-Date -Format "yyyy-MM-dd"
 
         $sb = New-Object System.Text.StringBuilder
-        [void]$sb.Append("<!DOCTYPE html>`n<html lang=`"ja`">`n<head>`n")
-        [void]$sb.Append("<meta charset=`"utf-8`">`n")
-        [void]$sb.Append("<meta http-equiv=`"refresh`" content=`"$refresh`">`n")
-        [void]$sb.Append("<meta name=`"viewport`" content=`"width=device-width, initial-scale=1`">`n")
-        [void]$sb.Append("<title>agent-monitor — AI の動きを見る</title>`n")
-        [void]$sb.Append("<style>`n")
-        [void]$sb.Append("*{box-sizing:border-box}`n")
-        [void]$sb.Append("body{margin:0;padding:16px;font-family:'Yu Gothic','Meiryo',sans-serif;background:#0f1115;color:#e6e6e6;word-break:keep-all;line-height:1.7}`n")
-        [void]$sb.Append(".wrap{max-width:880px;margin:0 auto}`n")
-        [void]$sb.Append("h1.hdr{font-size:18px;margin:0 0 14px;color:#9ad}`n")
-        [void]$sb.Append(".card{border-radius:12px;padding:18px 20px;margin-bottom:20px;border-left:8px solid #888;background:#1a1d24}`n")
-        [void]$sb.Append(".card-high{border-left-color:#e5534b;background:#2a1718}`n")
-        [void]$sb.Append(".card-medium{border-left-color:#e0b341;background:#2a2417}`n")
-        [void]$sb.Append(".card-low{border-left-color:#3fb950;background:#15241a}`n")
-        [void]$sb.Append(".card .ctitle{font-size:22px;font-weight:700;margin:0 0 6px}`n")
-        [void]$sb.Append(".card .cmeta{font-size:12px;opacity:.7;margin-bottom:10px}`n")
-        [void]$sb.Append(".card h2{font-size:15px;margin:14px 0 6px;color:#cfd}`n")
-        [void]$sb.Append(".card ul{margin:4px 0 4px 1.2em;padding:0}`n")
-        [void]$sb.Append(".card li{margin:3px 0}`n")
-        [void]$sb.Append(".card p{margin:6px 0}`n")
-        [void]$sb.Append(".events h2{font-size:15px;color:#9ad;margin:0 0 8px}`n")
-        [void]$sb.Append("table{width:100%;border-collapse:collapse;font-size:13px}`n")
-        [void]$sb.Append("th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #2a2f3a;vertical-align:top}`n")
-        [void]$sb.Append("th{color:#9aa;font-weight:600}`n")
-        [void]$sb.Append(".ev-ts{white-space:nowrap;opacity:.8}`n")
-        [void]$sb.Append(".ev-mode{white-space:nowrap;opacity:.85}`n")
-        [void]$sb.Append("tr.d-block .ev-dec{color:#ff7b72}`n")
-        [void]$sb.Append("tr.d-allow .ev-dec{color:#56d364}`n")
-        [void]$sb.Append("tr.d-explain .ev-dec{color:#79c0ff}`n")
-        [void]$sb.Append(".empty{opacity:.6;font-size:13px}`n")
-        [void]$sb.Append(".foot{margin-top:18px;font-size:11px;opacity:.5}`n")
-        [void]$sb.Append("</style>`n")
-        # JS リロード: meta refresh が file:// で効かないブラウザ向けの補完。
-        # ユーザ値を JS 内に一切流し込まない (XSS 不発生)。
-        # JS が無効な環境では meta refresh にフォールバックする。
-        [void]$sb.Append("<script>setInterval(function(){ location.reload(); }, 1000);</script>`n")
-        [void]$sb.Append("</head>`n<body>`n<div class=`"wrap`">`n")
-        [void]$sb.Append("<h1 class=`"hdr`">agent-monitor — いま AI がやろうとしていること</h1>`n")
+        [void]$sb.Append((Get-NowHtmlHead $refresh))
         [void]$sb.Append("<div class=`"card $cardcls`">`n")
         [void]$sb.Append("<div class=`"ctitle`">" + (ConvertTo-HtmlEscaped $Icon) + " " + (ConvertTo-HtmlEscaped $Title) + "</div>`n")
         [void]$sb.Append("<div class=`"cmeta`">" + (ConvertTo-HtmlEscaped $Ts) + " ・ tool=" + (ConvertTo-HtmlEscaped $Mode) + " ・ risk=" + (ConvertTo-HtmlEscaped $BodyRisk) + " ・ card=" + (ConvertTo-HtmlEscaped $CardId) + "</div>`n")
@@ -276,13 +328,7 @@ function Write-NowHtml {
         [void]$sb.Append("<div class=`"foot`">この画面は $refresh 秒ごとに自動更新されます (JS reload + meta refresh フォールバック)。判断はこの画面ではなくターミナル側で行ってください。</div>`n")
         [void]$sb.Append("</div>`n</body>`n</html>`n")
 
-        $out = Join-Path $LogDir "now.html"
-        $tmp = Join-Path $LogDir ("now.html.tmp." + [System.Diagnostics.Process]::GetCurrentProcess().Id)
-        # BOM 無し UTF-8 で書く (一部ブラウザの BOM 表示崩れ回避。impl-notes 参照)。
-        $enc = New-Object System.Text.UTF8Encoding($false)
-        [System.IO.File]::WriteAllText($tmp, $sb.ToString(), $enc)
-        # 原子書換: 同一ディレクトリ内 tmp -> Move-Item -Force で rename。
-        Move-Item -LiteralPath $tmp -Destination $out -Force
+        Write-NowHtmlFile $LogDir $sb.ToString()
     } catch {
         # フェイルセーフ: now.html 失敗は now.md / 判定に影響させない
     }
