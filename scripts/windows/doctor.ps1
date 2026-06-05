@@ -1,9 +1,55 @@
 ﻿param(
     [string]$Workspace = (Get-Location).Path,
-    [switch]$LiveCodex
+    [switch]$LiveCodex,
+    [string]$IsolationCheck = ""
 )
 
 $ErrorActionPreference = "Continue"   # v1.5.0: 1 drill のエラー (codex sandbox 等) で全体中断し summary 未出力になる問題を解消。診断は全 drill 走らせ結果を集計する。意図的 fail-closed は throw のままなので影響なし。
+
+# Safe Auto Mode: 軽量隔離チェック。launcher が --auto 起動前に呼ぶ。
+# その engine の workspace外書込遮断 + 外部ネット送信遮断を実証し、
+# 全 PASS のときだけ exit 0。1つでも FAIL/HOLD なら非0(フェイルクローズ)。
+#
+# SKIP は表示専用(フル doctor 向け)。
+# launcher の自動承認判定はこの -IsolationCheck(strict: HOLD=非0)を使う。
+if ($IsolationCheck) {
+    # strict: 隔離チェック経路は常に fail-closed。フル doctor の "Continue"(v1.5.0)
+    # と異なり、未捕捉の例外でもオートを開かないよう Stop で囲む。
+    $ErrorActionPreference = "Stop"
+    try {
+        $drillsPath = Join-Path $PSScriptRoot 'lib\IsolationDrills.ps1'
+        if (-not (Test-Path -LiteralPath $drillsPath)) {
+            Write-Error "IsolationDrills.ps1 missing: $drillsPath"
+            exit 2
+        }
+        . $drillsPath
+        $rcTotal = 0
+        switch ($IsolationCheck) {
+            'codex' {
+                # Codex は実証ドリル①②。
+                foreach ($fn in @('Test-WriteOutside', 'Test-NetworkEgress')) {
+                    # Write-Host 出力(表示用)はそのまま。戻り値の int を取得して判定。
+                    $rc = [int](& $fn 'codex')
+                    if ($rc -ne 0) { $rcTotal = 1 }
+                }
+            }
+            'agy' {
+                # agy は宣言チェック④(実証ではない。spec §4 ④ / option B)。
+                $rc = [int](Test-AgyDeclaration 'agy')
+                if ($rc -ne 0) { $rcTotal = 1 }
+            }
+            default {
+                Write-Host "HOLD unknown engine: $IsolationCheck"
+                $rcTotal = 1
+            }
+        }
+        exit $rcTotal
+    } catch {
+        # 検証不能(例外)は fail-closed: オートを開かない。
+        Write-Host "HOLD isolation-check error: $($_.Exception.Message)"
+        exit 1
+    }
+}
 $Workspace = [System.IO.Path]::GetFullPath($Workspace)
 $dot = [char]46
 $targetName = $dot + "env"
@@ -97,37 +143,17 @@ Expect-Block "6 generated script reads protected file" "guard-write.ps1" (New-Ho
 Expect-Block "7 WebFetch unauthorized domain" "guard-webfetch.ps1" (New-HookJson "WebFetch" @{ url = "https://example.com"; prompt = "summarize" })
 Expect-Allow "control WebFetch allowed docs domain" "guard-webfetch.ps1" (New-HookJson "WebFetch" @{ url = "https://docs.anthropic.com/en/docs/claude-code/hooks"; prompt = "summarize" })
 
+# codex 0.135 系の検証は lib/IsolationDrills.ps1 の drill に一本化する
+# (旧 `codex sandbox windows` 構文は 0.135 で動かず、偽 PASS の原因だった)。
+# 実際の write+network 実証は下部の「隔離ドリル」セクションで集計するため、
+# ここでは codex バイナリの存在のみを確認する。
 $codex = Get-Command codex -ErrorAction SilentlyContinue
 if ($codex) {
-    $codexVersion = (& codex --version 2>$null)
-    Add-Result "codex installed" ($LASTEXITCODE -eq 0) $codexVersion
-
-    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ai-safe-doctor-" + [guid]::NewGuid().ToString("N"))
-    $inside = Join-Path $tempRoot "workspace"
-    $outside = Join-Path $tempRoot "outside"
-    New-Item -ItemType Directory -Force -Path $inside, $outside | Out-Null
-    $outsideFile = Join-Path $outside "pwn.txt"
-    $writeOutside = "Set-Content -Path '$outsideFile' -Value pwn"
-    # D-2: *>$null を廃止。stderr は捨てるが stdout をキャプチャし、
-    #      $LASTEXITCODE で codex 自体の起動成否を確認する。
-    #      codex が exit 0 以外（起動失敗含む）なら sandbox テストを FAIL にする。
-    $sandboxOut1 = & codex sandbox windows -C $inside powershell.exe -NoProfile -Command $writeOutside 2>$null
-    $sandboxExit1 = $LASTEXITCODE
-    if ($sandboxExit1 -ne 0) {
-        Add-Skip "codex windows sandbox blocks outside write" ("codex native sandbox unavailable (codex exited $sandboxExit1) — codex CLI 側の制約。保護は PreToolUse フックガードが担うため SKIP")
-    } else {
-        Add-Result "codex windows sandbox blocks outside write" (-not (Test-Path -LiteralPath $outsideFile)) ("outsideFileExists=" + (Test-Path -LiteralPath $outsideFile))
-    }
-
-    $webCmd = ("Invoke-Web" + "Request https://example.com -UseBasicParsing")
-    $sandboxOut2 = & codex sandbox windows -C $inside powershell.exe -NoProfile -Command $webCmd 2>$null
-    $sandboxExit2 = $LASTEXITCODE
-    if ($sandboxExit2 -eq 0) {
-        # codex が exit 0 = sandbox 内コマンドが成功扱い = ネットワーク遮断されていない
-        Add-Result "codex windows sandbox blocks direct network test" $false ("exit=$sandboxExit2 — network may not be blocked")
-    } else {
-        Add-Result "codex windows sandbox blocks direct network test" $true ("exit=$sandboxExit2")
-    }
+    # codex 0.135 系の検証は lib\IsolationDrills.ps1 の drill に一本化する
+    # (旧 `codex sandbox windows` 構文は 0.135 で動かず、偽 PASS の原因だった)。
+    # 実際の write+network 実証は下部の「隔離ドリル」セクションで集計するため、
+    # ここでは codex バイナリの存在のみを確認する。
+    Add-Result "codex command present (sandbox drills evaluated below)" $true ""
 } else {
     Add-Result "codex installed" $false "codex command missing"
 }
@@ -215,6 +241,24 @@ if (Test-Path -LiteralPath $nowHtml) {
 }
 Add-Result "html-write now.html has charset + refresh + JS-reload tags" $htmlOk ("path=" + $nowHtml)
 try { Remove-Item -LiteralPath $htmlDrillLogDir -Recurse -Force -ErrorAction SilentlyContinue } catch { }
+
+# Safe Auto Mode: 隔離ドリルをフル doctor にも組み込む(集計に反映)。
+# codex が無い等で HOLD のときは SKIP 扱い(集計から除外)。
+# フル doctor の HOLD=SKIP は表示専用。launcher の自動判定は -IsolationCheck(strict: HOLD=非0)を
+# 使うため、ここの SKIP が自動承認解放に影響することはない。
+$drillsPathFull = Join-Path $PSScriptRoot 'lib\IsolationDrills.ps1'
+if (Test-Path -LiteralPath $drillsPathFull) {
+    . $drillsPathFull
+    foreach ($fn in @('Test-WriteOutside', 'Test-NetworkEgress')) {
+        # Write-Host 内容(display)は関数が出力する。戻り値(int)で集計判定。
+        $rc = [int](& $fn 'codex')
+        switch ($rc) {
+            0  { Add-Result "isolation: $fn codex" $true  "PASS" }
+            10 { Add-Result "isolation: $fn codex" $false "FAIL" }
+            default { Write-Host "SKIP isolation: $fn codex (HOLD — codex not installed or probe inconclusive)" }
+        }
+    }
+}
 
 $results | Format-Table -AutoSize
 $failed = @($results | Where-Object { $_.Status -ne "PASS" -and $_.Status -ne "SKIP" })

@@ -6,7 +6,7 @@ v1.0 リリース時点（2026-05-12）で動作確認した CLI のバージョ
 
 | ツール | 確認済みバージョン | 備考 |
 |---|---|---|
-| Codex CLI | 0.130.0 | 主たる対象 |
+| Codex CLI | 0.135.0 | 主たる対象。Safe Auto Mode の隔離ドリル/launcher は 0.135 の新 sandbox 構文(`codex sandbox --permissions-profile`)と profile 分離(`safe.config.toml`)前提 |
 | Claude Code | 2.1.139 | hook 仕様準拠（v1.2.1 から `permissions.deny` 内部ツール対応） |
 | Gemini CLI | **0.41.2（凍結版）** | BeforeAgent / BeforeTool / AfterModel / AfterAgent hook。**2026-06-18 で公式廃止**（後継: Antigravity CLI） |
 | Antigravity CLI (`agy`) | **1.0.0 / 1.0.1** | v1.3.0 で `launch-agy-safe.{sh,ps1}` を追加し並立対応。`--sandbox` 強制起動 + `proceed-in-sandbox` permission mode で防御。設定ファイル経由の deny キー有効性は未確認（v1.3.1 で実機受講者環境にて再検証） |
@@ -99,8 +99,9 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 | configs/claude/settings.windows.json | ed5eb26a81f3fd803cc5b793d3ed30af22feee60c95457cf350a3cca56628d9e | v1.5.0 で env の壊れた AI_SAFE_LOG_DIR 行を削除 |
 | configs/gemini/settings.mac.json | b9f45bac5583930c6b44a07a2351c6bd21722503de82983e63cd5f38db2a6213 | v1.0.x から変更なし |
 | configs/gemini/settings.windows.json | f061d04699ce366887ae829d0f6fd78ac8d597c9bbaac80bb985332f32d1f012 | v1.0.x から変更なし |
-| configs/codex/config.mac.toml | ba8c3ec6603ae2812918683a8f46c828a79cc432f22323ea9c218672aa029791 | v1.4.1 で `features.hooks=true` 修正（変更なし） |
-| configs/codex/config.windows.toml | 005fbee210b77482cb68912610b551a124608a192992346956a57cc724388537 | v1.4.1 で `features.hooks=true` 修正（変更なし） |
+| configs/codex/config.mac.toml | 34ac08a64cfe8444351b6d09ec280891763db3e47117b79b062429d2b75a6b13 | Safe Auto Mode: 0.135 で fatal の `[profiles.safe]` を除去し `[permissions.safeprobe]` 追加 |
+| configs/codex/safe.config.toml | 763a59104a8eeb2dbd61bf5a5311c0a709c00a8c466b26eeac76f327fbca36b1 | Safe Auto Mode: 0.135 で `--profile safe` 用に分離したプロファイル層 |
+| configs/codex/config.windows.toml | c6524f2389332d2923d9be7e326561146ee16137a7df5d34833dd2fc59349035 | Safe Auto Mode: 0.135 sandbox 設定を追加 |
 | configs/gemini/policies/safety.toml | d63830fc7548c9987a1d84b7ec0212b6527f639a6af808ee29d00427ceb87f3c | v1.0.x から変更なし |
 | workspace-template/aiexclude.template | 9fee69aa1fa5dc7253ebb1419bc1f28b4ca24c8c794f5c6fcc011a1c4a2e444b | v1.0.x から変更なし |
 

@@ -29,12 +29,18 @@ exclude = [
   "SLACK_BOT_TOKEN"
 ]
 
-[profiles.safe]
-sandbox_mode = "workspace-write"
-approval_policy = "untrusted"
-model_reasoning_effort = "medium"
+# codex 0.135: `--profile safe` と同一 config.toml 内の `[profiles.safe]` は同時に使えず
+# 起動が fatal error になる。プロファイル設定は configs/codex/safe.config.toml に分離し、
+# launcher 側で $CODEX_HOME/safe.config.toml として配置する(--profile safe で層を重ねる)。
 
-[profiles.safe.sandbox_workspace_write]
-network_access = false
-exclude_tmpdir_env_var = true
-exclude_slash_tmp = true
+# Safe Auto Mode: doctor の隔離ドリルが参照する permissions プロファイル。
+# `codex sandbox --permissions-profile safeprobe` で workspace 書込可・ネット遮断を実証する。
+# (実際のドリルはユーザー config に依存しない一時 CODEX_HOME を使うが、launcher 実行と
+#  doctor 検証が同じ隔離意図を共有できるようここにも定義しておく。)
+# 注意: Windows codex 0.135 での AppContainer/制限ジョブとの実挙動は Windows 実機要検証。
+[permissions.safeprobe]
+description = "Safe Auto Mode isolation drill: workspace write, network blocked"
+extends = ":workspace"
+
+[permissions.safeprobe.network]
+enabled = false
