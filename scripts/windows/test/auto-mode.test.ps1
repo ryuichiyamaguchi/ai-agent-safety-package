@@ -76,12 +76,13 @@ if ($testProbeHome -and (Test-Path -LiteralPath (Join-Path $testProbeHome 'confi
 }
 
 # 判定ロジックの単体検証: 2 段プローブ分類関数 Get-NetResultClass <baseline> <blocked>。
-# フェイルクローズ: ベースライン疎通 (connected) が取れたときだけ遮断 (refused) を PASS とする。
-#   baseline=connected blocked=refused   -> 0  (PASS: ネット可の環境で遮断を実証)
-#   baseline=connected blocked=connected -> 10 (FAIL: 遮断プロファイルでも繋がる = 穴)
-#   baseline=connected blocked=timeout   -> 20 (HOLD: 遮断結果が判定不能)
-#   baseline!=connected (オフライン/到達不能) -> 20 (HOLD: 遮断を実証できない)
-$c1 = [int](Get-NetResultClass 'connected' 'refused')
+# F-A 修正済セマンティクス: sandbox-blocked(EPERM 系)のみ PASS。general-refused は HOLD。
+#   baseline=connected blocked=sandbox-blocked -> 0  (PASS: sandbox 由来の遮断を実証)
+#   baseline=connected blocked=general-refused -> 20 (HOLD: ECONNREFUSED は sandbox 実証にならない)
+#   baseline=connected blocked=connected       -> 10 (FAIL: 遮断プロファイルでも繋がる = 穴)
+#   baseline=connected blocked=timeout         -> 20 (HOLD: 遮断結果が判定不能)
+#   baseline!=connected (オフライン/到達不能)  -> 20 (HOLD: 遮断を実証できない)
+$c1 = [int](Get-NetResultClass 'connected' 'sandbox-blocked')
 if ($c1 -eq 0)  { Ok 'classify baseline+blocked=PASS' }        else { Ng "classify baseline+blocked=PASS (got $c1)" }
 
 $c2 = [int](Get-NetResultClass 'connected' 'connected')
@@ -102,6 +103,18 @@ if ($c6 -eq 20) { Ok 'classify single-refused=HOLD (no false PASS)' } else { Ng 
 
 $c7 = [int](Get-NetResultClass 'connected')
 if ($c7 -eq 10) { Ok 'classify single-connected=FAIL' }        else { Ng "classify single-connected=FAIL (got $c7)" }
+
+# F-A 追加: mac auto-mode.test.sh Task 5b と等価の Windows ケース。
+# sandbox-blocked(EPERM 系) → PASS / general-refused(ECONNREFUSED) → HOLD
+$cFA1 = [int](Get-NetResultClass 'connected' 'sandbox-blocked')
+if ($cFA1 -eq 0)  { Ok 'classify sandbox-blocked=PASS' }             else { Ng "classify sandbox-blocked=PASS (got $cFA1)" }
+
+$cFA2 = [int](Get-NetResultClass 'connected' 'general-refused')
+if ($cFA2 -eq 20) { Ok 'classify general-refused=HOLD (no false PASS)' } else { Ng "classify general-refused=HOLD (got $cFA2)" }
+
+# 後方互換: 1 引数 refused は sandbox 由来か不明なので HOLD のまま変わらないこと。
+$cFA3 = [int](Get-NetResultClass 'refused')
+if ($cFA3 -eq 20) { Ok 'classify 1arg-refused still HOLD (no false PASS)' } else { Ng "classify 1arg-refused still HOLD (got $cFA3)" }
 
 # ---- Task 8: doctor.ps1 -IsolationCheck ----
 
