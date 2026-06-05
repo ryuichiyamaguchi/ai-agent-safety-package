@@ -122,6 +122,53 @@ function Get-CardBody {
     return ($body -join "`n")
 }
 
+# ツール別に「AI が実際にしようとしていること」の文字列を返す。
+# 戻り値: [PSCustomObject]@{ Text=...; Label=... }
+# 800字超は安全に切り捨て。XSS対策は呼び出し側(Write-NowHtml)で行う。
+function Get-ActionText {
+    param([object]$HookInput, [string]$Mode)
+    $text = ""
+    $label = "操作"
+    try {
+        switch ($Mode) {
+            "bash" {
+                $text = [string](Get-CommandText $HookInput)
+                $label = "コマンド実行"
+            }
+            "write" {
+                $fp = [string](Get-WriteTarget $HookInput)
+                $toolInput = Get-ToolInput $HookInput
+                $content = [string](Get-JsonValue $toolInput @("content", "new_string"))
+                if (-not [string]::IsNullOrWhiteSpace($content)) {
+                    $preview = ($content -replace "[\r\n\t]", " ").Substring(0, [Math]::Min($content.Length, 120))
+                    $text = "$fp (内容: $preview)"
+                } else {
+                    $text = $fp
+                }
+                $label = "ファイル書き込み"
+            }
+            "webfetch" {
+                $text = [string](Get-WebUrl $HookInput)
+                $label = "Web アクセス"
+            }
+            { $_ -eq "prompt" -or $_ -eq "post-output" } {
+                $raw = [string](Get-PromptText $HookInput)
+                $text = if ($raw.Length -gt 300) { $raw.Substring(0, 300) } else { $raw }
+                $label = "プロンプト"
+            }
+            default {
+                $raw = ConvertTo-SafeText $HookInput
+                $text = if ($raw.Length -gt 200) { $raw.Substring(0, 200) } else { $raw }
+            }
+        }
+    } catch { $text = "" }
+
+    if ([string]::IsNullOrWhiteSpace($text)) { $text = "（取得できませんでした）" }
+    # 800字で切り捨て
+    if ($text.Length -gt 800) { $text = $text.Substring(0, 800) + "…(省略)" }
+    return [PSCustomObject]@{ Text = $text; Label = $label }
+}
+
 # ----- now.html 書き出し (Phase 1: HTML モニター足場) ---------------------
 # now.md と「並立」する追加出力。now.md の挙動は一切変えない。
 # meta refresh による file:// 直開きの自動更新を前提に、自己完結 HTML を
@@ -242,6 +289,9 @@ function Get-NowHtmlHead([int]$Refresh) {
     [void]$sb.Append("tr.d-explain .ev-dec{color:#79c0ff}`n")
     [void]$sb.Append(".empty{opacity:.6;font-size:13px}`n")
     [void]$sb.Append(".foot{margin-top:18px;font-size:11px;opacity:.5}`n")
+    [void]$sb.Append(".action{background:#12161f;border:1px solid #2a3040;border-radius:8px;padding:12px 14px;margin:10px 0 14px}`n")
+    [void]$sb.Append(".action-label{font-size:12px;color:#8ab;margin-bottom:6px;font-weight:600}`n")
+    [void]$sb.Append(".action-cmd{margin:0;font-family:monospace,'Courier New',Courier;font-size:14px;color:#f0c080;white-space:pre-wrap;word-break:break-all;overflow-wrap:anywhere}`n")
     [void]$sb.Append("</style>`n")
     # JS リロード: meta refresh が file:// で効かないブラウザ向けの補完。
     # ユーザ値を JS 内に一切流し込まない (XSS 不発生)。
@@ -296,7 +346,7 @@ function Write-NowHtmlPlaceholder([string]$LogDir) {
 }
 
 function Write-NowHtml {
-    param([string]$Icon, [string]$Title, [string]$BodyRisk, [string]$Ts, [string]$CardId, [string]$Mode, [string]$Body, [string]$LogDir)
+    param([string]$Icon, [string]$Title, [string]$BodyRisk, [string]$Ts, [string]$CardId, [string]$Mode, [string]$Body, [string]$LogDir, [string]$ActionText = "", [string]$ActionLabel = "操作")
     try {
         $refresh = 1
         if ($env:AI_SAFE_MONITOR_INTERVAL -match '^\d+$') { $refresh = [int]$env:AI_SAFE_MONITOR_INTERVAL }
@@ -314,6 +364,12 @@ function Write-NowHtml {
         [void]$sb.Append("<div class=`"card $cardcls`">`n")
         [void]$sb.Append("<div class=`"ctitle`">" + (ConvertTo-HtmlEscaped $Icon) + " " + (ConvertTo-HtmlEscaped $Title) + "</div>`n")
         [void]$sb.Append("<div class=`"cmeta`">" + (ConvertTo-HtmlEscaped $Ts) + " ・ tool=" + (ConvertTo-HtmlEscaped $Mode) + " ・ risk=" + (ConvertTo-HtmlEscaped $BodyRisk) + " ・ card=" + (ConvertTo-HtmlEscaped $CardId) + "</div>`n")
+        if (-not [string]::IsNullOrWhiteSpace($ActionText)) {
+            [void]$sb.Append("<div class=`"action`">`n")
+            [void]$sb.Append("<div class=`"action-label`">🤖 AI がしようとしていること（" + (ConvertTo-HtmlEscaped $ActionLabel) + "）</div>`n")
+            [void]$sb.Append("<pre class=`"action-cmd`">" + (ConvertTo-HtmlEscaped $ActionText) + "</pre>`n")
+            [void]$sb.Append("</div>`n")
+        }
         [void]$sb.Append($cardHtml)
         [void]$sb.Append("</div>`n")
         [void]$sb.Append("<div class=`"events`">`n<h2>直近の出来事 (events-$day.jsonl)</h2>`n")
@@ -335,7 +391,7 @@ function Write-NowHtml {
 }
 
 function Write-NowCard {
-    param([string]$CardId, [string]$RiskDefault, [string]$Mode, [string]$CardsDir)
+    param([string]$CardId, [string]$RiskDefault, [string]$Mode, [string]$CardsDir, [object]$HookInput = $null)
     $bodyPath = Join-Path $CardsDir ($CardId + ".md")
     if (-not (Test-Path -LiteralPath $bodyPath)) {
         $bodyPath = Join-Path $CardsDir ("default-" + $Mode + ".md")
@@ -352,6 +408,17 @@ function Write-NowCard {
     $body = Get-CardBody $bodyPath
     $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
+    # 実際の操作文字列を抽出（HookInput が渡された場合のみ）。
+    $actionText = ""
+    $actionLabel = "操作"
+    if ($null -ne $HookInput) {
+        try {
+            $action = Get-ActionText -HookInput $HookInput -Mode $Mode
+            $actionText = $action.Text
+            $actionLabel = $action.Label
+        } catch { }
+    }
+
     $logDir = $env:AI_SAFE_LOG_DIR
     if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
     if (-not (Test-Path -LiteralPath $logDir)) {
@@ -360,11 +427,13 @@ function Write-NowCard {
     $out = Join-Path $logDir "now.md"
 
     $sep = ("─" * 41)
-    $header = "$icon $title  (risk: $risk)`n$sep`n[$ts  tool=$Mode  card=$CardId]`n`n"
+    # 実際の操作を最上部に表示（コンソール monitor が読む）。
+    $actionLine = if (-not [string]::IsNullOrWhiteSpace($actionText)) { "`n▶ ${actionLabel}:`n  $actionText`n" } else { "" }
+    $header = "$icon $title  (risk: $risk)`n$sep`n[$ts  tool=$Mode  card=$CardId]$actionLine`n"
     Set-Content -LiteralPath $out -Value ($header + $body) -Encoding UTF8
 
     # now.html を「並立」出力 (now.md は上で確定済み・不変)。失敗しても判定は止めない。
-    Write-NowHtml -Icon $icon -Title $title -BodyRisk $risk -Ts $ts -CardId $CardId -Mode $Mode -Body $body -LogDir $logDir
+    Write-NowHtml -Icon $icon -Title $title -BodyRisk $risk -Ts $ts -CardId $CardId -Mode $Mode -Body $body -LogDir $logDir -ActionText $actionText -ActionLabel $actionLabel
 
     return $CardId
 }
@@ -386,7 +455,7 @@ function Invoke-Explain {
             $risk = "low"
         }
 
-        $written = Write-NowCard -CardId $cardId -RiskDefault $risk -Mode $Mode -CardsDir $cardsDir
+        $written = Write-NowCard -CardId $cardId -RiskDefault $risk -Mode $Mode -CardsDir $cardsDir -HookInput $HookInput
         if (-not [string]::IsNullOrWhiteSpace($written)) {
             try {
                 Write-AuditLog $HookInput $Mode "explain" ("card=" + $written + " risk=" + $risk) "" $Policy
