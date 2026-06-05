@@ -268,6 +268,9 @@ write_now_html_placeholder() {
   local out tmp refresh
   [ -n "$dir" ] || return 1
   out="$dir/now.html"
+  # F-I: 本物 now.html が既に存在する場合は何もしない（レース安全化）。
+  # write_now_html（本物）は従来どおり上書きするが、placeholder は上書きしない。
+  [ -f "$out" ] && return 0
   refresh="${AI_SAFE_MONITOR_INTERVAL:-1}"
   case "$refresh" in (''|*[!0-9]*) refresh=1 ;; esac
   mkdir -p "$dir" 2>/dev/null || return 1

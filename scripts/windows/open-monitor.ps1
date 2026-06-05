@@ -1,4 +1,4 @@
-# open-monitor.ps1 — HTML 見守りモニター(now.html)を既定ブラウザで開く。
+﻿﻿# open-monitor.ps1 — HTML 見守りモニター(now.html)を既定ブラウザで開く。
 #
 # 「見守りモニターを起動」ボタンの実体。
 #   1. ログディレクトリを解決（guards / monitor.ps1 と同一ロジック）
@@ -40,17 +40,11 @@ if (Test-Path -LiteralPath $nowHtml) {
         Start-Process $nowHtml
         exit 0
     } catch {
-        Write-Host "ブラウザを開けませんでした。次のファイルを手動で開いてください:"
-        Write-Host "  $nowHtml"
+        # F-G: ブラウザ起動失敗時はコンソール版へ自動フォールバック（非エンジニア配慮）。
+        Write-Host "ブラウザを開けませんでした。コンソール版モニターを表示します。"
         Write-Host ""
-        Write-Host "（ブラウザが使えない場合は、コンソール版モニターも使えます: $PSScriptRoot\monitor.ps1）"
-        exit 1
     }
 }
 
-# placeholder すら生成できなかった場合のフォールバック（コンソール版）。
-Write-Host "HTML モニターを準備できませんでした。"
-Write-Host "ログ保存先: $logDir"
-Write-Host "代わりにコンソール版モニターを開きます…"
-Write-Host ""
+# placeholder 生成失敗 or ブラウザ起動失敗時のフォールバック（コンソール版）。
 & (Join-Path $PSScriptRoot "monitor.ps1")

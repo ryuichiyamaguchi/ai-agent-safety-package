@@ -268,6 +268,10 @@ function Write-NowHtmlFile([string]$LogDir, [string]$Html) {
 # 空白 / file-not-found を防ぐために本物 now.html と同じパス・同じ体裁で吐く。
 # ガード発火後は Write-NowHtml が同じパスを上書きするので自動で切り替わる。
 function Write-NowHtmlPlaceholder([string]$LogDir) {
+    # F-I: 本物 now.html が既に存在する場合は何もしない（レース安全化）。
+    # Write-NowHtml（本物）は従来どおり上書きするが、placeholder は上書きしない。
+    $existingHtml = Join-Path $LogDir "now.html"
+    if (Test-Path -LiteralPath $existingHtml) { return $false }
     try {
         $refresh = 1
         if ($env:AI_SAFE_MONITOR_INTERVAL -match '^\d+$') { $refresh = [int]$env:AI_SAFE_MONITOR_INTERVAL }

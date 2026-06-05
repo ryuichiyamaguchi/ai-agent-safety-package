@@ -44,16 +44,10 @@ fi
 
 if [ -f "$NOW_HTML" ]; then
   open "$NOW_HTML" 2>/dev/null && exit 0
-  echo "ブラウザを開けませんでした。次のファイルを手動で開いてください:"
-  echo "  $NOW_HTML"
+  # F-G: ブラウザ起動失敗時はコンソール版へ自動フォールバック（非エンジニア配慮）。
+  echo "ブラウザを開けませんでした。コンソール版モニターを表示します。"
   echo
-  echo "（ブラウザが使えない場合は、コンソール版モニターも使えます: $HERE/monitor.sh）"
-  exit 1
 fi
 
-# placeholder すら生成できなかった場合のフォールバック（コンソール版）。
-echo "HTML モニターを準備できませんでした。"
-echo "ログ保存先: $DIR"
-echo "代わりにコンソール版モニターを開きます…"
-echo
+# placeholder 生成失敗 or ブラウザ起動失敗時のフォールバック（コンソール版）。
 exec bash "$HERE/monitor.sh"
