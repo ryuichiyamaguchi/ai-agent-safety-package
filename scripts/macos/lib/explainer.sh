@@ -60,20 +60,44 @@ extract_target() {
   esac
 }
 
-# ツール別に「AI が実際にしようとしていること」の文字列を組み立てて返す。
-# now.html と now.md の両方で使う。800字超は安全に切り捨て（表示欠落を防ぐ）。
+# ツール別に「AI が実際にしようとしていること」の文字列を組み立てる。
+# 結果はグローバル変数 ACTION_TEXT / ACTION_LABEL に格納する。
+# TAB/改行を含むコマンドでも round-trip を破壊しないよう戻り値を使わない。
 # XSS対策は呼び出し側(write_now_html)で html_escape するので、ここはプレーンテキスト。
+#
+# 切り捨て: perl -CSDA で Unicode 文字単位の 800 字。実際に切った時だけ「…(省略)」を付ける。
+# (macOS awk は バイト単位のため不使用。perl は isolation_drills.sh で既に前提)
+_limit_chars() {
+  # 引数: max_chars
+  # stdin からテキストを受け取り、max_chars 文字で切り捨てる（改行を除去してから）。
+  # -CSDA: stdin/stdout/stderr を Unicode として扱う。日本語を文字単位で正しく数える。
+  # 省略マーカーは \x{2026}\x{FF08}\x{7701}\x{7565}\x{FF09} = …(省略)
+  local max="${1:-800}"
+  perl -CSDA -0777 -ne '
+    s/[\r\n]+/ /g;
+    if (length($_) > '"$max"') {
+      print substr($_, 0, '"$max"') . "\x{2026}\x{FF08}\x{7701}\x{7565}\x{FF09}";
+    } else {
+      print $_;
+    }
+  ' 2>/dev/null
+}
+
+# グローバル変数（explain() から参照する）
+ACTION_TEXT=""
+ACTION_LABEL="操作"
+
 extract_action_text() {
-  local text label
+  local text label fp content_first
   case "$MODE" in
     bash)
       text="$(extract_json_string "command")"
       label="コマンド実行"
       ;;
     write)
-      local fp content_first
       fp="$(extract_json_string "file_path")"
-      content_first="$(extract_json_string "content" | head -c 120 | tr '\n\t' ' ')"
+      # content 先頭を文字単位 120 字で切る（F-M: head -c はバイト切り）
+      content_first="$(extract_json_string "content" | _limit_chars 120)"
       if [ -n "$content_first" ]; then
         text="${fp} (内容: ${content_first})"
       else
@@ -86,20 +110,22 @@ extract_action_text() {
       label="Web アクセス"
       ;;
     prompt|post-output)
-      # プロンプトは先頭 300 字だけ
-      text="$(printf '%s' "$RAW_INPUT" | head -c 300 | tr '\n\t' ' ')"
+      # プロンプトは先頭 300 字（F-M: head -c はバイト切り）
+      text="$(printf '%s' "$RAW_INPUT" | _limit_chars 300)"
       label="プロンプト"
       ;;
     *)
-      text="$(printf '%s' "$RAW_INPUT" | head -c 200 | tr '\n\t' ' ')"
+      text="$(printf '%s' "$RAW_INPUT" | _limit_chars 200)"
       label="操作"
       ;;
   esac
   # 空の場合は不明
   [ -z "$text" ] && text="（取得できませんでした）"
-  # 800字で切り捨て（awk で安全に。${text:0:800} はマルチバイトで危険）
-  text="$(printf '%s' "$text" | awk 'BEGIN{n=0}{for(i=1;i<=length($0);i++){n++;printf substr($0,i,1)}; if(n>=800){printf "…(省略)"; exit}} END{printf "\n"}')"
-  printf '%s\t%s' "$text" "$label"
+  # 800字で切り捨て（F-J: 実際に切ったときだけ「…(省略)」を付ける）
+  text="$(printf '%s' "$text" | _limit_chars 800)"
+  # グローバル変数に格納（F-K: TAB round-trip 破壊を避けるため戻り値を使わない）
+  ACTION_TEXT="$text"
+  ACTION_LABEL="$label"
 }
 
 # ----- index.tsv 走査 -----------------------------------------------------
@@ -462,11 +488,11 @@ explain() {
       card_id="default-$MODE"
       risk="low"
     fi
-    # 実際の操作文字列を抽出（TAB 区切りで text\tlabel を返す）。
-    action_raw="$(extract_action_text 2>/dev/null || true)"
-    action_text="$(printf '%s' "$action_raw" | cut -f1)"
-    action_label="$(printf '%s' "$action_raw" | cut -f2)"
-    written="$(write_now_card "$card_id" "$risk" "$action_text" "$action_label" 2>/dev/null || true)"
+    # 実際の操作文字列を抽出（グローバル変数 ACTION_TEXT/ACTION_LABEL に格納）。
+    # F-K: TAB round-trip 破壊を避けるためグローバル変数経由。
+    ACTION_TEXT=""; ACTION_LABEL="操作"
+    extract_action_text 2>/dev/null || true
+    written="$(write_now_card "$card_id" "$risk" "$ACTION_TEXT" "$ACTION_LABEL" 2>/dev/null || true)"
     if [ -n "$written" ]; then
       audit_log "explain" "card=$written risk=$risk"
     fi

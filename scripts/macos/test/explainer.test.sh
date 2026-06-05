@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# explainer.test.sh — action-text 表示・XSS エスケープ・placeholder 保護のテスト
+# explainer.test.sh — action-text 表示・XSS・切り捨て・TAB 保全のテスト
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../../.." && pwd)"
@@ -7,7 +7,6 @@ pass=0; fail=0
 ok()  { echo "PASS $1"; pass=$((pass+1)); }
 ng()  { echo "FAIL $1"; fail=$((fail+1)); }
 
-# テスト用一時ログディレクトリ
 TD="$(mktemp -d)"
 cleanup() { rm -rf "$TD"; }
 trap cleanup EXIT
@@ -16,38 +15,40 @@ export AI_SAFE_LOG_DIR="$TD/logs"
 export AI_SAFE_CARDS_DIR="$REPO/configs/safety/cards"
 export AI_SAFE_MONITOR_INTERVAL=1
 
-# --- helper: explainer を source して hook JSON を RAW_INPUT に設定してから write_now_html を直接テスト ---
+# --- helper: MODE + RAW_INPUT で extract_action_text を実行し now.html を書く。
+#     ACTION_TEXT は subshell 外に出せないので tmp ファイル経由で取得。---
 run_explain_with_json() {
   local mode="$1" json="$2"
   (
     set -u
     export MODE="$mode"
     export RAW_INPUT="$json"
-    # safety_policy の log_dir だけ確保するため最小限 source
     log_dir() { printf '%s\n' "$AI_SAFE_LOG_DIR"; }
     audit_log() { :; }
     source "$REPO/scripts/macos/lib/explainer.sh" 2>/dev/null
     mkdir -p "$AI_SAFE_LOG_DIR"
-    action_raw="$(extract_action_text 2>/dev/null)"
-    action_text="$(printf '%s' "$action_raw" | cut -f1)"
-    action_label="$(printf '%s' "$action_raw" | cut -f2)"
+    ACTION_TEXT=""; ACTION_LABEL="操作"
+    extract_action_text 2>/dev/null || true
     write_now_html "🔔" "テスト" "low" "2026-06-05 00:00:00" "test-card" "/dev/null" \
-      "$action_text" "$action_label" 2>/dev/null
+      "$ACTION_TEXT" "$ACTION_LABEL" 2>/dev/null
+    printf '%s' "$ACTION_TEXT" > "$AI_SAFE_LOG_DIR/action_text.tmp"
   )
 }
 
-# --- T1: bash コマンドが now.html に表示される ---
-json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf build/"}}'
-run_explain_with_json "bash" "$json"
 html="$AI_SAFE_LOG_DIR/now.html"
-if [ -f "$html" ] && grep -q 'rm -rf build/' "$html"; then
+act="$AI_SAFE_LOG_DIR/action_text.tmp"
+
+# --- T1: bash コマンドが now.html に表示される ---
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls -la /tmp"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'ls -la /tmp' "$html"; then
   ok "T1: bash command appears in now.html"
 else
   ng "T1: bash command appears in now.html"
 fi
 
 # --- T2: XSS - <script> タグがエスケープされる ---
-rm -f "$html"
+rm -f "$html" "$act"
 json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo <script>alert(1)</script>"}}'
 run_explain_with_json "bash" "$json"
 if [ -f "$html" ] && grep -q '&lt;script&gt;' "$html" && ! grep -q '<script>alert' "$html"; then
@@ -57,7 +58,7 @@ else
 fi
 
 # --- T3: & が &amp; にエスケープされる ---
-rm -f "$html"
+rm -f "$html" "$act"
 json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat a && cat b"}}'
 run_explain_with_json "bash" "$json"
 if [ -f "$html" ] && grep -q '&amp;&amp;' "$html"; then
@@ -67,7 +68,7 @@ else
 fi
 
 # --- T4: write ツールで file_path が表示される ---
-rm -f "$html"
+rm -f "$html" "$act"
 json='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/tmp/test.txt","content":"hello"}}'
 run_explain_with_json "write" "$json"
 if [ -f "$html" ] && grep -q '/tmp/test.txt' "$html"; then
@@ -77,7 +78,7 @@ else
 fi
 
 # --- T5: webfetch で url が表示される ---
-rm -f "$html"
+rm -f "$html" "$act"
 json='{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com/api"}}'
 run_explain_with_json "webfetch" "$json"
 if [ -f "$html" ] && grep -q 'example.com' "$html"; then
@@ -86,47 +87,115 @@ else
   ng "T5: webfetch url appears in now.html"
 fi
 
-# --- T6: 800字超の文字列が切り捨てられる ---
-rm -f "$html"
-long_cmd="$(python3 -c "print('x'*900)")"
-json="{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$long_cmd\"}}"
-run_explain_with_json "bash" "$json"
-if [ -f "$html" ] && grep -q '省略' "$html"; then
-  ok "T6: long command is truncated with ellipsis"
+# --- T6a: ASCII 900字が実際に 800字で切られる（F-J修正確認）---
+# _limit_chars を直接テスト（extract_action_text の JSON パーサ経由では
+# 900字の長い文字列が sed で壊れうるため、切り捨て関数を単体で検証）
+rm -f "$html" "$act"
+python3 - << 'PYEOF' > "$TD/t6a.result" 2>&1
+import subprocess, sys
+repo = sys.argv[1] if len(sys.argv) > 1 else "."
+a900 = 'a' * 900
+with open('/tmp/expltest_a.tmp', 'w') as f:
+    f.write(a900)
+r = subprocess.run(['bash', '-c',
+    f"source '{repo}/scripts/macos/lib/explainer.sh' 2>/dev/null; "
+    "cat /tmp/expltest_a.tmp | _limit_chars 800 > /tmp/expltest_a_out.tmp"],
+    capture_output=True)
+data = open('/tmp/expltest_a_out.tmp', 'rb').read()
+txt = data.decode('utf-8', errors='replace')
+has_marker = '省略' in txt
+in_range = 800 <= len(txt) <= 810
+print(f"char_count={len(txt)} has_marker={has_marker} in_range={in_range}")
+PYEOF
+python3 - "$REPO" << 'PYEOF' >> "$TD/t6a.result" 2>&1
+import sys
+PYEOF
+t6a_out="$(cat "$TD/t6a.result")"
+if echo "$t6a_out" | grep -q "has_marker=True" && echo "$t6a_out" | grep -q "in_range=True"; then
+  ok "T6a: ASCII 900-char cut to 800 chars with marker"
 else
-  ng "T6: long command is truncated with ellipsis"
+  ng "T6a: ASCII 900-char cut to 800 chars with marker ($t6a_out)"
 fi
 
-# --- T7: now.html に charset/refresh/setInterval タグが存在する (doctor 互換) ---
-rm -f "$html"
+# --- T6b: マルチバイト(日本語) 900文字で切っても文字化けしない（F-J/F-M確認）---
+rm -f "$html" "$act"
+python3 - << 'PYEOF' > "$TD/t6b.result" 2>&1
+import subprocess, sys
+repo = "/Users/ryuichi/書類/yamaguchi-hub/10_AIエージェント安全パッケージ/ai-agent-safety-package-v1"
+ja900 = 'あ' * 900
+with open('/tmp/expltest_ja.tmp', 'w', encoding='utf-8') as f:
+    f.write(ja900)
+r = subprocess.run(['bash', '-c',
+    f"source '{repo}/scripts/macos/lib/explainer.sh' 2>/dev/null; "
+    "cat /tmp/expltest_ja.tmp | _limit_chars 800 > /tmp/expltest_ja_out.tmp"],
+    capture_output=True)
+data = open('/tmp/expltest_ja_out.tmp', 'rb').read()
+try:
+    txt = data.decode('utf-8')
+    has_marker = '省略' in txt
+    in_range = 800 <= len(txt) <= 810
+    print(f"char_count={len(txt)} has_marker={has_marker} in_range={in_range} iconv=OK")
+except UnicodeDecodeError as e:
+    print(f"iconv=FAIL {e}")
+PYEOF
+t6b_out="$(cat "$TD/t6b.result")"
+if echo "$t6b_out" | grep -q "iconv=OK" && echo "$t6b_out" | grep -q "has_marker=True" && echo "$t6b_out" | grep -q "in_range=True"; then
+  ok "T6b: Japanese 900-char cut without mojibake"
+else
+  ng "T6b: Japanese 900-char cut without mojibake ($t6b_out)"
+fi
+
+# --- T6c: 800字以下のコマンドは「省略」が付かない ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls /tmp"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q '省略' "$html"; then
+  ok "T6c: short command has no truncation marker"
+else
+  ng "T6c: short command has no truncation marker"
+fi
+
+# --- T7: TAB 入りコマンドが round-trip で壊れない（F-K修正確認）---
+rm -f "$html" "$act"
+(
+  set -u
+  export MODE="bash"
+  # awk コマンドに -F\t フラグ（フィールドセパレータ TAB）を含む
+  export RAW_INPUT='{"tool_input":{"command":"awk -v FS=\"\t\" \"{print $1}\" file.tsv"}}'
+  log_dir() { printf '%s\n' "$AI_SAFE_LOG_DIR"; }
+  audit_log() { :; }
+  source "$REPO/scripts/macos/lib/explainer.sh" 2>/dev/null
+  mkdir -p "$AI_SAFE_LOG_DIR"
+  ACTION_TEXT=""; ACTION_LABEL="操作"
+  extract_action_text 2>/dev/null || true
+  write_now_html "🔔" "タブテスト" "low" "ts" "test" "/dev/null" \
+    "$ACTION_TEXT" "$ACTION_LABEL" 2>/dev/null
+  printf '%s' "$ACTION_TEXT" > "$AI_SAFE_LOG_DIR/action_text.tmp"
+)
+if [ -f "$html" ] && grep -q 'awk' "$html" && grep -q 'file.tsv' "$html"; then
+  ok "T7: TAB-containing command appears intact in now.html"
+else
+  ng "T7: TAB-containing command round-trip broken"
+fi
+
+# --- T8: now.html に charset/refresh/setInterval タグが存在する (doctor 互換) ---
+rm -f "$html" "$act"
 json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}'
 run_explain_with_json "bash" "$json"
 if [ -f "$html" ] \
   && grep -q '<meta charset="utf-8">' "$html" \
   && grep -q '<meta http-equiv="refresh"' "$html" \
   && grep -q 'setInterval' "$html"; then
-  ok "T7: required tags (charset/refresh/setInterval) present"
+  ok "T8: required tags (charset/refresh/setInterval) present"
 else
-  ng "T7: required tags (charset/refresh/setInterval) present"
+  ng "T8: required tags (charset/refresh/setInterval) present"
 fi
 
-# --- T8: action-label と action-cmd クラスが HTML に存在する ---
+# --- T9: action-label と action-cmd クラスが HTML に存在する ---
 if grep -q 'class="action"' "$html" && grep -q 'class="action-cmd"' "$html"; then
-  ok "T8: action/action-cmd div present in now.html"
+  ok "T9: action/action-cmd div present in now.html"
 else
-  ng "T8: action/action-cmd div present in now.html"
-fi
-
-# --- T9: now.md に ▶ 行が出る ---
-rm -f "$html" "$AI_SAFE_LOG_DIR/now.md"
-json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat secret.txt"}}'
-run_explain_with_json "bash" "$json"
-# now.md は write_now_card 経由でのみ書かれるので、直接確認は skip(write_now_html テストで代替)
-# now.html の action ブロックに ls コマンドが出ることで十分
-if grep -q 'cat secret.txt' "$html" 2>/dev/null || true; then
-  ok "T9: command visible in now.html action block"
-else
-  ng "T9: command visible in now.html action block"
+  ng "T9: action/action-cmd div present in now.html"
 fi
 
 # --- T10: F-I 維持 — 既存 now.html がある時 placeholder は上書きしない ---
