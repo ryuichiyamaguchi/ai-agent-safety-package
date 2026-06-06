@@ -159,7 +159,8 @@ function Remove-SudoPrefix([string]$Seg) {
     return $Seg
 }
 
-# 引用符スパン内テキストをスペースに置換(redir 検出の前処理用)。
+# 単一・二重引用符 両方の内側テキストをスペースに置換(redir/演算子検出の前処理用)。
+# 注: 二重引用符内でも $(...) は有効なため、コマンド置換検出には使わないこと。
 function Remove-QuotedContent([string]$S) {
     $r = [System.Text.StringBuilder]::new()
     $inDq = $false; $inSq = $false
@@ -168,6 +169,21 @@ function Remove-QuotedContent([string]$S) {
         if ($c -eq '"' -and -not $inSq) { $inDq = -not $inDq; [void]$r.Append($c); continue }
         if ($c -eq "'" -and -not $inDq) { $inSq = -not $inSq; [void]$r.Append($c); continue }
         if ($inDq -or $inSq) { [void]$r.Append(' '); continue }
+        [void]$r.Append($c)
+    }
+    return $r.ToString()
+}
+
+# 単一引用符 のみ の内側テキストをスペースに置換(コマンド置換検出の前処理用)。
+# 二重引用符内では $(...)/backtick がアクティブなため除去しない。
+function Remove-SingleQuotedContent([string]$S) {
+    $r = [System.Text.StringBuilder]::new()
+    $inSq = $false
+    for ($i = 0; $i -lt $S.Length; $i++) {
+        $c = $S[$i]
+        if ($c -eq "'" -and -not $inSq) { $inSq = $true; [void]$r.Append($c); continue }
+        if ($c -eq "'" -and $inSq) { $inSq = $false; [void]$r.Append($c); continue }
+        if ($inSq) { [void]$r.Append(' '); continue }
         [void]$r.Append($c)
     }
     return $r.ToString()
@@ -264,6 +280,13 @@ function Get-ExplainTargetFromCmd([string]$Primary, [string]$Category) {
         if (($t -match '^[0-9]*>>?[^>]' -or $t -match '^&>>?[^>]') -and $t -notmatch '^2>>?') {
             $redirIdx[$i] = $true
         }
+        # 入力リダイレクト < << <> → このトークンと次トークンを除外
+        if ($t -match '^<<?(>|$)' -or $t -eq '<') {
+            $redirIdx[$i] = $true
+            if ($i + 1 -lt $sToks.Count) { $redirIdx[$i + 1] = $true }
+        }
+        # <file 連結形(<で始まり$(でも<(でもない)
+        if ($t -match '^<[^<>($]') { $redirIdx[$i] = $true }
     }
 
     # URL 最優先 (orig から返す)
@@ -323,20 +346,24 @@ function Get-CommandFlags([string]$Full) {
     $flags = @{
         Sudo = $false; Delete = $false; DeleteRecurse = $false
         Write = $false; Exec = $false; Perm = $false
-        AnyRedir = $false   # 任意のリダイレクト(2> 含む) が一切あるか(安心文禁止トリガー)
-        CmdSubst = $false   # コマンド置換 $(...) <(...) ` が含まれるか
-        RoVerb   = $true    # 全動詞が read-only カテゴリのみか
+        AnyRedir  = $false  # 任意のリダイレクト(> < << 等。2> 含む) が一切あるか
+        CmdSubst  = $false  # コマンド置換 $(...) <(...) ` が含まれるか
+        RoVerb    = $true   # 全動詞が read-only カテゴリのみか
+        Compound  = $false  # パイプ/連結(| ; && ||)が含まれるか
     }
     $lc = $Full.ToLowerInvariant()
     # sudo / 権限昇格
     if ($lc -match '(^|\s)sudo(\s|$)' -or $lc -match 'runas' -or $lc -match 'start-process.*-verb\s+runas') {
         $flags.Sudo = $true
     }
-    # 任意リダイレクトの存在チェック(2> 含む・安心文禁止トリガー)
+    # 任意リダイレクトの存在チェック(> < << 等。安心文禁止トリガー)
     $strippedRedir = Remove-QuotedContent $Full
-    if ($strippedRedir -match '>>?|[0-9]>>?|&>>?') { $flags.AnyRedir = $true }
-    # コマンド置換の検出 ($( / <( / `)
-    if ($strippedRedir -match '\$\(|<\(|`') { $flags.CmdSubst = $true }
+    if ($strippedRedir -match '>>?|[0-9]>>?|&>>?|<+') { $flags.AnyRedir = $true }
+    # コマンド置換の検出: 単一引用符のみ除去(二重引用符内でも $() はアクティブ)
+    $strippedSq = Remove-SingleQuotedContent $Full
+    if ($strippedSq -match '\$\(|<\(|`') { $flags.CmdSubst = $true }
+    # パイプ/連結(| ; && ||)の検出
+    if ($strippedRedir -match '(\||;|&&|\|\|)') { $flags.Compound = $true }
     # content-write リダイレクト
     if (Test-HasRedirect $Full) { $flags.Write = $true }
 
@@ -421,13 +448,13 @@ function Get-CommandExplanation([string]$Full) {
     $danger = $dangerLines -join "`n"
 
     # ホワイトリスト方式の readonlyAll:
-    # 全動詞が read-only カテゴリ + 任意リダイレクトなし + コマンド置換なし + 全フラグ0
+    # 単一の単純な読み取りコマンドの時のみ安心文を出す
     $readonlyAll = (-not $flags.Sudo) -and (-not $flags.Delete) -and (-not $flags.Write) -and `
                   (-not $flags.Exec) -and (-not $flags.Perm) -and (-not $flags.AnyRedir) -and `
-                  (-not $flags.CmdSubst) -and $flags.RoVerb
+                  (-not $flags.CmdSubst) -and (-not $flags.Compound) -and $flags.RoVerb
 
     # 複合コマンドか
-    $isCompound = ($Full -match '(\||;|&&|\|\|)')
+    $isCompound = $flags.Compound
 
     # > リダイレクト → 書き込み解説に差し替え
     if ($flags.Write -or (Test-HasRedirect $Full)) {

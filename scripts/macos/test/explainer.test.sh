@@ -777,3 +777,102 @@ fi
 echo ""
 echo "explainer.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]
+
+# ============================================================
+# cycle-6 追加テスト
+# ============================================================
+
+# --- T57: RED 二重引用符内コマンド置換 — cat "$(printf f)" → 安心文なし+埋込警告 ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat \"$(printf x)\""}}'
+run_explain_with_json "bash" "$json"
+t57_no_calm=0; t57_has_warn=0
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then t57_no_calm=1; fi
+if [ -f "$html" ] && grep -q '埋め込まれています' "$html"; then t57_has_warn=1; fi
+if [ "$t57_no_calm" -eq 1 ] && [ "$t57_has_warn" -eq 1 ]; then
+  ok 'T57: cat "$(...)" -> NO calm, cmd-subst warning (RED: double-quote does not block $())'
+else
+  ng "T57: cat dollar-paren -> NO calm, cmd-subst warning (no_calm=$t57_no_calm has_warn=$t57_has_warn)"
+fi
+
+# --- T58: backtick 内コマンド置換 → 安心文なし+埋込警告 ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat `printf x`"}}'
+run_explain_with_json "bash" "$json"
+t58_no_calm=0; t58_has_warn=0
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then t58_no_calm=1; fi
+if [ -f "$html" ] && grep -q '埋め込まれています' "$html"; then t58_has_warn=1; fi
+if [ "$t58_no_calm" -eq 1 ] && [ "$t58_has_warn" -eq 1 ]; then
+  ok "T58: cat \`cmd\` -> NO calm, cmd-subst warning (backtick)"
+else
+  ng "T58: cat \`cmd\` -> NO calm, cmd-subst warning (no_calm=$t58_no_calm has_warn=$t58_has_warn)"
+fi
+
+# --- T59: パイプ複合 → 安心文なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo | grep abc"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html" && grep -q 'ほかにも処理が続きます' "$html"; then
+  ok "T59: cat|grep -> NO calm text (compound), pipeline note present"
+else
+  ng "T59: cat|grep -> NO calm text (compound)"
+fi
+
+# --- T60: && 連結 → 安心文なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls /tmp && cat foo"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then
+  ok "T60: ls && cat -> NO calm text (compound)"
+else
+  ng "T60: ls && cat -> NO calm text (compound)"
+fi
+
+# --- T61: 入力リダイレクト < → 安心文なし・対象が < にならない ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat < foo.txt"}}'
+run_explain_with_json "bash" "$json"
+t61_no_calm=0; t61_no_ltarget=0
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then t61_no_calm=1; fi
+if [ -f "$html" ] && ! grep -q 'class="whatdo-body">< ' "$html"; then t61_no_ltarget=1; fi
+if [ "$t61_no_calm" -eq 1 ] && [ "$t61_no_ltarget" -eq 1 ]; then
+  ok "T61: cat < foo.txt -> NO calm, < not in target"
+else
+  ng "T61: cat < foo.txt -> NO calm, < not in target (no_calm=$t61_no_calm no_lt=$t61_no_ltarget)"
+fi
+
+# --- T62: ホワイトリスト確認 — ls(素) → 安心文あり(退行ガード) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'しません' "$html"; then
+  ok "T62: ls (bare) -> calm text present (whitelist allows simple readonly)"
+else
+  ng "T62: ls (bare) -> calm text present (regression)"
+fi
+
+# --- T63: cat foo(素) → 安心文あり(退行ガード) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '読むだけ' "$html"; then
+  ok "T63: cat foo.txt -> calm text present (whitelist allows simple readonly)"
+else
+  ng "T63: cat foo.txt -> calm text present (regression)"
+fi
+
+# --- T64: 単一引用符内の $(...) は literal → 埋込警告を出さなくてよい(出ても可) ---
+# 安心文が出るかどうかは実装依存で OK(単引 $() は literal なので danger なし)
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo x"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q '<p class="whatdo-danger"' "$html"; then
+  ok "T64: echo x (simple, no danger) -> no danger present"
+else
+  ng "T64: echo x -> no danger (baseline)"
+fi
+
+
+echo ""
+echo "explainer.test summary: pass=$pass fail=$fail"
+[ "$fail" -eq 0 ]

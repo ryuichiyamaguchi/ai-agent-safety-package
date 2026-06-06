@@ -184,12 +184,20 @@ _explain_verb() {
   printf '%s' "$1" | awk '{ print $1 }'
 }
 
-# 引用符("..." / '...')の内側テキストをスペースに置換して返す。
-# redir 検出の前処理として使用。完全なパーサではないが引用内 > を除外できる。
+# 単一・二重引用符 両方の内側テキストをスペースに置換して返す。
+# リダイレクト演算子(> < | ;)の検出前処理に使用。
+# 注: 二重引用符内でも $(...) は有効なため、コマンド置換検出には使わないこと。
 _explain_strip_quoted() {
   printf '%s' "$1" | sed -E \
     -e 's/"[^"]*"/ /g' \
     -e "s/'[^']*'/ /g"
+}
+
+# 単一引用符 のみ の内側テキストをスペースに置換して返す。
+# コマンド置換($(...) `...` <(...))の検出前処理に使用。
+# 二重引用符内では $(...)/backtick がアクティブなため二重引用符は除去しない。
+_explain_strip_single_quoted() {
+  printf '%s' "$1" | sed -E "s/'[^']*'/ /g"
 }
 
 # stderr リダイレクト(2> 2>> のみ)かどうかを判定するヘルパ。
@@ -339,6 +347,15 @@ _explain_target() {
         if ((t ~ /^[0-9]*>>?[^>]/ || t ~ /^&>>?[^>]/) && t !~ /^2>>?/) {
           redir_idx[i]=1
         }
+        # 入力リダイレクト < << <> → このトークンと次トークンを除外(< が対象にならないよう)
+        if (t ~ /^<<?(>|$)/ || t ~ /^<$/) {
+          redir_idx[i]=1
+          if (i+1<=n) redir_idx[i+1]=1
+        }
+        # <file 連結形
+        if (t ~ /^<[^<>(]/ && t !~ /^\$\(/ && t !~ /^<\(/) {
+          redir_idx[i]=1
+        }
       }
 
       # URL を tok(strip済み)で確認しつつ orig から返す
@@ -426,22 +443,32 @@ _explain_scan_flags() {
   _ecf_write=0     # 書き込み系動詞 or content-write リダイレクト
   _ecf_exec=0      # 実行系動詞
   _ecf_perm=0      # 権限変更
-  _ecf_any_redir=0 # 全文に何らかのリダイレクト(2> 含む)が1つでもある
+  _ecf_any_redir=0 # 全文に何らかのリダイレクト(> < << <> 等)が1つでもある
   _ecf_cmd_subst=0 # コマンド置換 $(...) <(...) `...` が含まれる
   _ecf_ro_verb=1   # 全動詞が read-only カテゴリ(list/read/search/cd)のみ
+  _ecf_compound=0  # パイプ/連結(| ; && ||)が含まれる
 
-  # コマンド置換の検出(引用符外に $( / <( / ` があれば)
+  # コマンド置換の検出:
+  # 単一引用符外に $( / <( / ` があれば検出する。
+  # 二重引用符内でも $(...)/backtick はアクティブなため、単一引用符のみ除去して検出。
   local stripped_for_subst
-  stripped_for_subst="$(_explain_strip_quoted "$full")"
+  stripped_for_subst="$(_explain_strip_single_quoted "$full")"
   if printf '%s' "$stripped_for_subst" | grep -qE -- '(\$\(|<\(|`)'; then
     _ecf_cmd_subst=1
   fi
 
-  # 任意のリダイレクト演算子(2> 含む)の存在チェック(安心文禁止トリガー)
+  # 任意のリダイレクト演算子(> >> < << <> 等)の存在チェック(安心文禁止トリガー)
+  # 両引用符を除去してから検出(引用符内の > < は literal)
   local stripped_for_redir
   stripped_for_redir="$(_explain_strip_quoted "$full")"
-  if printf '%s' "$stripped_for_redir" | grep -qE -- '>>?|[0-9]>>?|&>>?'; then
+  if printf '%s' "$stripped_for_redir" | grep -qE -- '(>>?|[0-9]>>?|&>>?|<+)'; then
     _ecf_any_redir=1
+  fi
+
+  # パイプ/連結(| ; && ||)の存在チェック(安心文禁止トリガー)
+  # 引用符除去後に演算子を探す
+  if printf '%s' "$stripped_for_redir" | grep -qE -- '(\||;|&&|\|\|)'; then
+    _ecf_compound=1
   fi
 
   local seg verb_lc lc_seg
@@ -533,7 +560,7 @@ explain_command() {
   # 全セグメントを走査してフラグを確定
   _ecf_sudo=0; _ecf_delete=0; _ecf_delete_recurse=0
   _ecf_write=0; _ecf_exec=0; _ecf_perm=0
-  _ecf_any_redir=0; _ecf_cmd_subst=0; _ecf_ro_verb=1
+  _ecf_any_redir=0; _ecf_cmd_subst=0; _ecf_ro_verb=1; _ecf_compound=0
   _explain_scan_flags "$full"
 
   # 主コマンド(先頭セグメント)の動詞を先に取得(DANGER 組み立てで参照)
@@ -568,22 +595,23 @@ explain_command() {
   EXPLAIN_DANGER="$dangers"
 
   # ホワイトリスト方式の readonly_all:
-  # 以下を全て満たす時のみ安心文「読むだけ。書き換えはしません」を出す。
+  # 以下を全て満たす「単一の単純な読み取りコマンド」の時のみ安心文を出す。
   # 1. 全動詞が read-only カテゴリ(list/read/search/cd)のみ
-  # 2. 任意のリダイレクトが一切ない(2> 含む)
-  # 3. コマンド置換が一切ない
-  # 4. delete/exec/sudo/perm/write フラグが全て 0
+  # 2. 任意のリダイレクトが一切ない(> < << 等。2> 含む)
+  # 3. コマンド置換が一切ない($(...) `...` <(...))
+  # 4. パイプ/連結が一切ない(| ; && ||)
+  # 5. delete/exec/sudo/perm/write フラグが全て 0
   local readonly_all=0
   if [ "$_ecf_sudo" -eq 0 ] && [ "$_ecf_delete" -eq 0 ] && \
      [ "$_ecf_write" -eq 0 ] && [ "$_ecf_exec" -eq 0 ] && [ "$_ecf_perm" -eq 0 ] && \
      [ "$_ecf_any_redir" -eq 0 ] && [ "$_ecf_cmd_subst" -eq 0 ] && \
-     [ "$_ecf_ro_verb" -eq 1 ]; then
+     [ "$_ecf_compound" -eq 0 ] && [ "$_ecf_ro_verb" -eq 1 ]; then
     readonly_all=1
   fi
 
-  # 複合コマンドか判定
+  # 複合コマンドか判定(is_compound は extra メッセージ用)
   local is_compound=0
-  if printf '%s' "$full" | grep -qE -- '(\||;|&&|\|\|)'; then is_compound=1; fi
+  [ "$_ecf_compound" -eq 1 ] && is_compound=1
 
   # > リダイレクト先(全文から最初の >)
   local redir_tgt

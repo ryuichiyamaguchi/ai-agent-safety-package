@@ -8,7 +8,7 @@
 #
 # bash テスト: scripts/macos/test/explainer.test.sh の T49 ループが iterate
 # PS テスト: pwsh 不在のため山口さん Windows 実機で確認。このファイルが契約の SSOT。
-# readonly=true: 全動詞が read-only 且つリダイレクト/コマンド置換が一切ない時のみ(ホワイトリスト)
+# readonly=true: 単一読取コマンド AND リダイレクト/コマンド置換/パイプ連結が全くない時のみ
 
 ls /tmp	list	false	true	/tmp
 ls 2>/dev/null	list	false	false
@@ -28,3 +28,6 @@ del /s C:\Temp	delete	true	false	C:\Temp
 tar -rf archive.tar f	unknown	false	false
 cat xargs rm foo.txt	read	false	true	xargs
 xargs rm badfile	unknown	true	false
+cat foo | grep abc	read	false	false	foo
+ls && cat foo	list	false	false
+cat < foo.txt	read	false	false
