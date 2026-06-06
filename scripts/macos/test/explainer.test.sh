@@ -1202,6 +1202,29 @@ else
   ng "T94-reg: head -n 5 foo.txt -> calm present"
 fi
 
+# --- T95-T96: 末尾 LF / backslash 行継続でも安心文を出さない(false-safety防止) ---
+# mac は $() が末尾改行を削るため、ACTION_RAW_CMD で末尾改行を保持し full を直接検査する。
+
+# T95: 末尾 LF → 安心文なし
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt'"${BS}"'n"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html"; then
+  ok "T95: trailing LF -> NO calm"
+else
+  ng "T95: trailing LF -> NO calm"
+fi
+
+# T96: backslash 行継続 + 末尾 LF → 安心文なし
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt '"${BS}${BS}${BS}"'n"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html"; then
+  ok "T96: backslash continuation + trailing LF -> NO calm"
+else
+  ng "T96: backslash continuation + trailing LF -> NO calm"
+fi
+
 echo ""
 echo "explainer.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

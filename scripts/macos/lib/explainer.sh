@@ -121,7 +121,9 @@ extract_action_text() {
   case "$MODE" in
     bash)
       text="$(extract_json_string "command")"
-      raw_cmd="$text"
+      # raw_cmd は末尾改行も保持する(複合判定の末尾区切り検出用)。
+      # $() は末尾改行を削るため sentinel(printf X)で保護してから剥がす。
+      raw_cmd="$(extract_json_string "command"; printf X)"; raw_cmd="${raw_cmd%X}"
       label="コマンド実行"
       ;;
     write)
@@ -508,8 +510,9 @@ _explain_scan_flags() {
   case "$stripped_for_redir" in
     *'|'*|*';'*|*'&'*) _ecf_compound=1 ;;
   esac
-  # 改行 / CR が残っていれば複合(末尾 CR は $() で剥がれず残る)
-  if [ "$(printf '%s' "$stripped_for_redir" | tr -dc '\n\r' | wc -c | tr -d ' ')" != "0" ]; then
+  # 改行 / CR が1つでもあれば複合。末尾改行も拾うため stripped_for_redir でなく full を直接見る
+  # (stripped_for_redir は $() 経由で末尾改行が落ちる。ACTION_RAW_CMD 側で末尾改行は保持済み)。
+  if [ "$(printf '%s' "$full" | tr -dc '\n\r' | wc -c | tr -d ' ')" != "0" ]; then
     _ecf_compound=1
   fi
 
