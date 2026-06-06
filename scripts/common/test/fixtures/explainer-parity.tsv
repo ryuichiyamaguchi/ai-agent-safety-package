@@ -1,0 +1,47 @@
+# explainer-parity.tsv — コマンド解説エンジンの共有 fixture
+# SSOT: bash と PowerShell の両実装がこのテーブルを満たすこと
+# columns: command<TAB>category<TAB>danger<TAB>readonly<TAB>target_hint
+# category: list/read/delete/write/exec/perm/cd/search/install/fetch/unknown
+# danger: true/false (EXPLAIN_DANGER または PS Danger が空でないか)
+# readonly: true/false (EXPLAIN_WHATDO に「しません」等の安心文が含まれるか)
+# target_hint: 対象として表示されるべき文字列(部分一致。空=チェックしない)
+#
+# bash テスト: scripts/macos/test/explainer.test.sh の T49 ループが iterate
+# PS テスト: pwsh 不在のため山口さん Windows 実機で確認。このファイルが契約の SSOT。
+# readonly=true: reassurance-safe 集合(ls/cat/head/tail/wc等の純粋リーダー)のみ
+#                AND リダイレクト/コマンド置換/パイプ連結が全くない時のみ
+#                find/grep/awk/sed 等は exec/write 可能なため readonly=false
+
+ls /tmp	list	false	true	/tmp
+ls 2>/dev/null	list	false	false
+cat foo.txt	read	false	true	foo.txt
+cat foo.txt 2> err.log	read	false	false	foo.txt
+ls > out.txt	write	false	false	out.txt
+cat readme.txt > dest.txt	write	false	false	dest.txt
+echo "a > b"	unknown	false	false
+grep ">" file.txt	search	false	false	file.txt
+grep abc foo.txt	search	false	false	foo.txt
+chmod 644 /etc/hostsfile	perm	false	false	/etc/hostsfile
+ls foo | del temp.txt	list	true	false
+cat build.sh | sh	read	true	false	build.sh
+Get-ChildItem -Recurse	list	false	true
+Remove-Item -Recurse build	delete	true	false	build
+del /s C:\Temp	delete	true	false	C:\Temp
+tar -rf archive.tar f	unknown	false	false
+cat xargs rm foo.txt	read	false	true	xargs
+xargs rm badfile	unknown	true	false
+cat foo | grep abc	read	false	false	foo
+ls && cat foo	list	false	false
+cat < foo.txt	read	false	false
+find . -exec printf {} +	search	true	false
+find . -delete	search	true	false
+find . -name foo	search	false	false
+wc foo.txt	read	false	true	foo.txt
+file foo.txt	read	false	false
+date	unknown	false	false
+more foo.txt	read	false	false
+find . -okdir printf {} +	search	true	false
+wc foo.txt	read	false	true	foo.txt
+stat foo.txt	read	false	true	foo.txt
+pwd & touch harmless.tmp	read	false	false
+ls & echo ok	list	false	false
