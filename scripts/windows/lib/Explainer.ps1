@@ -122,6 +122,195 @@ function Get-CardBody {
     return ($body -join "`n")
 }
 
+# ----- コマンド解説エンジン (パターン式・LLM不要・オフライン・決定的) ----
+# 入力: 実コマンド文字列。戻り値: [PSCustomObject]@{ WhatDo=...; Icon=...; Danger=... }
+#   WhatDo  平易な日本語の「何をする？」本文（未知コマンドは空）
+#   Icon    セクション見出しアイコン（既定 📂）
+#   Danger  危険語が含まれる時の強調1行（無ければ空）
+# 嘘解説を避けるため、語彙に無い動詞は WhatDo を空にしてフォールバックさせる。
+# scripts/macos/lib/explainer.sh の explain_command と parity を保つ。
+
+# 複合コマンドの主コマンド（先頭セグメント）を返す。| ; && || の手前まで。
+function Get-PrimarySegment([string]$Full) {
+    $out = New-Object System.Text.StringBuilder
+    $i = 0
+    $len = $Full.Length
+    while ($i -lt $len) {
+        $c = $Full[$i]
+        $c2 = if ($i + 1 -lt $len) { [string]$c + [string]$Full[$i + 1] } else { "" }
+        if ($c -eq '|' -or $c -eq ';') { break }
+        if ($c2 -eq '&&' -or $c2 -eq '||') { break }
+        [void]$out.Append($c)
+        $i++
+    }
+    return $out.ToString().Trim()
+}
+
+# 主コマンドの対象を抽出する。URL優先 → -Path/-LiteralPath/-Destination/-Url の値
+# → 最初の非フラグ位置引数。取れなければ空。
+function Get-ExplainTargetFromCmd([string]$Primary) {
+    $toks = $Primary -split '\s+' | Where-Object { $_ -ne "" }
+    if ($toks.Count -eq 0) { return "" }
+    # URL 最優先
+    foreach ($t in $toks) {
+        if ($t -match '^https?://') { return $t }
+    }
+    # 名前付きパラメータ
+    for ($i = 1; $i -lt $toks.Count; $i++) {
+        $lf = $toks[$i].ToLowerInvariant()
+        if ($lf -eq '-path' -or $lf -eq '-literalpath' -or $lf -eq '-destination' -or $lf -eq '-url' -or $lf -eq '-uri') {
+            if ($i + 1 -lt $toks.Count) { return $toks[$i + 1] }
+        }
+    }
+    # 最初の非フラグ位置引数（動詞 [0] をスキップ）
+    for ($i = 1; $i -lt $toks.Count; $i++) {
+        if ($toks[$i].StartsWith('-')) { continue }
+        return $toks[$i]
+    }
+    return ""
+}
+
+# 危険語（再帰削除・権限昇格）を全文から検知して強調1行を返す（無ければ空）。
+function Get-ExplainDanger([string]$Full) {
+    $lc = $Full.ToLowerInvariant()
+    if ($lc -match '(^|\s)sudo(\s|$)' -or $lc -match 'runas' -or $lc -match 'start-process.*-verb\s+runas') {
+        return "⚠️ 管理者権限への昇格を含みます（PC全体に影響する可能性）"
+    }
+    if ($lc -match '\brm\b[^|;]*\s-[a-z]*r' -or $lc -match '\s-recurse' -or $lc -match '\s-rf' -or $lc -match '\s-fr' -or $lc -match 'remove-item[^|;]*-recurse') {
+        return "⚠️ フォルダごとの完全削除（復元できません）を含みます"
+    }
+    return ""
+}
+
+function Get-CommandExplanation([string]$Full) {
+    $whatdo = ""
+    $icon = "📂"
+    $danger = ""
+    if ([string]::IsNullOrWhiteSpace($Full)) {
+        return [PSCustomObject]@{ WhatDo = ""; Icon = $icon; Danger = "" }
+    }
+
+    $danger = Get-ExplainDanger $Full
+    $primary = Get-PrimarySegment $Full
+    # 先頭の sudo を剥がして verb/target を実コマンド基準に揃える（sudo は danger 側で強調済み）。
+    $ptoks = $primary -split '\s+' | Where-Object { $_ -ne "" }
+    if ($ptoks.Count -ge 2 -and $ptoks[0].ToLowerInvariant() -eq 'sudo') {
+        $primary = ($ptoks[1..($ptoks.Count - 1)] -join ' ')
+    }
+    $toks = $primary -split '\s+' | Where-Object { $_ -ne "" }
+    $verb = if ($toks.Count -gt 0) { $toks[0] } else { "" }
+    $verbLc = $verb.ToLowerInvariant()
+    $target = Get-ExplainTargetFromCmd $primary
+    $tdisp = if ([string]::IsNullOrEmpty($target)) { "現在のフォルダ" } else { $target }
+
+    # 複合（パイプ/連結）一言
+    $extra = ""
+    if ($Full -match '(\||;|&&|\|\|)') {
+        $extra = "（ほかにも処理が続きます。全文は上のコマンドを確認してください）"
+    }
+
+    switch -Regex ($verbLc) {
+        '^(ls|dir|get-childitem|gci|ll|la)$' {
+            $icon = "📂"
+            $whatdo = "$tdisp の中のファイル・フォルダ一覧を見ようとしています。（中身を見るだけ。削除や書き換えはしません）"
+            break
+        }
+        '^(cat|head|tail|less|more|type|get-content|gc)$' {
+            $icon = "📄"
+            $whatdo = "$tdisp の中身を読もうとしています。（読むだけ。書き換えはしません）"
+            break
+        }
+        '^(rm|rmdir|del|erase|remove-item|ri)$' {
+            $icon = "🗑"
+            $whatdo = "$tdisp を削除しようとしています。"
+            break
+        }
+        '^(touch|new-item|set-content|out-file|add-content|tee)$' {
+            $icon = "✏️"
+            $whatdo = "$tdisp を作成または書き換えようとしています。"
+            break
+        }
+        '^(echo|printf)$' {
+            if ($primary -match '>') {
+                $redir = ""
+                if ($primary -match '>>?\s*([^\s|;]+)') { $redir = $matches[1] }
+                if ([string]::IsNullOrEmpty($redir)) { $redir = "ファイル" }
+                $icon = "✏️"
+                $whatdo = "$redir に文字を書き込もうとしています。"
+            } else {
+                $icon = "📄"
+                $whatdo = "画面に文字を表示しようとしています。（表示するだけ）"
+            }
+            break
+        }
+        '^(mv|move|move-item)$' {
+            $icon = "📦"
+            $whatdo = "$tdisp を別の場所に移動しようとしています。"
+            break
+        }
+        '^(cp|copy|copy-item)$' {
+            $icon = "📦"
+            $whatdo = "$tdisp を別の場所にコピーしようとしています。"
+            break
+        }
+        '^(curl|wget|invoke-webrequest|iwr|invoke-restmethod|irm|nc|ncat|netcat)$' {
+            $icon = "🌐"
+            if (-not [string]::IsNullOrEmpty($target)) {
+                $whatdo = "$target とインターネット通信（ダウンロードまたは送信）をしようとしています。"
+            } else {
+                $whatdo = "インターネット通信（ダウンロードまたは送信）をしようとしています。"
+            }
+            break
+        }
+        '^(npm|pip|pip3|winget|choco|brew|apt|apt-get|yum|gem)$' {
+            if ($primary -match '(^|\s)(install|add|i)(\s|$)') {
+                $icon = "📥"
+                $pkg = ""
+                if ($toks.Count -ge 3) {
+                    for ($j = 2; $j -lt $toks.Count; $j++) {
+                        if (-not $toks[$j].StartsWith('-')) { $pkg = $toks[$j]; break }
+                    }
+                }
+                if ([string]::IsNullOrEmpty($pkg)) { $pkg = "パッケージ" }
+                $whatdo = "$pkg をインターネットからインストール（PC に新しいプログラムを追加）しようとしています。"
+            } else {
+                $icon = "⚙️"
+                $whatdo = "$verb コマンドを実行しようとしています。"
+            }
+            break
+        }
+        '^(bash|sh|zsh|python|python3|node|source|\.|invoke-expression|iex|start-process)$' {
+            $icon = "⚙️"
+            $whatdo = "$tdisp を実行しようとしています。（別のプログラムやスクリプトを動かします）"
+            break
+        }
+        '^(chmod|chown|icacls|set-acl|set-itemproperty)$' {
+            $icon = "🔑"
+            $whatdo = "$tdisp のアクセス権限や設定を変更しようとしています。"
+            break
+        }
+        '^(cd|set-location|sl|pushd)$' {
+            $icon = "📁"
+            $whatdo = "作業フォルダを $tdisp に移動しようとしています。"
+            break
+        }
+        '^(grep|findstr|select-string|sls|find)$' {
+            $icon = "🔍"
+            $whatdo = "$tdisp から文字列やファイルを検索しようとしています。"
+            break
+        }
+        default {
+            # 未知コマンド: 嘘解説をせず空のままフォールバックさせる
+            $whatdo = ""
+        }
+    }
+
+    if (-not [string]::IsNullOrEmpty($whatdo) -and -not [string]::IsNullOrEmpty($extra)) {
+        $whatdo = $whatdo + $extra
+    }
+    return [PSCustomObject]@{ WhatDo = $whatdo; Icon = $icon; Danger = $danger }
+}
+
 # ツール別に「AI が実際にしようとしていること」の文字列を返す。
 # 戻り値: [PSCustomObject]@{ Text=...; Label=... }
 # 800字超は安全に切り捨て。XSS対策は呼び出し側(Write-NowHtml)で行う。
@@ -292,6 +481,10 @@ function Get-NowHtmlHead([int]$Refresh) {
     [void]$sb.Append(".action{background:#12161f;border:1px solid #2a3040;border-radius:8px;padding:12px 14px;margin:10px 0 14px}`n")
     [void]$sb.Append(".action-label{font-size:12px;color:#8ab;margin-bottom:6px;font-weight:600}`n")
     [void]$sb.Append(".action-cmd{margin:0;font-family:monospace,'Courier New',Courier;font-size:14px;color:#f0c080;white-space:pre-wrap;word-break:break-all;overflow-wrap:anywhere}`n")
+    [void]$sb.Append(".whatdo{background:#14211a;border:1px solid #2a4030;border-radius:8px;padding:12px 14px;margin:0 0 14px}`n")
+    [void]$sb.Append(".whatdo-label{font-size:13px;color:#7fd6a0;margin-bottom:6px;font-weight:700}`n")
+    [void]$sb.Append(".whatdo-body{margin:0;font-size:15px;color:#e6e6e6;line-height:1.7}`n")
+    [void]$sb.Append(".whatdo-danger{margin:8px 0 0;font-size:14px;color:#ffb4ad;font-weight:700}`n")
     [void]$sb.Append("</style>`n")
     # JS リロード: meta refresh が file:// で効かないブラウザ向けの補完。
     # ユーザ値を JS 内に一切流し込まない (XSS 不発生)。
@@ -369,6 +562,23 @@ function Write-NowHtml {
             [void]$sb.Append("<div class=`"action-label`">🤖 AI がしようとしていること（" + (ConvertTo-HtmlEscaped $ActionLabel) + "）</div>`n")
             [void]$sb.Append("<pre class=`"action-cmd`">" + (ConvertTo-HtmlEscaped $ActionText) + "</pre>`n")
             [void]$sb.Append("</div>`n")
+            # 「これは何をする？」具体解説（bash モードのみ・決定的・LLM不要）。
+            if ($Mode -eq "bash") {
+                $expl = Get-CommandExplanation $ActionText
+                if (-not [string]::IsNullOrEmpty($expl.WhatDo)) {
+                    [void]$sb.Append("<div class=`"whatdo`">`n")
+                    [void]$sb.Append("<div class=`"whatdo-label`">" + (ConvertTo-HtmlEscaped $expl.Icon) + " これは何をする？</div>`n")
+                    [void]$sb.Append("<p class=`"whatdo-body`">" + (ConvertTo-HtmlEscaped $expl.WhatDo) + "</p>`n")
+                    if (-not [string]::IsNullOrEmpty($expl.Danger)) {
+                        [void]$sb.Append("<p class=`"whatdo-danger`">" + (ConvertTo-HtmlEscaped $expl.Danger) + "</p>`n")
+                    }
+                    [void]$sb.Append("</div>`n")
+                } elseif (-not [string]::IsNullOrEmpty($expl.Danger)) {
+                    [void]$sb.Append("<div class=`"whatdo`">`n")
+                    [void]$sb.Append("<p class=`"whatdo-danger`">" + (ConvertTo-HtmlEscaped $expl.Danger) + "</p>`n")
+                    [void]$sb.Append("</div>`n")
+                }
+            }
         }
         [void]$sb.Append($cardHtml)
         [void]$sb.Append("</div>`n")
@@ -429,6 +639,18 @@ function Write-NowCard {
     $sep = ("─" * 41)
     # 実際の操作を最上部に表示（コンソール monitor が読む）。
     $actionLine = if (-not [string]::IsNullOrWhiteSpace($actionText)) { "`n▶ ${actionLabel}:`n  $actionText`n" } else { "" }
+    # 「これは何をする？」具体解説（bash モードのみ）。
+    if (-not [string]::IsNullOrWhiteSpace($actionText) -and $Mode -eq "bash") {
+        try {
+            $expl = Get-CommandExplanation $actionText
+            if (-not [string]::IsNullOrEmpty($expl.WhatDo)) {
+                $actionLine = $actionLine + "$($expl.Icon) これは何をする？`n  $($expl.WhatDo)`n"
+            }
+            if (-not [string]::IsNullOrEmpty($expl.Danger)) {
+                $actionLine = $actionLine + "  $($expl.Danger)`n"
+            }
+        } catch { }
+    }
     $header = "$icon $title  (risk: $risk)`n$sep`n[$ts  tool=$Mode  card=$CardId]$actionLine`n"
     Set-Content -LiteralPath $out -Value ($header + $body) -Encoding UTF8
 

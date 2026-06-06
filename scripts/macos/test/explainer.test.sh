@@ -214,6 +214,107 @@ else
   ng "T10: placeholder does not overwrite existing now.html (F-I)"
 fi
 
+# --- T11: 一覧（Get-ChildItem 単独）→ 「現在のフォルダ」 ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"Get-ChildItem"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'これは何をする' "$html" && grep -q '現在のフォルダ' "$html" && grep -q '一覧' "$html"; then
+  ok "T11: Get-ChildItem alone -> 一覧/現在のフォルダ"
+else
+  ng "T11: Get-ChildItem alone -> 一覧/現在のフォルダ"
+fi
+
+# --- T12: 一覧（対象パスあり）→ パスが具体表示 ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"Get-ChildItem -Path C:\\\\Users\\\\foo\\\\Temp"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'これは何をする' "$html" && grep -q 'Users' "$html" && grep -q '一覧' "$html"; then
+  ok "T12: Get-ChildItem -Path -> 対象パス具体表示"
+else
+  ng "T12: Get-ChildItem -Path -> 対象パス具体表示 ($(grep -o 'whatdo-body[^<]*<[^>]*>[^<]*' "$html" 2>/dev/null | head -1))"
+fi
+
+# --- T13: 読む（cat foo.txt）→ 読む・対象=foo.txt ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'これは何をする' "$html" && grep -q 'foo.txt' "$html" && grep -q '読' "$html"; then
+  ok "T13: cat foo.txt -> 読む/対象=foo.txt"
+else
+  ng "T13: cat foo.txt -> 読む/対象=foo.txt"
+fi
+
+# --- T14: 削除（Remove-Item -Recurse）→ 削除 + 完全削除警告（危険語）---
+#  ※安全フック対策: 実 rm -rf は使わず PowerShell 系で確認
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"Remove-Item -Recurse build"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '削除' "$html" && grep -q 'whatdo-danger' "$html" && grep -q '完全削除' "$html"; then
+  ok "T14: Remove-Item -Recurse -> 削除 + 完全削除警告"
+else
+  ng "T14: Remove-Item -Recurse -> 削除 + 完全削除警告"
+fi
+
+# --- T15: 通信（curl URL）→ 通信・対象=URL ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"curl https://example.com/api"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'これは何をする' "$html" && grep -q 'example.com' "$html" && grep -q '通信' "$html"; then
+  ok "T15: curl URL -> 通信/対象=URL"
+else
+  ng "T15: curl URL -> 通信/対象=URL"
+fi
+
+# --- T16: 未知コマンド → フォールバック（嘘解説なし＝whatdo セクションを出さない）---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"xyzzy --foo bar"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'xyzzy' "$html" && ! grep -q '<p class="whatdo-body"' "$html"; then
+  ok "T16: unknown command -> no fake explanation (fallback)"
+else
+  ng "T16: unknown command -> no fake explanation (fallback)"
+fi
+
+# --- T17: 権限昇格（sudo）→ 危険語強調（主コマンドに関わらず）---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"sudo ls /etc"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'whatdo-danger' "$html" && grep -q '権限' "$html"; then
+  ok "T17: sudo -> 権限昇格警告"
+else
+  ng "T17: sudo -> 権限昇格警告"
+fi
+
+# --- T18: XSS — 対象パスに <script> → エスケープされる（whatdo セクション内）---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat <script>x</script>"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '&lt;script&gt;' "$html" && ! grep -q '<script>x' "$html"; then
+  ok "T18: whatdo target XSS is escaped"
+else
+  ng "T18: whatdo target XSS is escaped"
+fi
+
+# --- T19: パイプライン → 「ほかにも処理が続きます」が添えられる ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt | grep abc"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'foo.txt' "$html" && grep -q 'ほかにも処理が続きます' "$html"; then
+  ok "T19: pipeline -> 'ほかにも処理が続きます' note"
+else
+  ng "T19: pipeline -> 'ほかにも処理が続きます' note"
+fi
+
+# --- T20: write モードでは whatdo（bash 専用）を出さない（既存挙動維持）---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/tmp/x.txt","content":"hi"}}'
+run_explain_with_json "write" "$json"
+if [ -f "$html" ] && grep -q '/tmp/x.txt' "$html" && ! grep -q '<div class="whatdo-label"' "$html"; then
+  ok "T20: write mode does not emit bash whatdo section"
+else
+  ng "T20: write mode does not emit bash whatdo section"
+fi
+
 echo ""
 echo "explainer.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

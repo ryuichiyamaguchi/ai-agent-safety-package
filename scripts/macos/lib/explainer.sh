@@ -128,6 +128,236 @@ extract_action_text() {
   ACTION_LABEL="$label"
 }
 
+# ----- コマンド解説エンジン (パターン式・LLM不要・オフライン・決定的) ----
+# 入力: 実コマンド文字列。出力はグローバル変数:
+#   EXPLAIN_WHATDO  平易な日本語の「何をする？」本文（未知コマンドは空）
+#   EXPLAIN_ICON    セクション見出しアイコン（既定 📂）
+#   EXPLAIN_DANGER  危険語が含まれる時の強調1行（無ければ空）
+# 嘘解説を避けるため、語彙に無い動詞は EXPLAIN_WHATDO を空にしてフォールバックさせる。
+EXPLAIN_WHATDO=""
+EXPLAIN_ICON="📂"
+EXPLAIN_DANGER=""
+
+# 複合コマンドの主コマンド（先頭セグメント）を取り出す。
+# `|`/`;`/`&&`/`||` の手前までを主コマンドとみなす。前後の空白を除去。
+_explain_primary_segment() {
+  printf '%s' "$1" | awk '
+    {
+      seg=$0
+      # 最初の区切り (| ; && ||) の位置で切る
+      n=split(seg, _x, "")  # noop to keep awk happy
+      # 文字走査で最初の区切りを探す
+      out=""
+      i=1
+      L=length(seg)
+      while (i<=L) {
+        c=substr(seg,i,1)
+        c2=substr(seg,i,2)
+        if (c=="|" || c==";") break
+        if (c2=="&&" || c2=="||") break
+        out=out c
+        i++
+      }
+      gsub(/^[[:space:]]+/, "", out)
+      gsub(/[[:space:]]+$/, "", out)
+      print out
+    }
+  '
+}
+
+# 主コマンドから先頭の sudo を剥がす（sudo 自体は危険語検知側で強調済み）。
+# 剥がした後の文字列を返すことで、verb/target 抽出を実コマンド基準に揃える。
+_explain_strip_sudo() {
+  printf '%s' "$1" | awk '{ if (tolower($1)=="sudo" && NF>=2) { $1=""; sub(/^[[:space:]]+/, ""); print } else print }'
+}
+
+# 主コマンドから先頭の動詞/cmdlet トークンを取り出す（小文字化はしない）。
+_explain_verb() {
+  printf '%s' "$1" | awk '{ print $1 }'
+}
+
+# 主コマンドから最初の「対象」を抽出する。
+#   - http(s):// で始まる語があればそれ（URL 優先）
+#   - PowerShell 風 -Path/-LiteralPath/-Destination/-Url <値> の値
+#   - それ以外は最初の非フラグ位置引数（- 始まりを除く・動詞自身を除く）
+# $env:... や $var はそのまま返す（展開しない）。取れなければ空。
+_explain_target() {
+  printf '%s' "$1" | awk '
+    {
+      # URL を最優先で探す
+      for (i=1;i<=NF;i++) {
+        if ($i ~ /^https?:\/\//) { print $i; exit }
+      }
+      # 名前付きパラメータ -Path/-LiteralPath/-Destination/-Url の次トークン
+      for (i=2;i<=NF;i++) {
+        lf=tolower($i)
+        if (lf=="-path" || lf=="-literalpath" || lf=="-destination" || lf=="-url" || lf=="-uri") {
+          if (i+1<=NF) { print $(i+1); exit }
+        }
+      }
+      # 最初の非フラグ位置引数（動詞 $1 はスキップ、- 始まりはスキップ）
+      for (i=2;i<=NF;i++) {
+        if (substr($i,1,1)=="-") continue
+        # PowerShell の値が = で来る場合 (-Path=foo) は別処理しない（簡略）
+        print $i; exit
+      }
+      print ""
+    }
+  '
+}
+
+# 対象表示用文字列を整形。空なら「現在のフォルダ」。
+_explain_target_display() {
+  local t="$1"
+  if [ -z "$t" ]; then
+    printf '現在のフォルダ'
+  else
+    printf '%s' "$t"
+  fi
+}
+
+# 危険語（削除-Recurse/-rf、sudo、権限昇格）を全文から検知して
+# EXPLAIN_DANGER に強調1行をセットする。主コマンドが何であれ拾う。
+_explain_detect_danger() {
+  local full="$1" lc
+  lc="$(printf '%s' "$full" | tr '[:upper:]' '[:lower:]')"
+  EXPLAIN_DANGER=""
+  # sudo / 権限昇格
+  case " $lc " in
+    *" sudo "*|*"runas"*|*"start-process"*"-verb runas"*)
+      EXPLAIN_DANGER="⚠️ 管理者権限への昇格を含みます（PC全体に影響する可能性）" ; return ;;
+  esac
+  # 再帰削除（rm -rf / -r / Remove-Item -Recurse）
+  if printf '%s' "$lc" | grep -Eq -- '(\brm\b[^|;]*[[:space:]]-[a-z]*r|[[:space:]]-recurse|[[:space:]]-rf|[[:space:]]-fr|remove-item[^|;]*-recurse)'; then
+    EXPLAIN_DANGER="⚠️ フォルダごとの完全削除（復元できません）を含みます"
+    return
+  fi
+}
+
+# メイン: 実コマンド文字列を解説する。
+explain_command() {
+  local full="$1"
+  EXPLAIN_WHATDO=""
+  EXPLAIN_ICON="📂"
+  EXPLAIN_DANGER=""
+  [ -z "$full" ] && return 0
+
+  # 危険語は主コマンドに関わらず全文から検知
+  _explain_detect_danger "$full"
+
+  local primary verb verb_lc target tdisp extra
+  primary="$(_explain_primary_segment "$full")"
+  primary="$(_explain_strip_sudo "$primary")"
+  verb="$(_explain_verb "$primary")"
+  verb_lc="$(printf '%s' "$verb" | tr '[:upper:]' '[:lower:]')"
+  target="$(_explain_target "$primary")"
+  tdisp="$(_explain_target_display "$target")"
+
+  # 複合（パイプ/連結）が含まれていたら一言添える
+  extra=""
+  if printf '%s' "$full" | grep -Eq -- '(\||;|&&|\|\|)'; then
+    extra="（ほかにも処理が続きます。全文は上のコマンドを確認してください）"
+  fi
+
+  case "$verb_lc" in
+    # 一覧
+    ls|dir|get-childitem|gci|ll|la)
+      EXPLAIN_ICON="📂"
+      EXPLAIN_WHATDO="${tdisp} の中のファイル・フォルダ一覧を見ようとしています。（中身を見るだけ。削除や書き換えはしません）"
+      ;;
+    # 読む
+    cat|head|tail|less|more|type|get-content|gc)
+      EXPLAIN_ICON="📄"
+      EXPLAIN_WHATDO="${tdisp} の中身を読もうとしています。（読むだけ。書き換えはしません）"
+      ;;
+    # 削除
+    rm|rmdir|del|erase|remove-item|ri)
+      EXPLAIN_ICON="🗑"
+      EXPLAIN_WHATDO="${tdisp} を削除しようとしています。"
+      ;;
+    # 書く/作る
+    touch|new-item|set-content|out-file|add-content|tee)
+      EXPLAIN_ICON="✏️"
+      EXPLAIN_WHATDO="${tdisp} を作成または書き換えようとしています。"
+      ;;
+    echo|printf)
+      # echo/printf は単独表示。> リダイレクトがあればファイル書き込み扱い。
+      if printf '%s' "$primary" | grep -Eq -- '>'; then
+        local redir
+        redir="$(printf '%s' "$primary" | sed -nE 's/.*>>?[[:space:]]*([^[:space:]|;]+).*/\1/p' | head -n1)"
+        [ -z "$redir" ] && redir="ファイル"
+        EXPLAIN_ICON="✏️"
+        EXPLAIN_WHATDO="${redir} に文字を書き込もうとしています。"
+      else
+        EXPLAIN_ICON="📄"
+        EXPLAIN_WHATDO="画面に文字を表示しようとしています。（表示するだけ）"
+      fi
+      ;;
+    # 移動/コピー
+    mv|move|move-item)
+      EXPLAIN_ICON="📦"
+      EXPLAIN_WHATDO="${tdisp} を別の場所に移動しようとしています。"
+      ;;
+    cp|copy|copy-item)
+      EXPLAIN_ICON="📦"
+      EXPLAIN_WHATDO="${tdisp} を別の場所にコピーしようとしています。"
+      ;;
+    # ダウンロード/通信
+    curl|wget|invoke-webrequest|iwr|invoke-restmethod|irm|nc|ncat|netcat)
+      EXPLAIN_ICON="🌐"
+      if [ -n "$target" ]; then
+        EXPLAIN_WHATDO="${target} とインターネット通信（ダウンロードまたは送信）をしようとしています。"
+      else
+        EXPLAIN_WHATDO="インターネット通信（ダウンロードまたは送信）をしようとしています。"
+      fi
+      ;;
+    # インストール
+    npm|pip|pip3|winget|choco|brew|apt|apt-get|yum|gem)
+      # install サブコマンドを含む時のみインストール解説
+      if printf '%s' "$primary" | grep -Eqi -- '(^|[[:space:]])(install|add|i)([[:space:]]|$)'; then
+        EXPLAIN_ICON="📥"
+        local pkg
+        pkg="$(printf '%s' "$primary" | awk '{for(i=3;i<=NF;i++){if(substr($i,1,1)!="-"){print $i;exit}}}')"
+        [ -z "$pkg" ] && pkg="パッケージ"
+        EXPLAIN_WHATDO="${pkg} をインターネットからインストール（PC に新しいプログラムを追加）しようとしています。"
+      else
+        EXPLAIN_ICON="⚙️"
+        EXPLAIN_WHATDO="${verb} コマンドを実行しようとしています。"
+      fi
+      ;;
+    # 実行
+    bash|sh|zsh|python|python3|node|source|.|invoke-expression|iex|start-process)
+      EXPLAIN_ICON="⚙️"
+      EXPLAIN_WHATDO="${tdisp} を実行しようとしています。（別のプログラムやスクリプトを動かします）"
+      ;;
+    # 権限変更
+    chmod|chown|icacls|set-acl|set-itemproperty)
+      EXPLAIN_ICON="🔑"
+      EXPLAIN_WHATDO="${tdisp} のアクセス権限や設定を変更しようとしています。"
+      ;;
+    # 移動(cd)
+    cd|set-location|sl|pushd)
+      EXPLAIN_ICON="📁"
+      EXPLAIN_WHATDO="作業フォルダを ${tdisp} に移動しようとしています。"
+      ;;
+    # 検索
+    grep|findstr|select-string|sls|find)
+      EXPLAIN_ICON="🔍"
+      EXPLAIN_WHATDO="${tdisp} から文字列やファイルを検索しようとしています。"
+      ;;
+    *)
+      # 未知コマンド: 嘘解説をせず空のままにしてフォールバックさせる
+      EXPLAIN_WHATDO=""
+      ;;
+  esac
+
+  # 複合の一言を本文末尾に添える（本文があるときだけ）
+  if [ -n "$EXPLAIN_WHATDO" ] && [ -n "$extra" ]; then
+    EXPLAIN_WHATDO="${EXPLAIN_WHATDO}${extra}"
+  fi
+  return 0
+}
+
 # ----- index.tsv 走査 -----------------------------------------------------
 
 # 引数: target_text
@@ -320,6 +550,10 @@ now_html_head() {
   printf '.action{background:#12161f;border:1px solid #2a3040;border-radius:8px;padding:12px 14px;margin:10px 0 14px}\n'
   printf '.action-label{font-size:12px;color:#8ab;margin-bottom:6px;font-weight:600}\n'
   printf '.action-cmd{margin:0;font-family:monospace,"Courier New",Courier;font-size:14px;color:#f0c080;white-space:pre-wrap;word-break:break-all;overflow-wrap:anywhere}\n'
+  printf '.whatdo{background:#14211a;border:1px solid #2a4030;border-radius:8px;padding:12px 14px;margin:0 0 14px}\n'
+  printf '.whatdo-label{font-size:13px;color:#7fd6a0;margin-bottom:6px;font-weight:700}\n'
+  printf '.whatdo-body{margin:0;font-size:15px;color:#e6e6e6;line-height:1.7}\n'
+  printf '.whatdo-danger{margin:8px 0 0;font-size:14px;color:#ffb4ad;font-weight:700}\n'
   printf '</style>\n'
   # JS リロード: meta refresh が file:// で効かないブラウザ向けの補完。
   # ユーザ値を JS 内に一切流し込まない (XSS 不発生)。
@@ -393,6 +627,24 @@ write_now_html() {
       printf '<div class="action-label">🤖 AI がしようとしていること（%s）</div>\n' "$(html_escape "$action_label")"
       printf '<pre class="action-cmd">%s</pre>\n' "$(html_escape "$action_text")"
       printf '</div>\n'
+      # 「これは何をする？」具体解説（bash モードのみ・決定的・LLM不要）。
+      if [ "${MODE:-}" = "bash" ]; then
+        explain_command "$action_text" 2>/dev/null || true
+        if [ -n "$EXPLAIN_WHATDO" ]; then
+          printf '<div class="whatdo">\n'
+          printf '<div class="whatdo-label">%s これは何をする？</div>\n' "$(html_escape "$EXPLAIN_ICON")"
+          printf '<p class="whatdo-body">%s</p>\n' "$(html_escape "$EXPLAIN_WHATDO")"
+          if [ -n "$EXPLAIN_DANGER" ]; then
+            printf '<p class="whatdo-danger">%s</p>\n' "$(html_escape "$EXPLAIN_DANGER")"
+          fi
+          printf '</div>\n'
+        elif [ -n "$EXPLAIN_DANGER" ]; then
+          # 未知コマンドでも危険語があれば強調だけは出す
+          printf '<div class="whatdo">\n'
+          printf '<p class="whatdo-danger">%s</p>\n' "$(html_escape "$EXPLAIN_DANGER")"
+          printf '</div>\n'
+        fi
+      fi
     fi
     if [ -r "$body_html_path" ]; then
       card_md_to_html < "$body_html_path"
@@ -457,6 +709,14 @@ write_now_card() {
     # 実際の操作を最上部に表示（コンソール monitor が読む）。
     if [ -n "$action_text" ]; then
       printf '\n▶ %s:\n  %s\n' "$action_label" "$action_text"
+      # 「これは何をする？」具体解説（bash モードのみ）。
+      if [ "$MODE" = "bash" ]; then
+        explain_command "$action_text" 2>/dev/null || true
+        if [ -n "$EXPLAIN_WHATDO" ]; then
+          printf '%s これは何をする？\n  %s\n' "$EXPLAIN_ICON" "$EXPLAIN_WHATDO"
+        fi
+        [ -n "$EXPLAIN_DANGER" ] && printf '  %s\n' "$EXPLAIN_DANGER"
+      fi
     fi
     printf '\n'
     strip_frontmatter "$body_path"
