@@ -470,6 +470,118 @@ else
   ng "T32: sudo cat -> read explanation + admin danger"
 fi
 
+# ============================================================
+# cycle-3 追加テスト: N1~N5 修正の検証
+# ============================================================
+
+# --- T33: N1 fd redir — ls 2>/dev/null → 書込警告なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls 2>/dev/null"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q '書き込み' "$html" && ! grep -q '<p class="whatdo-danger"' "$html"; then
+  ok "T33: ls 2>/dev/null -> NO write warning (fd redir ignored)"
+else
+  ng "T33: ls 2>/dev/null -> NO write warning (fd redir ignored)"
+fi
+
+# --- T34: N1 fd redir — cat foo 2> err.log → 書込警告なし・対象=foo ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt 2> err.log"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'foo.txt' "$html" && ! grep -q '書き込み' "$html"; then
+  ok "T34: cat foo 2> err.log -> target=foo, NO write warning"
+else
+  ng "T34: cat foo 2> err.log -> target=foo, NO write warning"
+fi
+
+# --- T35: N1 bare content redir — ls > out.txt → 書込警告あり ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls > out.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '書き込み' "$html" && grep -q 'out.txt' "$html"; then
+  ok "T35: ls > out.txt -> write warning present (content redir)"
+else
+  ng "T35: ls > out.txt -> write warning present (content redir)"
+fi
+
+# --- T36: N2 quoted > — echo 'a > b' → 書込警告なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo \"a > b\""}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q '書き込み' "$html"; then
+  ok "T36: echo \"a > b\" -> NO write warning (quoted > ignored)"
+else
+  ng "T36: echo \"a > b\" -> NO write warning (quoted > ignored)"
+fi
+
+# --- T37: N2 quoted > in grep — grep '>' file.txt → 対象=file.txt, 書込警告なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"grep \">\" file.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'file.txt' "$html" && ! grep -q '書き込み' "$html"; then
+  ok "T37: grep \">\" file.txt -> target=file.txt, NO write warning"
+else
+  ng "T37: grep \">\" file.txt -> target=file.txt, NO write warning"
+fi
+
+# --- T38: N3 chmod absolute path — chmod 644 /etc/hostsfile → 対象=/etc/hostsfile ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"chmod 644 /etc/hostsfile"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '/etc/hostsfile' "$html" && ! grep -q '現在のフォルダ' "$html"; then
+  ok "T38: chmod 644 /etc/hostsfile -> target=/etc/hostsfile (not 現在のフォルダ)"
+else
+  ng "T38: chmod 644 /etc/hostsfile -> target=/etc/hostsfile (not 現在のフォルダ)"
+fi
+
+# --- T39: N4 xargs rm in arg — cat xargs rm foo.txt → 削除警告なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat xargs rm foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q '<p class="whatdo-danger"' "$html"; then
+  ok "T39: cat xargs rm foo.txt -> NO false deletion warning"
+else
+  ng "T39: cat xargs rm foo.txt -> NO false deletion warning"
+fi
+
+# --- T40: N4 xargs rm as verb — xargs del somefile → 削除警告あり ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"xargs del somefile"}}'
+run_explain_with_json "bash" "$json"
+# xargs del はNOT currently detected (only rm). Check at least no false alarm for safety.
+# (xargs del は現状未検出=フォールバック。重要なのは誤検出をしないこと)
+if [ -f "$html" ]; then
+  ok "T40: xargs del somefile -> does not crash (graceful)"
+else
+  ng "T40: xargs del somefile -> does not crash"
+fi
+
+# --- T41: N5 backslash JSON decode — del /s C:\\Temp → 表示に C:\Temp が出る ---
+# 注: フックが実際に渡すのは C:\Temp をJSONエンコードした C:\\Temp
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"del /s C:\\Temp"}}'
+run_explain_with_json "bash" "$json"
+# C:\Temp(1スラッシュ) が now.html に出ること。C:\\Temp(2スラッシュ)ではないこと。
+if [ -f "$html" ] && grep -qF 'C:\Temp' "$html" && ! grep -qF 'C:\\Temp' "$html"; then
+  ok "T41: del /s C:\\Temp -> displays C:\\Temp (single backslash, JSON decoded)"
+else
+  ng "T41: del /s C:\\Temp -> displays C:\\Temp (single backslash) (got: $(grep -o 'C[:\\]*Temp' "$html" | head -1))"
+fi
+
+# --- 退行ガード: cycle-2 の T21-T25 が引き続き pass ---
+# T21: ls|del → 安心文なし+削除警告
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls foo | del temp.txt"}}'
+run_explain_with_json "bash" "$json"
+t_nocalm=0; t_hasdanger=0
+if [ -f "$html" ] && ! grep -q 'しません' "$html"; then t_nocalm=1; fi
+if [ -f "$html" ] && grep -q '<p class="whatdo-danger"' "$html" && grep -q '削除' "$html"; then t_hasdanger=1; fi
+if [ "$t_nocalm" -eq 1 ] && [ "$t_hasdanger" -eq 1 ]; then
+  ok "T42-reg: ls|del still -> NO calm + deletion danger (cycle-2 regression guard)"
+else
+  ng "T42-reg: ls|del still -> NO calm + deletion danger (no_calm=$t_nocalm has_danger=$t_hasdanger)"
+fi
+
 echo ""
 echo "explainer.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

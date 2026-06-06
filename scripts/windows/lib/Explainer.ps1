@@ -159,14 +159,56 @@ function Remove-SudoPrefix([string]$Seg) {
     return $Seg
 }
 
-# セグメントに > or >> リダイレクトが含まれるか判定。
-function Test-HasRedirect([string]$Seg) {
-    return ($Seg -match '>>?')
+# 引用符スパン内テキストをスペースに置換(redir 検出の前処理用)。
+function Remove-QuotedContent([string]$S) {
+    $r = [System.Text.StringBuilder]::new()
+    $inDq = $false; $inSq = $false
+    for ($i = 0; $i -lt $S.Length; $i++) {
+        $c = $S[$i]
+        if ($c -eq '"' -and -not $inSq) { $inDq = -not $inDq; [void]$r.Append($c); continue }
+        if ($c -eq "'" -and -not $inDq) { $inSq = -not $inSq; [void]$r.Append($c); continue }
+        if ($inDq -or $inSq) { [void]$r.Append(' '); continue }
+        [void]$r.Append($c)
+    }
+    return $r.ToString()
 }
 
-# 全文からリダイレクト先(最初の > or >> の被演算子)を取得。なければ空。
+# fd リダイレクトトークン (2>/dev/null, 1>foo, &>bar) かどうかを判定。
+function Test-FdRedir([string]$Token) {
+    return ($Token -match '^[0-9]>>?' -or $Token -match '^&>>?')
+}
+
+# セグメントに content-write リダイレクト(> or >>)が含まれるか判定。
+# fd リダイレクト(2> 1> &>)と引用符内 > は除外。
+function Test-HasRedirect([string]$Seg) {
+    $stripped = Remove-QuotedContent $Seg
+    $toks = $stripped -split '\s+' | Where-Object { $_ -ne "" }
+    foreach ($t in $toks) {
+        if (Test-FdRedir $t) { continue }
+        if ($t -match '^>>?$' -or ($t -match '^>>?[^>]' -and $t -notmatch '^[0-9]' -and $t -notmatch '^&')) {
+            return $true
+        }
+    }
+    return $false
+}
+
+# 全文からリダイレクト先(最初の content-write > or >> の被演算子)を取得。なければ空。
+# fd リダイレクト(2> 1> &>)と引用符内 > は除外。
 function Get-RedirectTarget([string]$Full) {
-    if ($Full -match '>>?\s*([^\s>|;&]+)') { return $matches[1] }
+    $stripped = Remove-QuotedContent $Full
+    $toks = $stripped -split '\s+' | Where-Object { $_ -ne "" }
+    for ($i = 0; $i -lt $toks.Count; $i++) {
+        $t = $toks[$i]
+        if (Test-FdRedir $t) { continue }
+        # standalone >/>>/
+        if ($t -match '^>>?$' -and -not (Test-FdRedir $t)) {
+            if ($i + 1 -lt $toks.Count) { return $toks[$i + 1] }
+        }
+        # >>filepath 形式 (>>foo) — fd 以外
+        if ($t -match '^(>>?)([^>].*)$' -and -not (Test-FdRedir $t)) {
+            return $Matches[2]
+        }
+    }
     return ""
 }
 
@@ -178,22 +220,29 @@ function Get-RedirectTarget([string]$Full) {
 # - chmod/chown は mode(数字/記号)除外
 # - > 演算子・直後トークンを除外
 function Get-ExplainTargetFromCmd([string]$Primary, [string]$Category) {
+    # 引用符内の > をスペースに置換したトークン列 (redir 除外判定用)
+    $stripped = Remove-QuotedContent $Primary
+    $sToks = $stripped -split '\s+' | Where-Object { $_ -ne "" }
     $allToks = $Primary -split '\s+' | Where-Object { $_ -ne "" }
     if ($allToks.Count -eq 0) { return "" }
 
-    # リダイレクト演算子とその後トークンのインデックスを収集
+    # redir 除外インデックス (stripped トークン列で判定・orig と同インデックス)
     $redirIdx = @{}
-    for ($i = 0; $i -lt $allToks.Count; $i++) {
-        if ($allToks[$i] -match '^>>?$') {
+    for ($i = 0; $i -lt $sToks.Count; $i++) {
+        $t = $sToks[$i]
+        # fd redir (2>/dev/null, &>foo) は除外対象としてマーク
+        if (Test-FdRedir $t) { $redirIdx[$i] = $true; continue }
+        if ($t -match '^>>?$') {
             $redirIdx[$i] = $true
-            if ($i + 1 -lt $allToks.Count) { $redirIdx[$i + 1] = $true }
+            if ($i + 1 -lt $sToks.Count) { $redirIdx[$i + 1] = $true }
         }
-        if ($allToks[$i] -match '^>>?[^>]') { $redirIdx[$i] = $true }  # >>foo 形式
+        if ($t -match '^>>?[^>]' -and $t -notmatch '^[0-9]' -and $t -notmatch '^&') { $redirIdx[$i] = $true }
     }
 
-    # URL 最優先
-    foreach ($t in $allToks) {
-        if ($t -match '^https?://') { return $t }
+    # URL 最優先 (orig から返す)
+    for ($i = 0; $i -lt $allToks.Count; $i++) {
+        if ($redirIdx[$i]) { continue }
+        if ($allToks[$i] -match '^https?://') { return $allToks[$i] }
     }
     # 名前付き -Path/-LiteralPath/-Destination/-Url
     for ($i = 1; $i -lt $allToks.Count; $i++) {
@@ -205,19 +254,22 @@ function Get-ExplainTargetFromCmd([string]$Primary, [string]$Category) {
             }
         }
     }
-    # 位置引数
+    # 位置引数 (引用符トークン自体はスキップ)
     $skip = 0
     $skipCats = @('grep','findstr','select-string','sls')
-    if ($skipCats -contains $Category) { $skip = 1 }  # 第1位置引数=パターン除外
+    if ($skipCats -contains $Category) { $skip = 1 }
     $pos = 0
     for ($i = 1; $i -lt $allToks.Count; $i++) {
         if ($redirIdx[$i]) { continue }
         $t = $allToks[$i]
-        if ($t.StartsWith('-')) { continue }  # - フラグ除外
-        # del の / スイッチ除外
-        if ($Category -eq 'del' -and $t.StartsWith('/')) { continue }
-        # chmod/chown の mode 除外 (数字/記号のみ)
-        if (($Category -eq 'chmod' -or $Category -eq 'chown') -and ($t -match '^\d+$' -or $t -match '^[ugoa]*[+\-=][rwxst,ugoa]*')) { continue }
+        $ts = if ($i -lt $sToks.Count) { $sToks[$i] } else { $t }
+        if ($ts.StartsWith('-')) { continue }
+        if ($Category -eq 'del' -and $ts.StartsWith('/')) { continue }
+        # chmod/chown の mode 除外 (数字のみ or ugoa+rwx 形式・絶対パスは除外しない)
+        if (($Category -eq 'chmod' -or $Category -eq 'chown') -and -not $ts.StartsWith('/') -and -not $ts.StartsWith('~') -and
+            ($ts -match '^\d+$' -or $ts -match '^[ugoa]*[+\-=][rwxst,ugoa]+$')) { continue }
+        # 引用符トークンが stripped でスペースに変換された場合はスキップ
+        if ($ts -match '^\s*$') { $pos++; if ($pos -le $skip) { $skip++ }; continue }
         $pos++
         if ($pos -le $skip) { continue }
         return $t
@@ -267,10 +319,10 @@ function Get-CommandFlags([string]$Full) {
                 $flags.Perm = $true
             }
         }
-        # xargs rm
-        if ($segLc -match '\bxargs\b.*\brm\b') {
+        # xargs rm: xargs が先頭 verb の時のみ削除扱い(引数中に xargs rm が現れるだけでは検出しない)
+        if ($vl -eq 'xargs' -and $segLc -match '\bxargs\b\s+(-[^\s]+\s+)*rm\b') {
             $flags.Delete = $true
-            if ($segLc -match '\bxargs\b.*\brm\b.*\s-[a-z]*r') { $flags.DeleteRecurse = $true }
+            if ($segLc -match '\bxargs\b\s+(-[^\s]+\s+)*rm\b.*\s-[a-z]*r') { $flags.DeleteRecurse = $true }
         }
         # find -delete
         if ($vl -eq 'find' -and $segLc -match '\s-delete\b') { $flags.Delete = $true }

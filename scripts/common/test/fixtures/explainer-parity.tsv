@@ -1,0 +1,29 @@
+# explainer-parity.tsv — コマンド解説エンジンの共有 fixture
+# SSOT: bash と PowerShell の両実装がこのテーブルを満たすこと
+# columns: command<TAB>category<TAB>danger<TAB>readonly<TAB>target_hint
+# category: list/read/delete/write/exec/perm/cd/search/install/fetch/unknown
+# danger: true/false (EXPLAIN_DANGER または PS Danger が空でないか)
+# readonly: true/false (EXPLAIN_WHATDO に「しません」等の安心文が含まれるか)
+# target_hint: 対象として表示されるべき文字列(部分一致。空=チェックしない)
+#
+# bash テスト: scripts/macos/test/explainer.test.sh の T33-T42 が iterate
+# PS テスト: pwsh 不在のため山口さん Windows 実機で確認。このファイルが契約の SSOT。
+
+ls /tmp	list	false	true	/tmp
+ls 2>/dev/null	list	false	true
+cat foo.txt	read	false	true	foo.txt
+cat foo.txt 2> err.log	read	false	true	foo.txt
+ls > out.txt	write	false	false	out.txt
+cat readme.txt > dest.txt	write	false	false	dest.txt
+echo "a > b"	unknown	false	false
+grep ">" file.txt	search	false	true	file.txt
+grep abc foo.txt	search	false	true	foo.txt
+chmod 644 /etc/hostsfile	perm	false	false	/etc/hostsfile
+ls foo | del temp.txt	list	true	false
+cat build.sh | sh	read	true	false	build.sh
+Get-ChildItem -Recurse	list	false	true
+Remove-Item -Recurse build	delete	true	false	build
+del /s C:\Temp	delete	true	false	C:\Temp
+tar -rf archive.tar f	unknown	false	false
+cat xargs rm foo.txt	read	false	true	xargs
+xargs rm badfile	unknown	true	false

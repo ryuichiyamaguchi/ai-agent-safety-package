@@ -31,10 +31,14 @@ cards_dir() {
 # ----- 抽出ヘルパ ---------------------------------------------------------
 
 # 一行 JSON 風入力からキーの文字列値を雑に抽出する（jq 依存を避ける）。
-# 注意: エスケープシーケンスが含まれる場合は完全には正しくない。教育用途では十分。
+# 抽出後に最低限の JSON escape をデコード: \\ → \, \" → ", \/ → /
+# 注意: 完全な JSON パーサではない。教育用途では十分。
 extract_json_string() {
   local key="$1"
-  printf '%s' "$RAW_INPUT" | tr '\n' ' ' | sed -nE "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"((\\\\.|[^\"\\\\])*)\".*/\\1/p" | head -n 1
+  printf '%s' "$RAW_INPUT" | tr '\n' ' ' \
+    | sed -nE "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"((\\\\.|[^\"\\\\])*)\".*/\\1/p" \
+    | head -n 1 \
+    | sed 's/\\\\/\\/g; s/\\"/"/g; s/\\\//\//g'
 }
 
 # 解説対象として抽出する文字列（MODE 依存）。
@@ -180,15 +184,70 @@ _explain_verb() {
   printf '%s' "$1" | awk '{ print $1 }'
 }
 
-# セグメント文字列からリダイレクト先(> or >>)を抽出する。
-# 存在すれば先頭の > or >> に続くトークンを返す。無ければ空。
-_explain_redir_target() {
-  printf '%s' "$1" | sed -nE 's/.*>>?[[:space:]]*([^[:space:]>|;&]+).*/\1/p' | head -n1
+# 引用符("..." / '...')の内側テキストをスペースに置換して返す。
+# redir 検出の前処理として使用。完全なパーサではないが引用内 > を除外できる。
+_explain_strip_quoted() {
+  printf '%s' "$1" | sed -E \
+    -e 's/"[^"]*"/ /g' \
+    -e "s/'[^']*'/ /g"
 }
 
-# セグメントに > or >> リダイレクトが含まれるか判定(0=含む,1=含まない)。
+# fd リダイレクト(2> 2>> 1> &> &>>) かどうかを判定するヘルパ。
+# 引数: トークン文字列。fd リダイレクトなら 0(true) を返す。
+_explain_is_fd_redir() {
+  case "$1" in
+    [0-9]'>'*|[0-9]'>>'*|'&>'*|'&>>'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# セグメント文字列からリダイレクト先(> or >>)を抽出する。
+# fd リダイレクト(2> 1> &>)・引用符内の > を無視。無ければ空。
+_explain_redir_target() {
+  local stripped
+  stripped="$(_explain_strip_quoted "$1")"
+  # fd リダイレクト(数字>)・&> を除いた最初の >/<< を探す
+  printf '%s' "$stripped" | awk '
+    {
+      n=split($0, tok, /[[:space:]]+/)
+      for (i=1; i<=n; i++) {
+        t=tok[i]
+        # fd redir: 数字> または &> を除外
+        if (t ~ /^[0-9]>>?/ || t ~ /^&>>?/) continue
+        # bare > or >> (standalone)
+        if (t ~ /^>>?$/) {
+          # 次の非空トークンを返す
+          for (j=i+1; j<=n; j++) {
+            if (tok[j]!="") { print tok[j]; exit }
+          }
+        }
+        # >>filepath 形式 (>>foo) — fd 以外
+        if (t ~ /^>>?[^>]/ && t !~ /^[0-9]/ && t !~ /^&/) {
+          sub(/^>>?/, "", t); print t; exit
+        }
+      }
+    }
+  ' | head -n1
+}
+
+# セグメントに content-write リダイレクト(> or >>) が含まれるか判定。
+# fd リダイレクト(2> 1> &>) と引用符内の > は除外。
 _explain_has_redir() {
-  printf '%s' "$1" | grep -qE -- '>>?'
+  local stripped
+  stripped="$(_explain_strip_quoted "$1")"
+  printf '%s' "$stripped" | awk '
+    {
+      n=split($0, tok, /[[:space:]]+/)
+      for (i=1; i<=n; i++) {
+        t=tok[i]
+        if (t ~ /^[0-9]>>?/ || t ~ /^&>>?/) continue
+        if (t ~ /^>>?$/ || (t ~ /^>>?[^>]/ && t !~ /^[0-9]/ && t !~ /^&/)) {
+          print "1"; exit
+        }
+      }
+      print "0"
+    }
+  ' | grep -q '^1$'
 }
 
 # 対象抽出。カテゴリ別の補正ルール:
@@ -196,52 +255,63 @@ _explain_has_redir() {
 #   category=chmod/chown/icacls → mode(数字/記号)を除外してpath
 #   category=del → / スイッチを除外
 #   > リダイレクト演算子+直後トークンを対象候補から除外(全カテゴリ)
+#   fd リダイレクト(2>/dev/null 等)を除外
 # $env:... や変数はそのまま返す。取れなければ空。
 _explain_target() {
   local seg="$1" cat="$2"
   printf '%s' "$seg" | awk -v cat="$cat" '
-    function is_redir_seq(arr, n,    i) {
-      # arr[i] が > or >> なら arr[i+1] も除外
-      delete redir_idx
-      for (i=1; i<=n; i++) {
-        if (arr[i] ~ /^>>?$/) {
-          redir_idx[i]=1
-          if (i+1<=n) redir_idx[i+1]=1
-        }
+    # 文字列全体を走査して引用符内テキストを空白に置換する
+    function strip_quoted(s,    r,i,c,in_dq,in_sq) {
+      r=""; in_dq=0; in_sq=0
+      for (i=1;i<=length(s);i++) {
+        c=substr(s,i,1)
+        if (c=="\"" && !in_sq) { in_dq=!in_dq; r=r c; continue }
+        if (c=="'"'"'" && !in_dq) { in_sq=!in_sq; r=r c; continue }
+        if (in_dq || in_sq) { r=r " "; continue }
+        r=r c
       }
-      return 0
+      return r
     }
     {
-      n=split($0, tok, /[[:space:]]+/)
+      # 引用符内の > をスペースに置換した版でトークン境界を計算
+      sq=strip_quoted($0)
+      n=split(sq, tok, /[[:space:]]+/)
+      # 元の入力からも同じ区切りでトークンを取る（位置対応のため）
+      split($0, orig, /[[:space:]]+/)
       # リダイレクト演算子とその後トークンを除外インデックスに登録
       delete redir_idx
       for (i=1; i<=n; i++) {
-        if (tok[i] ~ /^>>?$/) {
+        t=tok[i]
+        # fd リダイレクト (2>/dev/null, 1>foo, &>bar, &>>baz) はスキップ
+        if (t ~ /^[0-9]>>?/ || t ~ /^&>>?/) {
+          redir_idx[i]=1
+          continue
+        }
+        if (t ~ /^>>?$/) {
           redir_idx[i]=1
           if (i+1<=n) redir_idx[i+1]=1
         }
         # トークン自体が >>filepath 形式 (>>foo) のとき演算子として除外
-        if (tok[i] ~ /^>>?[^>]/) {
+        if (t ~ /^>>?[^>]/ && t !~ /^[0-9]/ && t !~ /^&/) {
           redir_idx[i]=1
         }
       }
 
-      # URL 最優先
+      # URL を tok(strip済み)で確認しつつ orig から返す
       for (i=1; i<=n; i++) {
         if (redir_idx[i]) continue
-        if (tok[i] ~ /^https?:\/\//) { print tok[i]; exit }
+        if (orig[i] ~ /^https?:\/\//) { print orig[i]; exit }
       }
-      # 名前付き -Path/-LiteralPath/-Destination/-Url の次
+      # 名前付き -Path/-LiteralPath/-Destination/-Url の次 (tok で確認, orig で返す)
       for (i=2; i<=n; i++) {
         if (redir_idx[i]) continue
         lf=tolower(tok[i])
         if (lf=="-path"||lf=="-literalpath"||lf=="-destination"||lf=="-url"||lf=="-uri") {
           for (j=i+1; j<=n; j++) {
-            if (!redir_idx[j]) { print tok[j]; exit }
+            if (!redir_idx[j]) { print orig[j]; exit }
           }
         }
       }
-
       # カテゴリ別 positional 抽出（動詞=$1 を除く）
       skip=0
       if (cat=="grep" || cat=="findstr" || cat=="select-string" || cat=="sls") {
@@ -250,14 +320,17 @@ _explain_target() {
       pos=0
       for (i=2; i<=n; i++) {
         if (redir_idx[i]) continue
-        t=tok[i]
-        lf=tolower(t)
+        t=orig[i]    # 元の文字列からターゲットを返す
+        ts=tok[i]    # stripped 版でフラグ判定
         # - フラグ除外
-        if (substr(t,1,1)=="-") continue
+        if (substr(ts,1,1)=="-") continue
         # / スイッチ除外 (Windows del /s /q など)
-        if (cat=="del" && substr(t,1,1)=="/") continue
-        # chmod/chown の mode 除外 (数字/記号のみ)
-        if ((cat=="chmod"||cat=="chown") && (t ~ /^[0-9]+$/ || t ~ /^[ugoa]*[+-=][rwxst,ugoa]*/)) continue
+        if (cat=="del" && substr(ts,1,1)=="/") continue
+        # 空白のみ(引用符トークンが strip された)はスキップ
+        if (ts ~ /^[[:space:]]*$/) { pos++; if (pos<=skip) continue; skip=skip+1; continue }
+        # chmod/chown の mode 除外 (数字3-4桁 or ugoa+rwx 形式・絶対パスは除外しない)
+        if ((cat=="chmod"||cat=="chown") && substr(ts,1,1)!="/" && \
+            (ts ~ /^[0-9]+$/ || ts ~ /^[ugoa]*[+\-=][rwxst,ugoa]+/)) continue
         pos++
         if (pos <= skip) continue
         print t; exit
@@ -329,10 +402,11 @@ _explain_scan_flags() {
         _ecf_perm=1
         ;;
     esac
-    # xargs rm: xargs が後段で rm を呼ぶパターン
-    if printf '%s' "$lc_seg" | grep -qE -- '\bxargs\b.*\brm\b'; then
+    # xargs rm: xargs が先頭 verb でその引数に rm が来る時のみ削除扱い
+    # (引数の中に "xargs rm" が含まれるだけでは削除扱いしない)
+    if [ "$verb_lc" = "xargs" ] && printf '%s' "$lc_seg" | grep -qE -- '\bxargs\b[[:space:]]+(\-[^ ]+ +)*rm\b'; then
       _ecf_delete=1
-      if printf '%s' "$lc_seg" | grep -qE -- '\bxargs\b.*\brm\b.*[[:space:]]-[a-z]*r'; then
+      if printf '%s' "$lc_seg" | grep -qE -- '\bxargs\b[[:space:]]+(\-[^ ]+ +)*rm\b.*[[:space:]]-[a-z]*r'; then
         _ecf_delete_recurse=1
       fi
     fi
