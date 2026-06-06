@@ -315,6 +315,161 @@ else
   ng "T20: write mode does not emit bash whatdo section"
 fi
 
+# ============================================================
+# cycle-2 追加テスト: 安全設計の保守的動作を検証
+# (否定アサート必須 / 誤警告ゼロ / 対象抽出 / now.md カバー)
+# ============================================================
+
+# ---- ヘルパー: now.md に解説が出ることを検証 ----
+run_explain_with_nowmd() {
+  local mode="$1" json="$2"
+  (
+    set -u
+    export MODE="$mode"
+    export RAW_INPUT="$json"
+    log_dir() { printf '%s\n' "$AI_SAFE_LOG_DIR"; }
+    audit_log() { :; }
+    source "$REPO/scripts/macos/lib/explainer.sh" 2>/dev/null
+    mkdir -p "$AI_SAFE_LOG_DIR"
+    ACTION_TEXT=""; ACTION_LABEL="操作"
+    extract_action_text 2>/dev/null || true
+    cards_dir() { printf '%s\n' "$AI_SAFE_CARDS_DIR"; }
+    write_now_card "default-bash" "low" "$ACTION_TEXT" "$ACTION_LABEL" 2>/dev/null
+  )
+}
+
+md="$AI_SAFE_LOG_DIR/now.md"
+
+# --- T21: 破壊的コマンド(後段削除): 安心文「しません」が出ない + 削除警告が出る ---
+# ls foo | del temp.txt (ls は一覧だが後段に削除)
+rm -f "$html" "$act" "$md"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls foo | del temp.txt"}}'
+run_explain_with_json "bash" "$json"
+t21_no_calm=0; t21_has_danger=0
+if [ -f "$html" ] && ! grep -q 'しません' "$html"; then t21_no_calm=1; fi
+if [ -f "$html" ] && grep -q '<p class="whatdo-danger"' "$html" && grep -q '削除' "$html"; then t21_has_danger=1; fi
+if [ "$t21_no_calm" -eq 1 ] && [ "$t21_has_danger" -eq 1 ]; then
+  ok "T21: ls|del -> NO calm text + danger(deletion) present"
+else
+  ng "T21: ls|del -> NO calm text + danger(deletion) present (no_calm=$t21_no_calm has_danger=$t21_has_danger)"
+fi
+
+# --- T22: 実行後段(cat | sh): 安心文「しません」が出ない + 実行警告が出る ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat build.sh | sh"}}'
+run_explain_with_json "bash" "$json"
+t22_no_calm=0; t22_has_exec=0
+if [ -f "$html" ] && ! grep -q 'しません' "$html"; then t22_no_calm=1; fi
+if [ -f "$html" ] && grep -q '<p class="whatdo-danger"' "$html" && grep -q '実行' "$html"; then t22_has_exec=1; fi
+if [ "$t22_no_calm" -eq 1 ] && [ "$t22_has_exec" -eq 1 ]; then
+  ok "T22: cat|sh -> NO calm text + exec danger"
+else
+  ng "T22: cat|sh -> NO calm text + exec danger (no_calm=$t22_no_calm has_exec=$t22_has_exec)"
+fi
+
+# --- T23: リダイレクト書き込み(cat > file): 書き込み解説 + 「読むだけ」が出ない ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat readme.txt > out.txt"}}'
+run_explain_with_json "bash" "$json"
+t23_write=0; t23_no_readonly=0
+if [ -f "$html" ] && grep -q '書き込み' "$html"; then t23_write=1; fi
+if [ -f "$html" ] && ! grep -q '読むだけ' "$html" && ! grep -q 'しません' "$html"; then t23_no_readonly=1; fi
+if [ "$t23_write" -eq 1 ] && [ "$t23_no_readonly" -eq 1 ]; then
+  ok "T23: cat>file -> write message + no read-only text"
+else
+  ng "T23: cat>file -> write message + no read-only text (write=$t23_write no_ro=$t23_no_readonly)"
+fi
+
+# --- T24: 誤警告ゼロ: Get-ChildItem -Recurse → 「完全削除」が出ない ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"Get-ChildItem -Recurse"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q '完全削除' "$html" && ! grep -q '<p class="whatdo-danger"' "$html"; then
+  ok "T24: Get-ChildItem -Recurse -> NO false deletion warning"
+else
+  ng "T24: Get-ChildItem -Recurse -> NO false deletion warning"
+fi
+
+# --- T25: 誤警告ゼロ: tar -rf archive.tar (削除アーカイブ更新) → 削除誤警告なし ---
+# tar の -r はアーカイブ追記。削除動詞ではない。
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"tar -rf archive.tar newfile.txt"}}'
+run_explain_with_json "bash" "$json"
+# tar は未知コマンドなのでwhatdo-body は出ない。danger も出てはいけない。
+if [ -f "$html" ] && ! grep -q '完全削除' "$html" && ! grep -q '削除を含みます' "$html"; then
+  ok "T25: tar -rf -> NO false deletion warning"
+else
+  ng "T25: tar -rf -> NO false deletion warning"
+fi
+
+# --- T26: 対象抽出: del /s C:\\Temp → 対象=C:\Temp (スイッチ /s を対象にしない) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"del /s C:\\\\Temp"}}'
+run_explain_with_json "bash" "$json"
+# C:\Temp が表示され、/s が対象にならないこと
+if [ -f "$html" ] && grep -q 'Temp' "$html" && ! grep -Eq '対象=/s|whatdo-body.*[^T]/s' "$html"; then
+  ok "T26: del /s -> target=C:\\Temp not /s"
+else
+  ng "T26: del /s -> target=C:\\Temp not /s"
+fi
+
+# --- T27: 対象抽出: grep abc foo.txt → 対象=foo.txt (パターン abc を対象にしない) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"grep abc foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'foo.txt' "$html" && ! grep -q '>abc<' "$html"; then
+  ok "T27: grep abc foo.txt -> target=foo.txt not pattern abc"
+else
+  ng "T27: grep abc foo.txt -> target=foo.txt not pattern abc"
+fi
+
+# --- T28: リダイレクト対象: ls > listing.txt → 書き込み解説 (対象が > にならない) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls > listing.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '書き込み' "$html" && grep -q 'listing.txt' "$html" && ! grep -q 'class="whatdo-body">>' "$html"; then
+  ok "T28: ls > listing.txt -> write to listing.txt (not >)"
+else
+  ng "T28: ls > listing.txt -> write to listing.txt (not >)"
+fi
+
+# --- T29: now.md に具体解説が出る (Remove-Item -Recurse) ---
+rm -f "$html" "$act" "$md"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"Remove-Item -Recurse dist"}}'
+run_explain_with_nowmd "bash" "$json"
+if [ -f "$md" ] && grep -q 'これは何をする' "$md" && grep -q '削除' "$md"; then
+  ok "T29: now.md contains concrete explanation (Remove-Item)"
+else
+  ng "T29: now.md contains concrete explanation (got: $(head -5 "$md" 2>/dev/null))"
+fi
+
+# --- T30: now.md に危険警告が出る (Remove-Item -Recurse) ---
+if [ -f "$md" ] && grep -q '完全削除' "$md"; then
+  ok "T30: now.md contains danger warning (完全削除)"
+else
+  ng "T30: now.md contains danger warning (got: $(grep '⚠' "$md" 2>/dev/null | head -1))"
+fi
+
+# --- T31: 単一 read-only パイプライン(cat|grep): 安心文あり ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat README.md | grep TODO"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'ほかにも処理が続きます' "$html" && ! grep -q '<p class="whatdo-danger"' "$html"; then
+  ok "T31: cat|grep (read-only) -> pipeline note, no danger"
+else
+  ng "T31: cat|grep (read-only) -> pipeline note, no danger"
+fi
+
+# --- T32: sudo は主コマンドの解説+昇格警告 (sudo cat /etc/hosts → 読む+昇格警告) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"sudo cat /etc/hosts"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '<p class="whatdo-danger"' "$html" && grep -q '管理者権限' "$html" && grep -q '<p class="whatdo-body"' "$html"; then
+  ok "T32: sudo cat -> read explanation + admin danger"
+else
+  ng "T32: sudo cat -> read explanation + admin danger"
+fi
+
 echo ""
 echo "explainer.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

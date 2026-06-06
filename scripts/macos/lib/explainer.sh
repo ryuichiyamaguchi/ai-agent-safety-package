@@ -129,112 +129,233 @@ extract_action_text() {
 }
 
 # ----- コマンド解説エンジン (パターン式・LLM不要・オフライン・決定的) ----
-# 入力: 実コマンド文字列。出力はグローバル変数:
+# 設計原則: 「証明されない限り安全と言わない(保守的)」。
+# 安心文「(中身を見るだけ。削除や書き換えはしません)」は全セグメントが
+# read-only と証明できた時のみ出す。少しでも危険性があれば省く。
+#
+# 出力グローバル変数:
 #   EXPLAIN_WHATDO  平易な日本語の「何をする？」本文（未知コマンドは空）
 #   EXPLAIN_ICON    セクション見出しアイコン（既定 📂）
-#   EXPLAIN_DANGER  危険語が含まれる時の強調1行（無ければ空）
-# 嘘解説を避けるため、語彙に無い動詞は EXPLAIN_WHATDO を空にしてフォールバックさせる。
+#   EXPLAIN_DANGER  危険強調行（複数あれば改行区切り。無ければ空）
 EXPLAIN_WHATDO=""
 EXPLAIN_ICON="📂"
 EXPLAIN_DANGER=""
 
-# 複合コマンドの主コマンド（先頭セグメント）を取り出す。
-# `|`/`;`/`&&`/`||` の手前までを主コマンドとみなす。前後の空白を除去。
-_explain_primary_segment() {
+# コマンド全文を | ; && || で分割し、各セグメント(前後空白除去)をプリントする。
+# awk で文字走査して分割（BSD/GNU 両対応）。
+_explain_split_segments() {
   printf '%s' "$1" | awk '
+    BEGIN { seg="" }
     {
-      seg=$0
-      # 最初の区切り (| ; && ||) の位置で切る
-      n=split(seg, _x, "")  # noop to keep awk happy
-      # 文字走査で最初の区切りを探す
-      out=""
-      i=1
-      L=length(seg)
-      while (i<=L) {
-        c=substr(seg,i,1)
-        c2=substr(seg,i,2)
-        if (c=="|" || c==";") break
-        if (c2=="&&" || c2=="||") break
-        out=out c
-        i++
+      L=length($0)
+      for (i=1;i<=L;i++) {
+        c=substr($0,i,1)
+        c2=substr($0,i,2)
+        if (c=="|" || c==";") {
+          gsub(/^[[:space:]]+/,"",seg); gsub(/[[:space:]]+$/,"",seg)
+          if (seg!="") print seg
+          seg=""
+        } else if (c2=="&&" || c2=="||") {
+          gsub(/^[[:space:]]+/,"",seg); gsub(/[[:space:]]+$/,"",seg)
+          if (seg!="") print seg
+          seg=""
+          i++  # skip second char
+        } else {
+          seg=seg c
+        }
       }
-      gsub(/^[[:space:]]+/, "", out)
-      gsub(/[[:space:]]+$/, "", out)
-      print out
+      gsub(/^[[:space:]]+/,"",seg); gsub(/[[:space:]]+$/,"",seg)
+      if (seg!="") print seg
     }
   '
 }
 
-# 主コマンドから先頭の sudo を剥がす（sudo 自体は危険語検知側で強調済み）。
-# 剥がした後の文字列を返すことで、verb/target 抽出を実コマンド基準に揃える。
+# セグメント文字列から先頭の sudo を剥がす。
 _explain_strip_sudo() {
-  printf '%s' "$1" | awk '{ if (tolower($1)=="sudo" && NF>=2) { $1=""; sub(/^[[:space:]]+/, ""); print } else print }'
+  printf '%s' "$1" | awk '{ if (tolower($1)=="sudo" && NF>=2) { $1=""; sub(/^[[:space:]]+/,""); print } else print }'
 }
 
-# 主コマンドから先頭の動詞/cmdlet トークンを取り出す（小文字化はしない）。
+# セグメント先頭の動詞トークンを返す（小文字化なし）。
 _explain_verb() {
   printf '%s' "$1" | awk '{ print $1 }'
 }
 
-# 主コマンドから最初の「対象」を抽出する。
-#   - http(s):// で始まる語があればそれ（URL 優先）
-#   - PowerShell 風 -Path/-LiteralPath/-Destination/-Url <値> の値
-#   - それ以外は最初の非フラグ位置引数（- 始まりを除く・動詞自身を除く）
-# $env:... や $var はそのまま返す（展開しない）。取れなければ空。
+# セグメント文字列からリダイレクト先(> or >>)を抽出する。
+# 存在すれば先頭の > or >> に続くトークンを返す。無ければ空。
+_explain_redir_target() {
+  printf '%s' "$1" | sed -nE 's/.*>>?[[:space:]]*([^[:space:]>|;&]+).*/\1/p' | head -n1
+}
+
+# セグメントに > or >> リダイレクトが含まれるか判定(0=含む,1=含まない)。
+_explain_has_redir() {
+  printf '%s' "$1" | grep -qE -- '>>?'
+}
+
+# 対象抽出。カテゴリ別の補正ルール:
+#   category=grep/findstr/select-string/sls → 最初の非フラグ位置引数を2番目以降から探す(第1引数=パターン除外)
+#   category=chmod/chown/icacls → mode(数字/記号)を除外してpath
+#   category=del → / スイッチを除外
+#   > リダイレクト演算子+直後トークンを対象候補から除外(全カテゴリ)
+# $env:... や変数はそのまま返す。取れなければ空。
 _explain_target() {
-  printf '%s' "$1" | awk '
-    {
-      # URL を最優先で探す
-      for (i=1;i<=NF;i++) {
-        if ($i ~ /^https?:\/\//) { print $i; exit }
-      }
-      # 名前付きパラメータ -Path/-LiteralPath/-Destination/-Url の次トークン
-      for (i=2;i<=NF;i++) {
-        lf=tolower($i)
-        if (lf=="-path" || lf=="-literalpath" || lf=="-destination" || lf=="-url" || lf=="-uri") {
-          if (i+1<=NF) { print $(i+1); exit }
+  local seg="$1" cat="$2"
+  printf '%s' "$seg" | awk -v cat="$cat" '
+    function is_redir_seq(arr, n,    i) {
+      # arr[i] が > or >> なら arr[i+1] も除外
+      delete redir_idx
+      for (i=1; i<=n; i++) {
+        if (arr[i] ~ /^>>?$/) {
+          redir_idx[i]=1
+          if (i+1<=n) redir_idx[i+1]=1
         }
       }
-      # 最初の非フラグ位置引数（動詞 $1 はスキップ、- 始まりはスキップ）
-      for (i=2;i<=NF;i++) {
-        if (substr($i,1,1)=="-") continue
-        # PowerShell の値が = で来る場合 (-Path=foo) は別処理しない（簡略）
-        print $i; exit
+      return 0
+    }
+    {
+      n=split($0, tok, /[[:space:]]+/)
+      # リダイレクト演算子とその後トークンを除外インデックスに登録
+      delete redir_idx
+      for (i=1; i<=n; i++) {
+        if (tok[i] ~ /^>>?$/) {
+          redir_idx[i]=1
+          if (i+1<=n) redir_idx[i+1]=1
+        }
+        # トークン自体が >>filepath 形式 (>>foo) のとき演算子として除外
+        if (tok[i] ~ /^>>?[^>]/) {
+          redir_idx[i]=1
+        }
+      }
+
+      # URL 最優先
+      for (i=1; i<=n; i++) {
+        if (redir_idx[i]) continue
+        if (tok[i] ~ /^https?:\/\//) { print tok[i]; exit }
+      }
+      # 名前付き -Path/-LiteralPath/-Destination/-Url の次
+      for (i=2; i<=n; i++) {
+        if (redir_idx[i]) continue
+        lf=tolower(tok[i])
+        if (lf=="-path"||lf=="-literalpath"||lf=="-destination"||lf=="-url"||lf=="-uri") {
+          for (j=i+1; j<=n; j++) {
+            if (!redir_idx[j]) { print tok[j]; exit }
+          }
+        }
+      }
+
+      # カテゴリ別 positional 抽出（動詞=$1 を除く）
+      skip=0
+      if (cat=="grep" || cat=="findstr" || cat=="select-string" || cat=="sls") {
+        skip=1  # 第1位置引数(パターン)をスキップ
+      }
+      pos=0
+      for (i=2; i<=n; i++) {
+        if (redir_idx[i]) continue
+        t=tok[i]
+        lf=tolower(t)
+        # - フラグ除外
+        if (substr(t,1,1)=="-") continue
+        # / スイッチ除外 (Windows del /s /q など)
+        if (cat=="del" && substr(t,1,1)=="/") continue
+        # chmod/chown の mode 除外 (数字/記号のみ)
+        if ((cat=="chmod"||cat=="chown") && (t ~ /^[0-9]+$/ || t ~ /^[ugoa]*[+-=][rwxst,ugoa]*/)) continue
+        pos++
+        if (pos <= skip) continue
+        print t; exit
       }
       print ""
     }
   '
 }
 
-# 対象表示用文字列を整形。空なら「現在のフォルダ」。
+# 対象表示用。空なら「現在のフォルダ」。
 _explain_target_display() {
-  local t="$1"
-  if [ -z "$t" ]; then
-    printf '現在のフォルダ'
-  else
-    printf '%s' "$t"
-  fi
+  if [ -z "$1" ]; then printf '現在のフォルダ'; else printf '%s' "$1"; fi
 }
 
-# 危険語（削除-Recurse/-rf、sudo、権限昇格）を全文から検知して
-# EXPLAIN_DANGER に強調1行をセットする。主コマンドが何であれ拾う。
-_explain_detect_danger() {
-  local full="$1" lc
-  lc="$(printf '%s' "$full" | tr '[:upper:]' '[:lower:]')"
-  EXPLAIN_DANGER=""
-  # sudo / 権限昇格
-  case " $lc " in
-    *" sudo "*|*"runas"*|*"start-process"*"-verb runas"*)
-      EXPLAIN_DANGER="⚠️ 管理者権限への昇格を含みます（PC全体に影響する可能性）" ; return ;;
-  esac
-  # 再帰削除（rm -rf / -r / Remove-Item -Recurse）
-  if printf '%s' "$lc" | grep -Eq -- '(\brm\b[^|;]*[[:space:]]-[a-z]*r|[[:space:]]-recurse|[[:space:]]-rf|[[:space:]]-fr|remove-item[^|;]*-recurse)'; then
-    EXPLAIN_DANGER="⚠️ フォルダごとの完全削除（復元できません）を含みます"
-    return
-  fi
+# ────────────────────────────────────────────────────────────
+# 全セグメント走査: danger/write/exec/sudo/delete/readonly フラグを設定する。
+# グローバル変数（_ecf_ プレフィックス）に書き込む。
+# ────────────────────────────────────────────────────────────
+_explain_scan_flags() {
+  local full="$1"
+  _ecf_sudo=0
+  _ecf_delete=0
+  _ecf_delete_recurse=0
+  _ecf_write=0    # 書き込み系動詞 or リダイレクト
+  _ecf_exec=0     # 実行系動詞
+  _ecf_perm=0     # 権限変更
+
+  local seg verb_lc lc_seg
+  while IFS= read -r seg; do
+    [ -z "$seg" ] && continue
+    seg="$(_explain_strip_sudo_flag "$seg")"
+    verb_lc="$(printf '%s' "$seg" | awk '{ print tolower($1) }')"
+    lc_seg="$(printf '%s' "$seg" | tr '[:upper:]' '[:lower:]')"
+
+    # sudo / 権限昇格
+    case " $(_orig_seg_lc "$1") " in
+      *" sudo "*) _ecf_sudo=1 ;;
+    esac
+    if printf '%s' "$lc_seg" | grep -qE -- '(runas|\-verb[[:space:]]+runas)'; then _ecf_sudo=1; fi
+
+    # > / >> リダイレクト（全動詞で書き込み）
+    if _explain_has_redir "$seg"; then _ecf_write=1; fi
+
+    case "$verb_lc" in
+      # 削除動詞
+      rm|rmdir|del|erase|remove-item|ri)
+        _ecf_delete=1
+        # 削除動詞 + 再帰フラグ: 語境界を考慮
+        # rm に -r/-f/-rf/-fr/-recursive、Remove-Item に -recurse、del に /s
+        if printf '%s' "$lc_seg" | grep -qE -- '(\brm\b.*[[:space:]]-[a-z]*r[a-z]*|remove-item.*[[:space:]]-recurse|\bdel\b.*/s\b)'; then
+          _ecf_delete_recurse=1
+        fi
+        # find -delete, xargs rm
+        ;;
+      # 書き込み系
+      touch|new-item|set-content|out-file|add-content|tee|echo|printf|mv|move|move-item|cp|copy|copy-item)
+        _ecf_write=1
+        ;;
+      # 実行系
+      bash|sh|zsh|python|python3|node|source|invoke-expression|iex|start-process)
+        _ecf_exec=1
+        ;;
+      # call operator (PowerShell &)
+      '&')
+        _ecf_exec=1
+        ;;
+      # 権限変更
+      chmod|chown|icacls|set-acl|set-itemproperty)
+        _ecf_perm=1
+        ;;
+    esac
+    # xargs rm: xargs が後段で rm を呼ぶパターン
+    if printf '%s' "$lc_seg" | grep -qE -- '\bxargs\b.*\brm\b'; then
+      _ecf_delete=1
+      if printf '%s' "$lc_seg" | grep -qE -- '\bxargs\b.*\brm\b.*[[:space:]]-[a-z]*r'; then
+        _ecf_delete_recurse=1
+      fi
+    fi
+    # find -delete
+    if [ "$verb_lc" = "find" ] && printf '%s' "$lc_seg" | grep -qE -- '[[:space:]]-delete\b'; then
+      _ecf_delete=1
+    fi
+  done <<EOF
+$(_explain_split_segments "$full")
+EOF
 }
 
-# メイン: 実コマンド文字列を解説する。
+# 全文を小文字化（ヘルパ）
+_orig_seg_lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# sudo 除去（フラグスキャン内部用。戻り値版）
+_explain_strip_sudo_flag() {
+  printf '%s' "$1" | awk '{ if (tolower($1)=="sudo" && NF>=2) { $1=""; sub(/^[[:space:]]+/,""); print } else print }'
+}
+
+# ────────────────────────────────────────────────────────────
+# メイン公開関数
+# ────────────────────────────────────────────────────────────
 explain_command() {
   local full="$1"
   EXPLAIN_WHATDO=""
@@ -242,33 +363,90 @@ explain_command() {
   EXPLAIN_DANGER=""
   [ -z "$full" ] && return 0
 
-  # 危険語は主コマンドに関わらず全文から検知
-  _explain_detect_danger "$full"
+  # 全セグメントを走査してフラグを確定
+  _ecf_sudo=0; _ecf_delete=0; _ecf_delete_recurse=0
+  _ecf_write=0; _ecf_exec=0; _ecf_perm=0
+  _explain_scan_flags "$full"
 
-  local primary verb verb_lc target tdisp extra
-  primary="$(_explain_primary_segment "$full")"
-  primary="$(_explain_strip_sudo "$primary")"
-  verb="$(_explain_verb "$primary")"
+  # 主コマンド(先頭セグメント)の動詞を先に取得(DANGER 組み立てで参照)
+  local first_seg verb verb_lc
+  first_seg="$(printf '%s' "$full" | _explain_split_segments_first)"
+  first_seg="$(_explain_strip_sudo "$first_seg")"
+  verb="$(_explain_verb "$first_seg")"
   verb_lc="$(printf '%s' "$verb" | tr '[:upper:]' '[:lower:]')"
-  target="$(_explain_target "$primary")"
+
+  # EXPLAIN_DANGER の組み立て (危険度降順・重複しないよう条件を分ける)
+  local dangers=""
+  _danger_append() { dangers="${dangers:+$dangers
+}$1"; }
+  if [ "$_ecf_sudo" -eq 1 ]; then
+    _danger_append "⚠️ 管理者権限への昇格を含みます（PC全体に影響する可能性）"
+  fi
+  if [ "$_ecf_delete_recurse" -eq 1 ]; then
+    _danger_append "⚠️ フォルダごとの完全削除（復元できません）を含みます"
+  elif [ "$_ecf_delete" -eq 1 ]; then
+    _danger_append "⚠️ ファイル・フォルダの削除を含みます"
+  fi
+  if [ "$_ecf_exec" -eq 1 ] && [ "$_ecf_sudo" -eq 0 ]; then
+    # 主コマンドが実行系の時は WHATDO 側で明示するので DANGER 重複を避ける
+    case "$verb_lc" in
+      bash|sh|zsh|python|python3|node|source|invoke-expression|iex|start-process|'&') ;;
+      *) _danger_append "⚠️ スクリプト/プログラムの実行を含みます" ;;
+    esac
+  fi
+  EXPLAIN_DANGER="$dangers"
+
+  # read-only フラグ: 全フラグが 0 の時のみ安心文を出す
+  local readonly_all=0
+  if [ "$_ecf_sudo" -eq 0 ] && [ "$_ecf_delete" -eq 0 ] && \
+     [ "$_ecf_write" -eq 0 ] && [ "$_ecf_exec" -eq 0 ] && [ "$_ecf_perm" -eq 0 ]; then
+    readonly_all=1
+  fi
+
+  # 複合コマンドか判定
+  local is_compound=0
+  if printf '%s' "$full" | grep -qE -- '(\||;|&&|\|\|)'; then is_compound=1; fi
+
+  # > リダイレクト先(全文から最初の >)
+  local redir_tgt
+  redir_tgt="$(_explain_redir_target "$full")"
+
+  # 全文に > リダイレクトがあれば書き込み解説に差し替え
+  if [ -n "$redir_tgt" ] && _explain_has_redir "$full"; then
+    EXPLAIN_ICON="✏️"
+    local redir_op="書き込み(上書き)"
+    if printf '%s' "$full" | grep -qE -- '>>'; then redir_op="追記"; fi
+    EXPLAIN_WHATDO="${redir_tgt} にファイルを${redir_op}しようとしています。"
+    [ "$is_compound" -eq 1 ] && EXPLAIN_WHATDO="${EXPLAIN_WHATDO}（ほかにも処理が続きます。全文は上のコマンドを確認してください）"
+    return 0
+  fi
+
+  local target tdisp
+  target="$(_explain_target "$first_seg" "$verb_lc")"
   tdisp="$(_explain_target_display "$target")"
 
-  # 複合（パイプ/連結）が含まれていたら一言添える
-  extra=""
-  if printf '%s' "$full" | grep -Eq -- '(\||;|&&|\|\|)'; then
-    extra="（ほかにも処理が続きます。全文は上のコマンドを確認してください）"
-  fi
+  # 複合時の一言(リダイレクトなし複合)
+  local extra=""
+  [ "$is_compound" -eq 1 ] && extra="（ほかにも処理が続きます。全文は上のコマンドを確認してください）"
 
   case "$verb_lc" in
     # 一覧
     ls|dir|get-childitem|gci|ll|la)
       EXPLAIN_ICON="📂"
-      EXPLAIN_WHATDO="${tdisp} の中のファイル・フォルダ一覧を見ようとしています。（中身を見るだけ。削除や書き換えはしません）"
+      if [ "$readonly_all" -eq 1 ]; then
+        EXPLAIN_WHATDO="${tdisp} の中のファイル・フォルダ一覧を見ようとしています。（中身を見るだけ。削除や書き換えはしません）"
+      else
+        EXPLAIN_WHATDO="${tdisp} の中のファイル・フォルダ一覧を見ようとしています。"
+      fi
       ;;
     # 読む
     cat|head|tail|less|more|type|get-content|gc)
       EXPLAIN_ICON="📄"
-      EXPLAIN_WHATDO="${tdisp} の中身を読もうとしています。（読むだけ。書き換えはしません）"
+      if [ "$readonly_all" -eq 1 ]; then
+        EXPLAIN_WHATDO="${tdisp} の中身を読もうとしています。（読むだけ。書き換えはしません）"
+      else
+        EXPLAIN_WHATDO="${tdisp} の中身を読もうとしています。"
+      fi
       ;;
     # 削除
     rm|rmdir|del|erase|remove-item|ri)
@@ -281,17 +459,8 @@ explain_command() {
       EXPLAIN_WHATDO="${tdisp} を作成または書き換えようとしています。"
       ;;
     echo|printf)
-      # echo/printf は単独表示。> リダイレクトがあればファイル書き込み扱い。
-      if printf '%s' "$primary" | grep -Eq -- '>'; then
-        local redir
-        redir="$(printf '%s' "$primary" | sed -nE 's/.*>>?[[:space:]]*([^[:space:]|;]+).*/\1/p' | head -n1)"
-        [ -z "$redir" ] && redir="ファイル"
-        EXPLAIN_ICON="✏️"
-        EXPLAIN_WHATDO="${redir} に文字を書き込もうとしています。"
-      else
-        EXPLAIN_ICON="📄"
-        EXPLAIN_WHATDO="画面に文字を表示しようとしています。（表示するだけ）"
-      fi
+      EXPLAIN_ICON="📄"
+      EXPLAIN_WHATDO="画面に文字を表示しようとしています。"
       ;;
     # 移動/コピー
     mv|move|move-item)
@@ -313,11 +482,10 @@ explain_command() {
       ;;
     # インストール
     npm|pip|pip3|winget|choco|brew|apt|apt-get|yum|gem)
-      # install サブコマンドを含む時のみインストール解説
-      if printf '%s' "$primary" | grep -Eqi -- '(^|[[:space:]])(install|add|i)([[:space:]]|$)'; then
+      if printf '%s' "$first_seg" | grep -Eqi -- '(^|[[:space:]])(install|add|i)([[:space:]]|$)'; then
         EXPLAIN_ICON="📥"
         local pkg
-        pkg="$(printf '%s' "$primary" | awk '{for(i=3;i<=NF;i++){if(substr($i,1,1)!="-"){print $i;exit}}}')"
+        pkg="$(printf '%s' "$first_seg" | awk '{for(i=3;i<=NF;i++){if(substr($i,1,1)!="-"){print $i;exit}}}')"
         [ -z "$pkg" ] && pkg="パッケージ"
         EXPLAIN_WHATDO="${pkg} をインターネットからインストール（PC に新しいプログラムを追加）しようとしています。"
       else
@@ -326,7 +494,7 @@ explain_command() {
       fi
       ;;
     # 実行
-    bash|sh|zsh|python|python3|node|source|.|invoke-expression|iex|start-process)
+    bash|sh|zsh|python|python3|node|source|invoke-expression|iex|start-process|'&')
       EXPLAIN_ICON="⚙️"
       EXPLAIN_WHATDO="${tdisp} を実行しようとしています。（別のプログラムやスクリプトを動かします）"
       ;;
@@ -343,19 +511,50 @@ explain_command() {
     # 検索
     grep|findstr|select-string|sls|find)
       EXPLAIN_ICON="🔍"
-      EXPLAIN_WHATDO="${tdisp} から文字列やファイルを検索しようとしています。"
+      if [ "$readonly_all" -eq 1 ]; then
+        EXPLAIN_WHATDO="${tdisp} から文字列やファイルを検索しようとしています。（読むだけ。書き換えはしません）"
+      else
+        EXPLAIN_WHATDO="${tdisp} から文字列やファイルを検索しようとしています。"
+      fi
       ;;
     *)
-      # 未知コマンド: 嘘解説をせず空のままにしてフォールバックさせる
       EXPLAIN_WHATDO=""
       ;;
   esac
 
-  # 複合の一言を本文末尾に添える（本文があるときだけ）
+  # extra を本文末尾に添える
   if [ -n "$EXPLAIN_WHATDO" ] && [ -n "$extra" ]; then
     EXPLAIN_WHATDO="${EXPLAIN_WHATDO}${extra}"
   fi
   return 0
+}
+
+# 全セグメントの先頭を1行だけ返す（_explain_split_segments のパイプ版ヘルパ）。
+_explain_split_segments_first() {
+  awk '
+    BEGIN { seg="" }
+    {
+      L=length($0)
+      for (i=1;i<=L;i++) {
+        c=substr($0,i,1)
+        c2=substr($0,i,2)
+        if (c=="|" || c==";") {
+          gsub(/^[[:space:]]+/,"",seg); gsub(/[[:space:]]+$/,"",seg)
+          if (seg!="") { print seg; exit }
+          seg=""
+        } else if (c2=="&&" || c2=="||") {
+          gsub(/^[[:space:]]+/,"",seg); gsub(/[[:space:]]+$/,"",seg)
+          if (seg!="") { print seg; exit }
+          seg=""
+          i++
+        } else {
+          seg=seg c
+        }
+      }
+      gsub(/^[[:space:]]+/,"",seg); gsub(/[[:space:]]+$/,"",seg)
+      if (seg!="") print seg
+    }
+  '
 }
 
 # ----- index.tsv 走査 -----------------------------------------------------
@@ -630,18 +829,23 @@ write_now_html() {
       # 「これは何をする？」具体解説（bash モードのみ・決定的・LLM不要）。
       if [ "${MODE:-}" = "bash" ]; then
         explain_command "$action_text" 2>/dev/null || true
-        if [ -n "$EXPLAIN_WHATDO" ]; then
+        if [ -n "$EXPLAIN_WHATDO" ] || [ -n "$EXPLAIN_DANGER" ]; then
           printf '<div class="whatdo">\n'
-          printf '<div class="whatdo-label">%s これは何をする？</div>\n' "$(html_escape "$EXPLAIN_ICON")"
-          printf '<p class="whatdo-body">%s</p>\n' "$(html_escape "$EXPLAIN_WHATDO")"
-          if [ -n "$EXPLAIN_DANGER" ]; then
-            printf '<p class="whatdo-danger">%s</p>\n' "$(html_escape "$EXPLAIN_DANGER")"
+          if [ -n "$EXPLAIN_WHATDO" ]; then
+            printf '<div class="whatdo-label">%s これは何をする？</div>\n' "$(html_escape "$EXPLAIN_ICON")"
+            printf '<p class="whatdo-body">%s</p>\n' "$(html_escape "$EXPLAIN_WHATDO")"
           fi
-          printf '</div>\n'
-        elif [ -n "$EXPLAIN_DANGER" ]; then
-          # 未知コマンドでも危険語があれば強調だけは出す
-          printf '<div class="whatdo">\n'
-          printf '<p class="whatdo-danger">%s</p>\n' "$(html_escape "$EXPLAIN_DANGER")"
+          if [ -n "$EXPLAIN_DANGER" ]; then
+            # 複数行 danger を各 <p> に分けて出力（subshell 回避のため awk で処理）
+            printf '%s\n' "$EXPLAIN_DANGER" | awk '
+              NF>0 {
+                line=$0
+                gsub(/&/,"\\&amp;",line); gsub(/</,"\\&lt;",line)
+                gsub(/>/,"\\&gt;",line); gsub(/"/,"\\&quot;",line)
+                print "<p class=\"whatdo-danger\">" line "</p>"
+              }
+            '
+          fi
           printf '</div>\n'
         fi
       fi

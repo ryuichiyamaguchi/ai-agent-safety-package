@@ -123,63 +123,159 @@ function Get-CardBody {
 }
 
 # ----- コマンド解説エンジン (パターン式・LLM不要・オフライン・決定的) ----
-# 入力: 実コマンド文字列。戻り値: [PSCustomObject]@{ WhatDo=...; Icon=...; Danger=... }
-#   WhatDo  平易な日本語の「何をする？」本文（未知コマンドは空）
-#   Icon    セクション見出しアイコン（既定 📂）
-#   Danger  危険語が含まれる時の強調1行（無ければ空）
-# 嘘解説を避けるため、語彙に無い動詞は WhatDo を空にしてフォールバックさせる。
+# 設計原則: 「証明されない限り安全と言わない(保守的)」。
 # scripts/macos/lib/explainer.sh の explain_command と parity を保つ。
+# 戻り値: [PSCustomObject]@{ WhatDo=...; Icon=...; Danger=... }
 
-# 複合コマンドの主コマンド（先頭セグメント）を返す。| ; && || の手前まで。
-function Get-PrimarySegment([string]$Full) {
-    $out = New-Object System.Text.StringBuilder
+# | ; && || でコマンドを分割してセグメント配列を返す。
+function Split-CommandSegments([string]$Full) {
+    $segs = [System.Collections.Generic.List[string]]::new()
+    $sb = New-Object System.Text.StringBuilder
     $i = 0
     $len = $Full.Length
     while ($i -lt $len) {
         $c = $Full[$i]
         $c2 = if ($i + 1 -lt $len) { [string]$c + [string]$Full[$i + 1] } else { "" }
-        if ($c -eq '|' -or $c -eq ';') { break }
-        if ($c2 -eq '&&' -or $c2 -eq '||') { break }
-        [void]$out.Append($c)
+        if ($c -eq '|' -or $c -eq ';') {
+            $s = $sb.ToString().Trim(); if ($s -ne "") { $segs.Add($s) }; $sb.Clear() | Out-Null
+        } elseif ($c2 -eq '&&' -or $c2 -eq '||') {
+            $s = $sb.ToString().Trim(); if ($s -ne "") { $segs.Add($s) }; $sb.Clear() | Out-Null
+            $i++  # skip second char
+        } else {
+            [void]$sb.Append($c)
+        }
         $i++
     }
-    return $out.ToString().Trim()
+    $s = $sb.ToString().Trim(); if ($s -ne "") { $segs.Add($s) }
+    return $segs
 }
 
-# 主コマンドの対象を抽出する。URL優先 → -Path/-LiteralPath/-Destination/-Url の値
-# → 最初の非フラグ位置引数。取れなければ空。
-function Get-ExplainTargetFromCmd([string]$Primary) {
-    $toks = $Primary -split '\s+' | Where-Object { $_ -ne "" }
-    if ($toks.Count -eq 0) { return "" }
+# sudo を先頭から除去してセグメントを返す。
+function Remove-SudoPrefix([string]$Seg) {
+    $toks = $Seg -split '\s+' | Where-Object { $_ -ne "" }
+    if ($toks.Count -ge 2 -and $toks[0].ToLowerInvariant() -eq 'sudo') {
+        return ($toks[1..($toks.Count - 1)] -join ' ')
+    }
+    return $Seg
+}
+
+# セグメントに > or >> リダイレクトが含まれるか判定。
+function Test-HasRedirect([string]$Seg) {
+    return ($Seg -match '>>?')
+}
+
+# 全文からリダイレクト先(最初の > or >> の被演算子)を取得。なければ空。
+function Get-RedirectTarget([string]$Full) {
+    if ($Full -match '>>?\s*([^\s>|;&]+)') { return $matches[1] }
+    return ""
+}
+
+# カテゴリ別対象抽出。
+# - URL 優先
+# - -Path/-LiteralPath/-Destination/-Url の次トークン
+# - grep/sls/findstr/select-string は第1位置引数をスキップ(パターン除外)
+# - del は / スイッチ除外
+# - chmod/chown は mode(数字/記号)除外
+# - > 演算子・直後トークンを除外
+function Get-ExplainTargetFromCmd([string]$Primary, [string]$Category) {
+    $allToks = $Primary -split '\s+' | Where-Object { $_ -ne "" }
+    if ($allToks.Count -eq 0) { return "" }
+
+    # リダイレクト演算子とその後トークンのインデックスを収集
+    $redirIdx = @{}
+    for ($i = 0; $i -lt $allToks.Count; $i++) {
+        if ($allToks[$i] -match '^>>?$') {
+            $redirIdx[$i] = $true
+            if ($i + 1 -lt $allToks.Count) { $redirIdx[$i + 1] = $true }
+        }
+        if ($allToks[$i] -match '^>>?[^>]') { $redirIdx[$i] = $true }  # >>foo 形式
+    }
+
     # URL 最優先
-    foreach ($t in $toks) {
+    foreach ($t in $allToks) {
         if ($t -match '^https?://') { return $t }
     }
-    # 名前付きパラメータ
-    for ($i = 1; $i -lt $toks.Count; $i++) {
-        $lf = $toks[$i].ToLowerInvariant()
+    # 名前付き -Path/-LiteralPath/-Destination/-Url
+    for ($i = 1; $i -lt $allToks.Count; $i++) {
+        if ($redirIdx[$i]) { continue }
+        $lf = $allToks[$i].ToLowerInvariant()
         if ($lf -eq '-path' -or $lf -eq '-literalpath' -or $lf -eq '-destination' -or $lf -eq '-url' -or $lf -eq '-uri') {
-            if ($i + 1 -lt $toks.Count) { return $toks[$i + 1] }
+            for ($j = $i + 1; $j -lt $allToks.Count; $j++) {
+                if (-not $redirIdx[$j]) { return $allToks[$j] }
+            }
         }
     }
-    # 最初の非フラグ位置引数（動詞 [0] をスキップ）
-    for ($i = 1; $i -lt $toks.Count; $i++) {
-        if ($toks[$i].StartsWith('-')) { continue }
-        return $toks[$i]
+    # 位置引数
+    $skip = 0
+    $skipCats = @('grep','findstr','select-string','sls')
+    if ($skipCats -contains $Category) { $skip = 1 }  # 第1位置引数=パターン除外
+    $pos = 0
+    for ($i = 1; $i -lt $allToks.Count; $i++) {
+        if ($redirIdx[$i]) { continue }
+        $t = $allToks[$i]
+        if ($t.StartsWith('-')) { continue }  # - フラグ除外
+        # del の / スイッチ除外
+        if ($Category -eq 'del' -and $t.StartsWith('/')) { continue }
+        # chmod/chown の mode 除外 (数字/記号のみ)
+        if (($Category -eq 'chmod' -or $Category -eq 'chown') -and ($t -match '^\d+$' -or $t -match '^[ugoa]*[+\-=][rwxst,ugoa]*')) { continue }
+        $pos++
+        if ($pos -le $skip) { continue }
+        return $t
     }
     return ""
 }
 
-# 危険語（再帰削除・権限昇格）を全文から検知して強調1行を返す（無ければ空）。
-function Get-ExplainDanger([string]$Full) {
+# 全セグメント走査でフラグをまとめて返す。
+function Get-CommandFlags([string]$Full) {
+    $flags = @{
+        Sudo = $false; Delete = $false; DeleteRecurse = $false
+        Write = $false; Exec = $false; Perm = $false
+    }
     $lc = $Full.ToLowerInvariant()
+    # sudo / 権限昇格
     if ($lc -match '(^|\s)sudo(\s|$)' -or $lc -match 'runas' -or $lc -match 'start-process.*-verb\s+runas') {
-        return "⚠️ 管理者権限への昇格を含みます（PC全体に影響する可能性）"
+        $flags.Sudo = $true
     }
-    if ($lc -match '\brm\b[^|;]*\s-[a-z]*r' -or $lc -match '\s-recurse' -or $lc -match '\s-rf' -or $lc -match '\s-fr' -or $lc -match 'remove-item[^|;]*-recurse') {
-        return "⚠️ フォルダごとの完全削除（復元できません）を含みます"
+    # リダイレクト(全文)
+    if (Test-HasRedirect $Full) { $flags.Write = $true }
+
+    $segs = Split-CommandSegments $Full
+    foreach ($rawSeg in $segs) {
+        $seg = Remove-SudoPrefix $rawSeg
+        $segToks = $seg -split '\s+' | Where-Object { $_ -ne "" }
+        if ($segToks.Count -eq 0) { continue }
+        $vl = $segToks[0].ToLowerInvariant()
+        $segLc = $seg.ToLowerInvariant()
+
+        switch ($vl) {
+            { $_ -in @('rm','rmdir','del','erase','remove-item','ri') } {
+                $flags.Delete = $true
+                # 削除動詞 + 再帰フラグ(語境界考慮)
+                if ($segLc -match '\brm\b.*\s-[a-z]*r[a-z]*' -or
+                    $segLc -match 'remove-item.*\s-recurse' -or
+                    $segLc -match '\bdel\b.*/s\b') {
+                    $flags.DeleteRecurse = $true
+                }
+            }
+            { $_ -in @('touch','new-item','set-content','out-file','add-content','tee','echo','printf','mv','move','move-item','cp','copy','copy-item') } {
+                $flags.Write = $true
+            }
+            { $_ -in @('bash','sh','zsh','python','python3','node','source','invoke-expression','iex','start-process','&') } {
+                $flags.Exec = $true
+            }
+            { $_ -in @('chmod','chown','icacls','set-acl','set-itemproperty') } {
+                $flags.Perm = $true
+            }
+        }
+        # xargs rm
+        if ($segLc -match '\bxargs\b.*\brm\b') {
+            $flags.Delete = $true
+            if ($segLc -match '\bxargs\b.*\brm\b.*\s-[a-z]*r') { $flags.DeleteRecurse = $true }
+        }
+        # find -delete
+        if ($vl -eq 'find' -and $segLc -match '\s-delete\b') { $flags.Delete = $true }
     }
-    return ""
+    return $flags
 }
 
 function Get-CommandExplanation([string]$Full) {
@@ -190,119 +286,114 @@ function Get-CommandExplanation([string]$Full) {
         return [PSCustomObject]@{ WhatDo = ""; Icon = $icon; Danger = "" }
     }
 
-    $danger = Get-ExplainDanger $Full
-    $primary = Get-PrimarySegment $Full
-    # 先頭の sudo を剥がして verb/target を実コマンド基準に揃える（sudo は danger 側で強調済み）。
-    $ptoks = $primary -split '\s+' | Where-Object { $_ -ne "" }
-    if ($ptoks.Count -ge 2 -and $ptoks[0].ToLowerInvariant() -eq 'sudo') {
-        $primary = ($ptoks[1..($ptoks.Count - 1)] -join ' ')
-    }
-    $toks = $primary -split '\s+' | Where-Object { $_ -ne "" }
-    $verb = if ($toks.Count -gt 0) { $toks[0] } else { "" }
+    # 全セグメントフラグ
+    $flags = Get-CommandFlags $Full
+
+    # 主コマンドの動詞を先に取得(DANGER 組み立てで参照)
+    $segs = Split-CommandSegments $Full
+    $firstSeg = if ($segs.Count -gt 0) { Remove-SudoPrefix $segs[0] } else { "" }
+    $fToks = $firstSeg -split '\s+' | Where-Object { $_ -ne "" }
+    $verb = if ($fToks.Count -gt 0) { $fToks[0] } else { "" }
     $verbLc = $verb.ToLowerInvariant()
-    $target = Get-ExplainTargetFromCmd $primary
+
+    # DANGER 組み立て
+    $dangerLines = [System.Collections.Generic.List[string]]::new()
+    if ($flags.Sudo) { $dangerLines.Add("⚠️ 管理者権限への昇格を含みます（PC全体に影響する可能性）") }
+    if ($flags.DeleteRecurse) {
+        $dangerLines.Add("⚠️ フォルダごとの完全削除（復元できません）を含みます")
+    } elseif ($flags.Delete) {
+        $dangerLines.Add("⚠️ ファイル・フォルダの削除を含みます")
+    }
+    if ($flags.Exec -and -not $flags.Sudo) {
+        $execVerbs = @('bash','sh','zsh','python','python3','node','source','invoke-expression','iex','start-process','&')
+        if ($verbLc -notin $execVerbs) {
+            $dangerLines.Add("⚠️ スクリプト/プログラムの実行を含みます")
+        }
+    }
+    $danger = $dangerLines -join "`n"
+
+    # read-only フラグ: 全フラグ false の時のみ安心文を出す
+    $readonlyAll = (-not $flags.Sudo) -and (-not $flags.Delete) -and (-not $flags.Write) -and (-not $flags.Exec) -and (-not $flags.Perm)
+
+    # 複合コマンドか
+    $isCompound = ($Full -match '(\||;|&&|\|\|)')
+
+    # > リダイレクト → 書き込み解説に差し替え
+    if ($flags.Write -or (Test-HasRedirect $Full)) {
+        $redirTgt = Get-RedirectTarget $Full
+        if (-not [string]::IsNullOrEmpty($redirTgt) -and (Test-HasRedirect $Full)) {
+            $redirOp = if ($Full -match '>>') { "追記" } else { "書き込み(上書き)" }
+            $whatdo = "$redirTgt にファイルを${redirOp}しようとしています。"
+            if ($isCompound) { $whatdo += "（ほかにも処理が続きます。全文は上のコマンドを確認してください）" }
+            $icon = "✏️"
+            return [PSCustomObject]@{ WhatDo = $whatdo; Icon = $icon; Danger = $danger }
+        }
+    }
+
+    # 対象抽出
+    $target = Get-ExplainTargetFromCmd $firstSeg $verbLc
     $tdisp = if ([string]::IsNullOrEmpty($target)) { "現在のフォルダ" } else { $target }
 
-    # 複合（パイプ/連結）一言
-    $extra = ""
-    if ($Full -match '(\||;|&&|\|\|)') {
-        $extra = "（ほかにも処理が続きます。全文は上のコマンドを確認してください）"
-    }
+    $extra = if ($isCompound) { "（ほかにも処理が続きます。全文は上のコマンドを確認してください）" } else { "" }
 
     switch -Regex ($verbLc) {
         '^(ls|dir|get-childitem|gci|ll|la)$' {
             $icon = "📂"
-            $whatdo = "$tdisp の中のファイル・フォルダ一覧を見ようとしています。（中身を見るだけ。削除や書き換えはしません）"
+            $whatdo = if ($readonlyAll) { "$tdisp の中のファイル・フォルダ一覧を見ようとしています。（中身を見るだけ。削除や書き換えはしません）" } else { "$tdisp の中のファイル・フォルダ一覧を見ようとしています。" }
             break
         }
         '^(cat|head|tail|less|more|type|get-content|gc)$' {
             $icon = "📄"
-            $whatdo = "$tdisp の中身を読もうとしています。（読むだけ。書き換えはしません）"
+            $whatdo = if ($readonlyAll) { "$tdisp の中身を読もうとしています。（読むだけ。書き換えはしません）" } else { "$tdisp の中身を読もうとしています。" }
             break
         }
         '^(rm|rmdir|del|erase|remove-item|ri)$' {
-            $icon = "🗑"
-            $whatdo = "$tdisp を削除しようとしています。"
-            break
+            $icon = "🗑"; $whatdo = "$tdisp を削除しようとしています。"; break
         }
         '^(touch|new-item|set-content|out-file|add-content|tee)$' {
-            $icon = "✏️"
-            $whatdo = "$tdisp を作成または書き換えようとしています。"
-            break
+            $icon = "✏️"; $whatdo = "$tdisp を作成または書き換えようとしています。"; break
         }
         '^(echo|printf)$' {
-            if ($primary -match '>') {
-                $redir = ""
-                if ($primary -match '>>?\s*([^\s|;]+)') { $redir = $matches[1] }
-                if ([string]::IsNullOrEmpty($redir)) { $redir = "ファイル" }
-                $icon = "✏️"
-                $whatdo = "$redir に文字を書き込もうとしています。"
-            } else {
-                $icon = "📄"
-                $whatdo = "画面に文字を表示しようとしています。（表示するだけ）"
-            }
-            break
+            $icon = "📄"; $whatdo = "画面に文字を表示しようとしています。"; break
         }
         '^(mv|move|move-item)$' {
-            $icon = "📦"
-            $whatdo = "$tdisp を別の場所に移動しようとしています。"
-            break
+            $icon = "📦"; $whatdo = "$tdisp を別の場所に移動しようとしています。"; break
         }
         '^(cp|copy|copy-item)$' {
-            $icon = "📦"
-            $whatdo = "$tdisp を別の場所にコピーしようとしています。"
-            break
+            $icon = "📦"; $whatdo = "$tdisp を別の場所にコピーしようとしています。"; break
         }
         '^(curl|wget|invoke-webrequest|iwr|invoke-restmethod|irm|nc|ncat|netcat)$' {
             $icon = "🌐"
-            if (-not [string]::IsNullOrEmpty($target)) {
-                $whatdo = "$target とインターネット通信（ダウンロードまたは送信）をしようとしています。"
-            } else {
-                $whatdo = "インターネット通信（ダウンロードまたは送信）をしようとしています。"
-            }
+            $whatdo = if (-not [string]::IsNullOrEmpty($target)) { "$target とインターネット通信（ダウンロードまたは送信）をしようとしています。" } else { "インターネット通信（ダウンロードまたは送信）をしようとしています。" }
             break
         }
         '^(npm|pip|pip3|winget|choco|brew|apt|apt-get|yum|gem)$' {
-            if ($primary -match '(^|\s)(install|add|i)(\s|$)') {
+            if ($firstSeg -match '(^|\s)(install|add|i)(\s|$)') {
                 $icon = "📥"
                 $pkg = ""
-                if ($toks.Count -ge 3) {
-                    for ($j = 2; $j -lt $toks.Count; $j++) {
-                        if (-not $toks[$j].StartsWith('-')) { $pkg = $toks[$j]; break }
-                    }
+                for ($j = 2; $j -lt $fToks.Count; $j++) {
+                    if (-not $fToks[$j].StartsWith('-')) { $pkg = $fToks[$j]; break }
                 }
                 if ([string]::IsNullOrEmpty($pkg)) { $pkg = "パッケージ" }
                 $whatdo = "$pkg をインターネットからインストール（PC に新しいプログラムを追加）しようとしています。"
-            } else {
-                $icon = "⚙️"
-                $whatdo = "$verb コマンドを実行しようとしています。"
-            }
+            } else { $icon = "⚙️"; $whatdo = "$verb コマンドを実行しようとしています。" }
             break
         }
-        '^(bash|sh|zsh|python|python3|node|source|\.|invoke-expression|iex|start-process)$' {
-            $icon = "⚙️"
-            $whatdo = "$tdisp を実行しようとしています。（別のプログラムやスクリプトを動かします）"
-            break
+        '^(bash|sh|zsh|python|python3|node|source|invoke-expression|iex|start-process|&)$' {
+            $icon = "⚙️"; $whatdo = "$tdisp を実行しようとしています。（別のプログラムやスクリプトを動かします）"; break
         }
         '^(chmod|chown|icacls|set-acl|set-itemproperty)$' {
-            $icon = "🔑"
-            $whatdo = "$tdisp のアクセス権限や設定を変更しようとしています。"
-            break
+            $icon = "🔑"; $whatdo = "$tdisp のアクセス権限や設定を変更しようとしています。"; break
         }
         '^(cd|set-location|sl|pushd)$' {
-            $icon = "📁"
-            $whatdo = "作業フォルダを $tdisp に移動しようとしています。"
-            break
+            $icon = "📁"; $whatdo = "作業フォルダを $tdisp に移動しようとしています。"; break
         }
         '^(grep|findstr|select-string|sls|find)$' {
             $icon = "🔍"
-            $whatdo = "$tdisp から文字列やファイルを検索しようとしています。"
+            $whatdo = if ($readonlyAll) { "$tdisp から文字列やファイルを検索しようとしています。（読むだけ。書き換えはしません）" } else { "$tdisp から文字列やファイルを検索しようとしています。" }
             break
         }
-        default {
-            # 未知コマンド: 嘘解説をせず空のままフォールバックさせる
-            $whatdo = ""
-        }
+        default { $whatdo = "" }
     }
 
     if (-not [string]::IsNullOrEmpty($whatdo) -and -not [string]::IsNullOrEmpty($extra)) {
@@ -565,17 +656,21 @@ function Write-NowHtml {
             # 「これは何をする？」具体解説（bash モードのみ・決定的・LLM不要）。
             if ($Mode -eq "bash") {
                 $expl = Get-CommandExplanation $ActionText
-                if (-not [string]::IsNullOrEmpty($expl.WhatDo)) {
+                $hasDanger = -not [string]::IsNullOrEmpty($expl.Danger)
+                $hasWhatdo = -not [string]::IsNullOrEmpty($expl.WhatDo)
+                if ($hasWhatdo -or $hasDanger) {
                     [void]$sb.Append("<div class=`"whatdo`">`n")
-                    [void]$sb.Append("<div class=`"whatdo-label`">" + (ConvertTo-HtmlEscaped $expl.Icon) + " これは何をする？</div>`n")
-                    [void]$sb.Append("<p class=`"whatdo-body`">" + (ConvertTo-HtmlEscaped $expl.WhatDo) + "</p>`n")
-                    if (-not [string]::IsNullOrEmpty($expl.Danger)) {
-                        [void]$sb.Append("<p class=`"whatdo-danger`">" + (ConvertTo-HtmlEscaped $expl.Danger) + "</p>`n")
+                    if ($hasWhatdo) {
+                        [void]$sb.Append("<div class=`"whatdo-label`">" + (ConvertTo-HtmlEscaped $expl.Icon) + " これは何をする？</div>`n")
+                        [void]$sb.Append("<p class=`"whatdo-body`">" + (ConvertTo-HtmlEscaped $expl.WhatDo) + "</p>`n")
                     }
-                    [void]$sb.Append("</div>`n")
-                } elseif (-not [string]::IsNullOrEmpty($expl.Danger)) {
-                    [void]$sb.Append("<div class=`"whatdo`">`n")
-                    [void]$sb.Append("<p class=`"whatdo-danger`">" + (ConvertTo-HtmlEscaped $expl.Danger) + "</p>`n")
+                    if ($hasDanger) {
+                        foreach ($dLine in ($expl.Danger -split "`n")) {
+                            if (-not [string]::IsNullOrWhiteSpace($dLine)) {
+                                [void]$sb.Append("<p class=`"whatdo-danger`">" + (ConvertTo-HtmlEscaped $dLine) + "</p>`n")
+                            }
+                        }
+                    }
                     [void]$sb.Append("</div>`n")
                 }
             }
