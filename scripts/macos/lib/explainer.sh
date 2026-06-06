@@ -31,17 +31,35 @@ cards_dir() {
 # ----- 抽出ヘルパ ---------------------------------------------------------
 
 # 一行 JSON 風入力からキーの文字列値を雑に抽出する（jq 依存を避ける）。
-# 抽出後に JSON escape をデコード。二重デコードを防ぐため \n/\t/\r を先に処理してから \\ → \ を適用。
-# 順序: \n→LF, \t→TAB, \r→CR を先に → \\ →\ を後に → \" → " / \/ → /
+# 抽出後に JSON 文字列エスケープを _json_unescape で正しくデコードする(perl・1パス)。
+# \" \\ \/ \b \f \n \r \t \uXXXX に対応し、\u000a(改行)や \u003e(>) を隠した入力でも検出が効く。
 # 注意: 完全な JSON パーサではない。教育用途では十分。
 extract_json_string() {
   local key="$1"
   printf '%s' "$RAW_INPUT" | tr '\n' ' ' \
     | sed -nE "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"((\\\\.|[^\"\\\\])*)\".*/\\1/p" \
     | head -n 1 \
-    | sed 's/\\n/\
-/g; s/\\t/	/g; s/\\r//g' \
-    | sed 's/\\\\/\\/g; s/\\"/"/g; s/\\\//\//g'
+    | _json_unescape
+}
+
+# JSON 文字列エスケープを1パス(左→右)で正しくデコードする。
+# 二重エスケープも誤って改行化せず、\uXXXX を実文字へ復元するため、
+# 改行や > を \u 形式で隠した入力でも区切り・リダイレクト検出が効く。
+_json_unescape() {
+  perl -CSDA -0777 -pe '
+    s{\\(u[0-9a-fA-F]{4}|["\\/bfnrt])}{
+      my $e = $1;
+        $e eq q{"}  ? q{"}  :
+        $e eq q{\\} ? q{\\} :
+        $e eq q{/}  ? q{/}  :
+        $e eq q{b}  ? "\b"  :
+        $e eq q{f}  ? "\f"  :
+        $e eq q{n}  ? "\n"  :
+        $e eq q{r}  ? "\r"  :
+        $e eq q{t}  ? "\t"  :
+        chr(hex(substr($e,1)))
+    }ge;
+  ' 2>/dev/null
 }
 
 # 解説対象として抽出する文字列（MODE 依存）。
@@ -171,7 +189,7 @@ _explain_split_segments() {
         c=substr($0,i,1)
         c2=substr($0,i,2)
         # 改行は区切り
-        if (c=="\n") { flush(); continue }
+        if (c=="\n" || c=="\r") { flush(); continue }
         if (c=="|" || c==";") { flush()
         } else if (c2=="&&" || c2=="||") { flush(); i++  # skip second char
         } else if (c=="&" && c2!="&&" && c2!="&>") {
@@ -769,7 +787,7 @@ _explain_split_segments_first() {
       for (i=1;i<=L;i++) {
         c=substr($0,i,1)
         c2=substr($0,i,2)
-        if (c=="\n" || c=="|" || c==";") {
+        if (c=="\n" || c=="\r" || c=="|" || c==";") {
           gsub(/^[[:space:]]+/,"",seg); gsub(/[[:space:]]+$/,"",seg)
           if (seg!="") { print seg; exit }
           seg=""

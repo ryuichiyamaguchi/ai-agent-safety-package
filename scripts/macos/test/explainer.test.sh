@@ -1121,6 +1121,42 @@ else
   ng "T87-reg: del /s C:\\Temp -> path intact + NO calm"
 fi
 
+# --- T88-T90: JSON の u-エスケープ / CR で区切り・リダイレクトを隠せないこと(false-safety防止) ---
+# extract_json_string が _json_unescape で u形式と \r を実文字へ復元するため、
+# 隠された 改行 / > / CR でも複合・リダイレクト検出が発火し安心文を出さない。
+# u形式エスケープは BS(バックスラッシュ)変数で組み立てる(リテラルだと環境で変換されうるため)。
+BS="$(printf '\\')"
+
+# T88: u形式の改行(LF)で2コマンドを連結 → 安心文なし
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt'"${BS}"'u000atouch harmless.tmp"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html"; then
+  ok "T88: hidden newline (u-escape) -> NO calm"
+else
+  ng "T88: hidden newline (u-escape) -> NO calm"
+fi
+
+# T89: u形式の > でリダイレクトを隠す → 書き込み検出 → 安心文なし
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt'"${BS}"'u003eout.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html"; then
+  ok "T89: hidden redirect (u-escape >) -> NO calm"
+else
+  ng "T89: hidden redirect (u-escape >) -> NO calm"
+fi
+
+# T90: CR(\r)を区切りとして扱う → 複合 → 安心文なし
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt'"${BS}"'rtouch harmless.tmp"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html"; then
+  ok "T90: CR separator -> NO calm"
+else
+  ng "T90: CR separator -> NO calm"
+fi
+
 echo ""
 echo "explainer.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

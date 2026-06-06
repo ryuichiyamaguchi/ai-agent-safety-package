@@ -136,7 +136,7 @@ function Split-CommandSegments([string]$Full) {
     while ($i -lt $len) {
         $c = $Full[$i]
         $c2 = if ($i + 1 -lt $len) { [string]$c + [string]$Full[$i + 1] } else { "" }
-        if ($c -eq "`n" -or $c -eq '|' -or $c -eq ';') {
+        if ($c -eq "`n" -or $c -eq "`r" -or $c -eq '|' -or $c -eq ';') {
             $s = $sb.ToString().Trim(); if ($s -ne "") { $segs.Add($s) }; $sb.Clear() | Out-Null
         } elseif ($c2 -eq '&&' -or $c2 -eq '||') {
             $s = $sb.ToString().Trim(); if ($s -ne "") { $segs.Add($s) }; $sb.Clear() | Out-Null
