@@ -487,10 +487,13 @@ _explain_scan_flags() {
     # content-write リダイレクト(2> 除く)→ write フラグ
     if _explain_has_redir "$seg"; then _ecf_write=1; fi
 
-    # 動詞が read-only カテゴリでない場合 ro_verb フラグを落とす
+    # reassurance-safe 集合: フラグでも絶対に実行/書き込みできない純粋リーダーのみ。
+    # find/grep/awk/sed 等は -exec/-w 等でexec/write 可能なため除外する。
+    # このフラグが 0 の時は安心文「見るだけ・しません」を出さない。
     case "$verb_lc" in
-      ls|dir|get-childitem|gci|ll|la|cat|head|tail|less|more|type|get-content|gc|\
-grep|findstr|select-string|sls|find|cd|set-location|sl|pushd) ;;
+      ls|dir|get-childitem|gci|ll|la|\
+cat|type|get-content|gc|head|tail|more|\
+wc|file|stat|pwd|whoami|date) ;;
       *) _ecf_ro_verb=0 ;;
     esac
 
@@ -530,9 +533,13 @@ grep|findstr|select-string|sls|find|cd|set-location|sl|pushd) ;;
         _ecf_delete_recurse=1
       fi
     fi
-    # find -delete
+    # find -delete → 削除
     if [ "$verb_lc" = "find" ] && printf '%s' "$lc_seg" | grep -qE -- '[[:space:]]-delete\b'; then
       _ecf_delete=1
+    fi
+    # find -exec/-execdir/-ok → 実行(任意コマンドを呼ぶ)
+    if [ "$verb_lc" = "find" ] && printf '%s' "$lc_seg" | grep -qE -- '[[:space:]]-(exec|execdir|ok)\b'; then
+      _ecf_exec=1
     fi
   done <<EOF
 $(_explain_split_segments "$full")
@@ -596,7 +603,8 @@ explain_command() {
 
   # ホワイトリスト方式の readonly_all:
   # 以下を全て満たす「単一の単純な読み取りコマンド」の時のみ安心文を出す。
-  # 1. 全動詞が read-only カテゴリ(list/read/search/cd)のみ
+  # 1. 全動詞が reassurance-safe 集合(ls/cat/head/tail 等の純粋リーダー)のみ
+  #    find/grep/awk/sed 等は -exec/-w 等でexec/write 可能なため対象外
   # 2. 任意のリダイレクトが一切ない(> < << 等。2> 含む)
   # 3. コマンド置換が一切ない($(...) `...` <(...))
   # 4. パイプ/連結が一切ない(| ; && ||)
@@ -645,8 +653,8 @@ explain_command() {
         EXPLAIN_WHATDO="${tdisp} の中のファイル・フォルダ一覧を見ようとしています。"
       fi
       ;;
-    # 読む
-    cat|head|tail|less|more|type|get-content|gc)
+    # 読む(純粋リーダー。フラグで exec/write 不可のもの)
+    cat|head|tail|less|more|type|get-content|gc|wc|file|stat|pwd|whoami|date)
       EXPLAIN_ICON="📄"
       if [ "$readonly_all" -eq 1 ]; then
         EXPLAIN_WHATDO="${tdisp} の中身を読もうとしています。（読むだけ。書き換えはしません）"

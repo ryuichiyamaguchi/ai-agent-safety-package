@@ -8,7 +8,9 @@
 #
 # bash テスト: scripts/macos/test/explainer.test.sh の T49 ループが iterate
 # PS テスト: pwsh 不在のため山口さん Windows 実機で確認。このファイルが契約の SSOT。
-# readonly=true: 単一読取コマンド AND リダイレクト/コマンド置換/パイプ連結が全くない時のみ
+# readonly=true: reassurance-safe 集合(ls/cat/head/tail/wc等の純粋リーダー)のみ
+#                AND リダイレクト/コマンド置換/パイプ連結が全くない時のみ
+#                find/grep/awk/sed 等は exec/write 可能なため readonly=false
 
 ls /tmp	list	false	true	/tmp
 ls 2>/dev/null	list	false	false
@@ -17,8 +19,8 @@ cat foo.txt 2> err.log	read	false	false	foo.txt
 ls > out.txt	write	false	false	out.txt
 cat readme.txt > dest.txt	write	false	false	dest.txt
 echo "a > b"	unknown	false	false
-grep ">" file.txt	search	false	true	file.txt
-grep abc foo.txt	search	false	true	foo.txt
+grep ">" file.txt	search	false	false	file.txt
+grep abc foo.txt	search	false	false	foo.txt
 chmod 644 /etc/hostsfile	perm	false	false	/etc/hostsfile
 ls foo | del temp.txt	list	true	false
 cat build.sh | sh	read	true	false	build.sh
@@ -31,3 +33,7 @@ xargs rm badfile	unknown	true	false
 cat foo | grep abc	read	false	false	foo
 ls && cat foo	list	false	false
 cat < foo.txt	read	false	false
+find . -exec printf {} +	search	true	false
+find . -delete	search	true	false
+find . -name foo	search	false	false
+wc foo.txt	read	false	true	foo.txt

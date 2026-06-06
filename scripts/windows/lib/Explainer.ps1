@@ -395,16 +395,19 @@ function Get-CommandFlags([string]$Full) {
                 $flags.Perm = $true
             }
         }
-        # RoVerb: read-only カテゴリでない動詞があれば false
-        $roVerbs = @('ls','dir','get-childitem','gci','ll','la','cat','head','tail','less','more','type','get-content','gc','grep','findstr','select-string','sls','find','cd','set-location','sl','pushd')
+        # RoVerb: reassurance-safe 集合(純粋リーダーのみ)でない動詞があれば false
+        # find/grep/awk/sed は -exec/-w 等で exec/write 可能なため除外
+        $roVerbs = @('ls','dir','get-childitem','gci','ll','la','cat','type','get-content','gc','head','tail','more','wc','file','stat','pwd','whoami','date')
         if ($vl -notin $roVerbs) { $flags.RoVerb = $false }
-        # xargs rm: xargs が先頭 verb の時のみ削除扱い(引数中に xargs rm が現れるだけでは検出しない)
+        # xargs rm: xargs が先頭 verb の時のみ削除扱い
         if ($vl -eq 'xargs' -and $segLc -match '\bxargs\b\s+(-[^\s]+\s+)*rm\b') {
             $flags.Delete = $true
             if ($segLc -match '\bxargs\b\s+(-[^\s]+\s+)*rm\b.*\s-[a-z]*r') { $flags.DeleteRecurse = $true }
         }
-        # find -delete
+        # find -delete → 削除
         if ($vl -eq 'find' -and $segLc -match '\s-delete\b') { $flags.Delete = $true }
+        # find -exec/-execdir/-ok → 実行(任意コマンドを呼ぶ)
+        if ($vl -eq 'find' -and $segLc -match '\s-(exec|execdir|ok)\b') { $flags.Exec = $true }
     }
     return $flags
 }
@@ -480,7 +483,7 @@ function Get-CommandExplanation([string]$Full) {
             $whatdo = if ($readonlyAll) { "$tdisp の中のファイル・フォルダ一覧を見ようとしています。（中身を見るだけ。削除や書き換えはしません）" } else { "$tdisp の中のファイル・フォルダ一覧を見ようとしています。" }
             break
         }
-        '^(cat|head|tail|less|more|type|get-content|gc)$' {
+        '^(cat|head|tail|less|more|type|get-content|gc|wc|file|stat|pwd|whoami|date)$' {
             $icon = "📄"
             $whatdo = if ($readonlyAll) { "$tdisp の中身を読もうとしています。（読むだけ。書き換えはしません）" } else { "$tdisp の中身を読もうとしています。" }
             break

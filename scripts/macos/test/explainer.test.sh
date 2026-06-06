@@ -876,3 +876,94 @@ fi
 echo ""
 echo "explainer.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]
+
+# ============================================================
+# cycle-7 追加テスト: reassurance-safe 集合 + find -exec
+# ============================================================
+
+# --- T65: find -exec → 実行警告 + 安心文なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"find . -exec printf {} +"}}'
+run_explain_with_json "bash" "$json"
+t65_exec=0; t65_no_calm=0
+if [ -f "$html" ] && grep -q '<p class="whatdo-danger"' "$html" && grep -q '実行' "$html"; then t65_exec=1; fi
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then t65_no_calm=1; fi
+if [ "$t65_exec" -eq 1 ] && [ "$t65_no_calm" -eq 1 ]; then
+  ok "T65: find -exec -> exec danger + NO calm (reassurance-safe excludes find)"
+else
+  ng "T65: find -exec -> exec danger + NO calm (exec=$t65_exec no_calm=$t65_no_calm)"
+fi
+
+# --- T66: find -execdir → 実行警告 ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"find . -execdir cat {} ;"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '<p class="whatdo-danger"' "$html" && grep -q '実行' "$html" && ! grep -q 'しません' "$html"; then
+  ok "T66: find -execdir -> exec danger, NO calm"
+else
+  ng "T66: find -execdir -> exec danger, NO calm"
+fi
+
+# --- T67: find -delete → 削除警告 + 安心文なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"find . -delete"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '<p class="whatdo-danger"' "$html" && grep -q '削除' "$html" && ! grep -q 'しません' "$html"; then
+  ok "T67: find -delete -> delete danger, NO calm"
+else
+  ng "T67: find -delete -> delete danger, NO calm"
+fi
+
+# --- T68: find -name (exec なし) → 検索カテゴリ表示・安心文なし・危険なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"find . -name foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '検索' "$html" && ! grep -q 'しません' "$html" && ! grep -q '<p class="whatdo-danger"' "$html"; then
+  ok "T68: find -name -> search category, NO calm, NO danger"
+else
+  ng "T68: find -name -> search category, NO calm, NO danger"
+fi
+
+# --- T69: grep (reassurance-safe 外) → 安心文なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"grep abc foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '検索' "$html" && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then
+  ok "T69: grep -> search category, NO calm (grep not in reassurance-safe)"
+else
+  ng "T69: grep -> search category, NO calm"
+fi
+
+# --- T70: wc foo.txt(素) → reassurance-safe で安心文あり ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"wc -l foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '<p class="whatdo-body"' "$html" && (grep -q 'しません' "$html" || grep -q '読むだけ' "$html"); then
+  ok "T70: wc foo.txt -> calm text present (wc is reassurance-safe)"
+else
+  ng "T70: wc foo.txt -> calm text present (wc should be reassurance-safe)"
+fi
+
+# --- T71: 退行 — ls(素) 安心文あり ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'しません' "$html"; then
+  ok "T71-reg: ls (bare) -> calm text present (regression guard)"
+else
+  ng "T71-reg: ls (bare) -> calm text present (regression)"
+fi
+
+# --- T72: 退行 — cat foo.txt(素) 安心文あり ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '読むだけ' "$html"; then
+  ok "T72-reg: cat foo.txt (bare) -> calm text present (regression guard)"
+else
+  ng "T72-reg: cat foo.txt (bare) -> calm text present (regression)"
+fi
+
+echo ""
+echo "explainer.test summary: pass=$pass fail=$fail"
+[ "$fail" -eq 0 ]
