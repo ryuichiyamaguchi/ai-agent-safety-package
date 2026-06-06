@@ -659,6 +659,7 @@ else
   while IFS=$'\t' read -r cmd_raw category danger_expected readonly_expected target_hint; do
     # コメント行・空行をスキップ
     case "$cmd_raw" in '#'*|'') continue ;; esac
+    rm -f "$TD/parity_result.tmp"
     (
       set -u
       source "$REPO/scripts/macos/lib/explainer.sh" 2>/dev/null
@@ -1030,6 +1031,74 @@ if [ -f "$html" ] && (grep -q 'しません' "$html" || grep -q '読むだけ' "
   ok "T78-reg: wc foo.txt -> calm text present (regression guard)"
 else
   ng "T78-reg: wc foo.txt -> calm text present (regression)"
+fi
+
+echo ""
+echo "explainer.test summary: pass=$pass fail=$fail"
+[ "$fail" -eq 0 ]
+
+# ============================================================
+# cycle-9 追加テスト: & 区切り + 改行区切り
+# ============================================================
+
+# --- T79: pwd & touch (& バックグラウンド区切り) → 安心文なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"pwd & touch harmless.tmp"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then
+  ok "T79: pwd & touch -> NO calm (& is background separator)"
+else
+  ng "T79: pwd & touch -> NO calm (& background)"
+fi
+
+# --- T80: ls & echo ok (& 区切り) → 安心文なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls & echo ok"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then
+  ok "T80: ls & echo -> NO calm (& background separator)"
+else
+  ng "T80: ls & echo -> NO calm"
+fi
+
+# --- T81: && 連結は従来どおり複合扱い(& と && の区別確認) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls && cat foo"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then
+  ok "T81: ls && cat -> NO calm (&& is compound, distinct from &)"
+else
+  ng "T81: ls && cat -> NO calm"
+fi
+
+# --- T82: &> はリダイレクト・複合扱いしない(書込解説) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls &> out.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '書き込み' "$html" && grep -q 'out.txt' "$html"; then
+  ok "T82: ls &> out.txt -> write detected (&> is redirect, not & separator)"
+else
+  ng "T82: ls &> out.txt -> write detected"
+fi
+
+# --- T83: 退行 — ls(素) 安心文あり ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'しません' "$html"; then
+  ok "T83-reg: ls (bare) -> calm text present (regression guard)"
+else
+  ng "T83-reg: ls (bare) -> calm text present"
+fi
+
+# --- T84: 退行 — cat foo(素) 安心文あり ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '読むだけ' "$html"; then
+  ok "T84-reg: cat foo.txt (bare) -> calm text present (regression guard)"
+else
+  ng "T84-reg: cat foo.txt (bare) -> calm text present"
 fi
 
 echo ""

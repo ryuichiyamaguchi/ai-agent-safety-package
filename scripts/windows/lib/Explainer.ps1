@@ -136,11 +136,14 @@ function Split-CommandSegments([string]$Full) {
     while ($i -lt $len) {
         $c = $Full[$i]
         $c2 = if ($i + 1 -lt $len) { [string]$c + [string]$Full[$i + 1] } else { "" }
-        if ($c -eq '|' -or $c -eq ';') {
+        if ($c -eq "`n" -or $c -eq '|' -or $c -eq ';') {
             $s = $sb.ToString().Trim(); if ($s -ne "") { $segs.Add($s) }; $sb.Clear() | Out-Null
         } elseif ($c2 -eq '&&' -or $c2 -eq '||') {
             $s = $sb.ToString().Trim(); if ($s -ne "") { $segs.Add($s) }; $sb.Clear() | Out-Null
             $i++  # skip second char
+        } elseif ($c -eq '&' -and $c2 -ne '&&' -and $c2 -ne '&>') {
+            # 単独 & (バックグラウンド区切り)
+            $s = $sb.ToString().Trim(); if ($s -ne "") { $segs.Add($s) }; $sb.Clear() | Out-Null
         } else {
             [void]$sb.Append($c)
         }
@@ -362,8 +365,9 @@ function Get-CommandFlags([string]$Full) {
     # コマンド置換の検出: 単一引用符のみ除去(二重引用符内でも $() はアクティブ)
     $strippedSq = Remove-SingleQuotedContent $Full
     if ($strippedSq -match '\$\(|<\(|`') { $flags.CmdSubst = $true }
-    # パイプ/連結(| ; && ||)の検出
-    if ($strippedRedir -match '(\||;|&&|\|\|)') { $flags.Compound = $true }
+    # 区切り(| ; && || & 改行)の検出: Split-CommandSegments の出力が2以上あれば複合
+    $splitSegs = Split-CommandSegments $Full
+    if ($splitSegs.Count -gt 1) { $flags.Compound = $true }
     # content-write リダイレクト
     if (Test-HasRedirect $Full) { $flags.Write = $true }
 

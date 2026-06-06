@@ -150,26 +150,28 @@ EXPLAIN_DANGER=""
 _explain_split_segments() {
   printf '%s' "$1" | awk '
     BEGIN { seg="" }
+    function flush() {
+      gsub(/^[[:space:]]+/,"",seg); gsub(/[[:space:]]+$/,"",seg)
+      if (seg!="") print seg
+      seg=""
+    }
     {
       L=length($0)
       for (i=1;i<=L;i++) {
         c=substr($0,i,1)
         c2=substr($0,i,2)
-        if (c=="|" || c==";") {
-          gsub(/^[[:space:]]+/,"",seg); gsub(/[[:space:]]+$/,"",seg)
-          if (seg!="") print seg
-          seg=""
-        } else if (c2=="&&" || c2=="||") {
-          gsub(/^[[:space:]]+/,"",seg); gsub(/[[:space:]]+$/,"",seg)
-          if (seg!="") print seg
-          seg=""
-          i++  # skip second char
+        # 改行は区切り
+        if (c=="\n") { flush(); continue }
+        if (c=="|" || c==";") { flush()
+        } else if (c2=="&&" || c2=="||") { flush(); i++  # skip second char
+        } else if (c=="&" && c2!="&&" && c2!="&>") {
+          # 単独 & (バックグラウンド区切り): && と &> ではない場合
+          flush()
         } else {
           seg=seg c
         }
       }
-      gsub(/^[[:space:]]+/,"",seg); gsub(/[[:space:]]+$/,"",seg)
-      if (seg!="") print seg
+      flush()
     }
   '
 }
@@ -465,9 +467,12 @@ _explain_scan_flags() {
     _ecf_any_redir=1
   fi
 
-  # パイプ/連結(| ; && ||)の存在チェック(安心文禁止トリガー)
-  # 引用符除去後に演算子を探す
-  if printf '%s' "$stripped_for_redir" | grep -qE -- '(\||;|&&|\|\|)'; then
+  # 区切り(| ; && || & 改行)の存在チェック(安心文禁止トリガー)
+  # _explain_split_segments の出力が2セグメント以上あれば複合コマンドとみなす。
+  # これにより | ; && || & 改行 を全て正確に検出できる。
+  local seg_count
+  seg_count="$(_explain_split_segments "$full" | wc -l | tr -d ' ')"
+  if [ "${seg_count:-0}" -gt 1 ] 2>/dev/null; then
     _ecf_compound=1
   fi
 
@@ -753,7 +758,7 @@ _explain_split_segments_first() {
       for (i=1;i<=L;i++) {
         c=substr($0,i,1)
         c2=substr($0,i,2)
-        if (c=="|" || c==";") {
+        if (c=="\n" || c=="|" || c==";") {
           gsub(/^[[:space:]]+/,"",seg); gsub(/[[:space:]]+$/,"",seg)
           if (seg!="") { print seg; exit }
           seg=""
@@ -762,6 +767,10 @@ _explain_split_segments_first() {
           if (seg!="") { print seg; exit }
           seg=""
           i++
+        } else if (c=="&" && c2!="&&" && c2!="&>") {
+          gsub(/^[[:space:]]+/,"",seg); gsub(/[[:space:]]+$/,"",seg)
+          if (seg!="") { print seg; exit }
+          seg=""
         } else {
           seg=seg c
         }

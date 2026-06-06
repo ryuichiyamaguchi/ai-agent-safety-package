@@ -43,3 +43,5 @@ more foo.txt	read	false	false
 find . -okdir printf {} +	search	true	false
 wc foo.txt	read	false	true	foo.txt
 stat foo.txt	read	false	true	foo.txt
+pwd & touch harmless.tmp	read	false	false
+ls & echo ok	list	false	false
