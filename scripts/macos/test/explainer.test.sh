@@ -775,9 +775,6 @@ else
   ng "T56: cat 1> out.txt -> still write (regression)"
 fi
 
-echo ""
-echo "explainer.test summary: pass=$pass fail=$fail"
-[ "$fail" -eq 0 ]
 
 # ============================================================
 # cycle-6 追加テスト
@@ -874,9 +871,6 @@ else
 fi
 
 
-echo ""
-echo "explainer.test summary: pass=$pass fail=$fail"
-[ "$fail" -eq 0 ]
 
 # ============================================================
 # cycle-7 追加テスト: reassurance-safe 集合 + find -exec
@@ -965,9 +959,6 @@ else
   ng "T72-reg: cat foo.txt (bare) -> calm text present (regression)"
 fi
 
-echo ""
-echo "explainer.test summary: pass=$pass fail=$fail"
-[ "$fail" -eq 0 ]
 
 # ============================================================
 # cycle-8 追加テスト: file/date/more 除外 + find -okdir
@@ -1033,9 +1024,6 @@ else
   ng "T78-reg: wc foo.txt -> calm text present (regression)"
 fi
 
-echo ""
-echo "explainer.test summary: pass=$pass fail=$fail"
-[ "$fail" -eq 0 ]
 
 # ============================================================
 # cycle-9 追加テスト: & 区切り + 改行区切り
@@ -1099,6 +1087,38 @@ if [ -f "$html" ] && grep -q '読むだけ' "$html"; then
   ok "T84-reg: cat foo.txt (bare) -> calm text present (regression guard)"
 else
   ng "T84-reg: cat foo.txt (bare) -> calm text present"
+fi
+
+# --- T85: JSON の \n エスケープ = 改行区切り2コマンド → 安心文なし(false-safety防止) ---
+# mac の extract_json_string が \n を実改行に復元し、explain_command は ACTION_RAW_CMD
+# (改行保持)を受け取るため複合検出が発火する。Windows は ConvertFrom-Json が同等。
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"pwd\ntouch harmless.tmp"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && grep -q 'ほかにも処理が続きます' "$html"; then
+  ok "T85: JSON \\n separator (pwd<NL>touch) -> NO calm, compound note shown"
+else
+  ng "T85: JSON \\n separator -> NO calm + compound note"
+fi
+
+# --- T86: JSON \n 区切り cat+ls → 安心文なし・続き注記 ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt\nls"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && grep -q 'ほかにも処理が続きます' "$html"; then
+  ok "T86: JSON \\n separator (cat<NL>ls) -> NO calm, compound note shown"
+else
+  ng "T86: JSON \\n separator (cat<NL>ls) -> NO calm + compound note"
+fi
+
+# --- T87: 退行 — backslash パス表示が \n デコードで壊れない(del /s C:\Temp) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"del /s C:\\Temp"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'C:\\Temp' "$html" && ! grep -q 'しません' "$html"; then
+  ok "T87-reg: del /s C:\\Temp -> path intact (backslash not mangled), NO calm"
+else
+  ng "T87-reg: del /s C:\\Temp -> path intact + NO calm"
 fi
 
 echo ""

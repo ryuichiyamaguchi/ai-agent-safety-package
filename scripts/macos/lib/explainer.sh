@@ -31,13 +31,16 @@ cards_dir() {
 # ----- 抽出ヘルパ ---------------------------------------------------------
 
 # 一行 JSON 風入力からキーの文字列値を雑に抽出する（jq 依存を避ける）。
-# 抽出後に最低限の JSON escape をデコード: \\ → \, \" → ", \/ → /
+# 抽出後に JSON escape をデコード。二重デコードを防ぐため \n/\t/\r を先に処理してから \\ → \ を適用。
+# 順序: \n→LF, \t→TAB, \r→CR を先に → \\ →\ を後に → \" → " / \/ → /
 # 注意: 完全な JSON パーサではない。教育用途では十分。
 extract_json_string() {
   local key="$1"
   printf '%s' "$RAW_INPUT" | tr '\n' ' ' \
     | sed -nE "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"((\\\\.|[^\"\\\\])*)\".*/\\1/p" \
     | head -n 1 \
+    | sed 's/\\n/\
+/g; s/\\t/	/g; s/\\r//g' \
     | sed 's/\\\\/\\/g; s/\\"/"/g; s/\\\//\//g'
 }
 
@@ -90,12 +93,17 @@ _limit_chars() {
 # グローバル変数（explain() から参照する）
 ACTION_TEXT=""
 ACTION_LABEL="操作"
+# ACTION_RAW_CMD: bash モード時のみ _limit_chars 前の生コマンド文字列(改行を含む可能性あり)。
+# explain_command に渡すためのもの。ACTION_TEXT は表示用(改行→スペース変換済み)。
+ACTION_RAW_CMD=""
 
 extract_action_text() {
-  local text label fp content_first
+  local text label fp content_first raw_cmd
+  ACTION_RAW_CMD=""
   case "$MODE" in
     bash)
       text="$(extract_json_string "command")"
+      raw_cmd="$text"
       label="コマンド実行"
       ;;
     write)
@@ -129,6 +137,8 @@ extract_action_text() {
   text="$(printf '%s' "$text" | _limit_chars 800)"
   # グローバル変数に格納（F-K: TAB round-trip 破壊を避けるため戻り値を使わない）
   ACTION_TEXT="$text"
+  # bash モードのみ生コマンドを保持(explain_command 用。_limit_chars 前の改行を維持)
+  [ -n "$raw_cmd" ] && ACTION_RAW_CMD="$raw_cmd"
   ACTION_LABEL="$label"
 }
 
@@ -751,8 +761,9 @@ explain_command() {
 
 # 全セグメントの先頭を1行だけ返す（_explain_split_segments のパイプ版ヘルパ）。
 _explain_split_segments_first() {
-  awk '
-    BEGIN { seg="" }
+  # RS="\000" で全入力を1レコードとして読み込む(改行も $0 内の文字として扱う)。
+  # これにより改行を含むコマンド文字列でも正しく先頭セグメントを返せる。
+  awk 'BEGIN{RS="\000";seg=""}
     {
       L=length($0)
       for (i=1;i<=L;i++) {
@@ -1052,7 +1063,9 @@ write_now_html() {
       printf '</div>\n'
       # 「これは何をする？」具体解説（bash モードのみ・決定的・LLM不要）。
       if [ "${MODE:-}" = "bash" ]; then
-        explain_command "$action_text" 2>/dev/null || true
+        # ACTION_RAW_CMD は改行を保持した生コマンド（区切り検出のため）。
+        # 表示用 action_text は改行→スペース変換済みなので解説には使わない。
+        explain_command "${ACTION_RAW_CMD:-$action_text}" 2>/dev/null || true
         if [ -n "$EXPLAIN_WHATDO" ] || [ -n "$EXPLAIN_DANGER" ]; then
           printf '<div class="whatdo">\n'
           if [ -n "$EXPLAIN_WHATDO" ]; then
@@ -1139,7 +1152,9 @@ write_now_card() {
       printf '\n▶ %s:\n  %s\n' "$action_label" "$action_text"
       # 「これは何をする？」具体解説（bash モードのみ）。
       if [ "$MODE" = "bash" ]; then
-        explain_command "$action_text" 2>/dev/null || true
+        # ACTION_RAW_CMD は改行を保持した生コマンド（区切り検出のため）。
+        # 表示用 action_text は改行→スペース変換済みなので解説には使わない。
+        explain_command "${ACTION_RAW_CMD:-$action_text}" 2>/dev/null || true
         if [ -n "$EXPLAIN_WHATDO" ]; then
           printf '%s これは何をする？\n  %s\n' "$EXPLAIN_ICON" "$EXPLAIN_WHATDO"
         fi
