@@ -202,37 +202,64 @@ _explain_is_stderr_redir() {
   esac
 }
 
-# セグメント文字列からリダイレクト先(content-write > or >>)を抽出する。
-# 2>/2>> は無視。1>file/&>file/1>>file/&>>file/bare>/>>file も対象を抽出。
-# 引用符内の > は無視。無ければ空。
+# セグメント文字列からリダイレクト先(content-write)を抽出する。
+# 除外: 2>/2>> (stderr のみ)。引用符内の > も除外。
+# 検出: bare>/>> / 1>/1>> / Nfd>/Nfd>> / &>/&>> から対象を抽出。
+# 引用符付き対象("out file.txt")は引用符を除去して返す。
+# 元文字列を使ってトークン境界と引用符を同時に処理する。
 _explain_redir_target() {
-  local stripped
-  stripped="$(_explain_strip_quoted "$1")"
-  printf '%s' "$stripped" | awk '
+  printf '%s' "$1" | awk '
+    # 引用符スパンを認識しながらトークンを取り出す
+    function next_token(str, pos,    c, q, t) {
+      # skip spaces
+      while (pos<=length(str) && substr(str,pos,1)==" ") pos++
+      if (pos>length(str)) return ""
+      t=""; q=""
+      while (pos<=length(str)) {
+        c=substr(str,pos,1)
+        if (q!="") {
+          if (c==q) { q=""; pos++; continue }
+          t=t c; pos++; continue
+        }
+        if (c=="\"" || c=="'"'"'") { q=c; pos++; continue }
+        if (c==" ") break
+        t=t c; pos++
+      }
+      return t
+    }
     {
-      n=split($0, tok, /[[:space:]]+/)
-      for (i=1; i<=n; i++) {
-        t=tok[i]
-        # 2>/2>> は stderr のみ → スキップ
-        if (t ~ /^2>>?/) continue
-        # standalone 1> / 1>> / &> / &>> → 次トークンがターゲット
-        if (t ~ /^1>>?$/ || t ~ /^&>>?$/) {
-          for (j=i+1; j<=n; j++) {
-            if (tok[j]!="") { print tok[j]; exit }
+      pos=1; len=length($0)
+      while (pos<=len) {
+        # skip spaces
+        while (pos<=len && substr($0,pos,1)==" ") pos++
+        if (pos>len) break
+        # read token with quote awareness
+        t=""; raw=""; q=""
+        spos=pos
+        while (pos<=len) {
+          c=substr($0,pos,1)
+          if (q!="") {
+            if (c==q) { q=""; pos++; continue }
+            t=t c; pos++; continue
           }
+          if (c=="\"" || c=="'"'"'") { q=c; pos++; continue }
+          if (c==" ") break
+          t=t c; pos++
         }
-        # 1>file / 1>>file / &>file / &>>file — 先頭の 1 or & と > を剥がして返す
-        if (t ~ /^1>>?[^>]/ || t ~ /^&>>?[^>]/) {
-          sub(/^(1|&)>>?/, "", t); print t; exit
+        # t is the dequoted token
+        # 2>/2>> はスキップ
+        if (t ~ /^2>>?([^>]|$)/) continue
+        # standalone 任意fd> / &> / bare > → 次のトークン(dequoted)がターゲット
+        if (t ~ /^[0-9]*>>?$/ || t ~ /^&>>?$/) {
+          tgt=next_token($0, pos)
+          if (tgt!="") { print tgt; exit }
         }
-        # standalone bare > / >> → 次トークンがターゲット
-        if (t ~ /^>>?$/) {
-          for (j=i+1; j<=n; j++) {
-            if (tok[j]!="") { print tok[j]; exit }
-          }
+        # Nfd>payload / &>payload 連結 → 先頭 fd/& と > を取り除いたもの
+        if ((t ~ /^[0-9]+>>?[^>]/ || t ~ /^&>>?[^>]/) && t !~ /^2>>?/) {
+          sub(/^([0-9]+|&)>>?/, "", t); print t; exit
         }
-        # bare >file / >>file (1>/&> 以外・2> 以外)
-        if (t ~ /^>>?[^>]/ && t !~ /^2/) {
+        # bare >file (2> 以外)
+        if (t ~ /^>>?[^>]/ && t !~ /^2>>?/) {
           sub(/^>>?/, "", t); print t; exit
         }
       }
@@ -242,7 +269,8 @@ _explain_redir_target() {
 
 # セグメントに content-write リダイレクトが含まれるか判定。
 # 除外: 2>/2>> (stderr のみ) と引用符内の >
-# 検出: bare >/>> / 1>/1>> / &>/&>> (standalone or 連結形)
+# 検出: bare >/>> / 1>/1>> / &>/&>> / 3> / 9> など任意数字 fd (standalone or 連結形)
+# RED1: 2> のみ除外。他の数字 fd (1>,3>,9> 等) は content-write として検出する。
 _explain_has_redir() {
   local stripped
   stripped="$(_explain_strip_quoted "$1")"
@@ -251,16 +279,12 @@ _explain_has_redir() {
       n=split($0, tok, /[[:space:]]+/)
       for (i=1; i<=n; i++) {
         t=tok[i]
-        # 2>/2>> (stderr) はスキップ
-        if (t ~ /^2>>?/) continue
-        # bare > or >> (standalone)
-        if (t ~ /^>>?$/) { print "1"; exit }
-        # 1> or 1>> (standalone: "1>" "1>>")
-        if (t ~ /^1>>?$/) { print "1"; exit }
-        # &> or &>> (standalone)
-        if (t ~ /^&>>?$/) { print "1"; exit }
-        # >file / 1>file / &>file (連結形)
-        if (t ~ /^1>>?[^>]/ || t ~ /^&>>?[^>]/ || (t ~ /^>>?[^>]/ && t !~ /^2/)) {
+        # 2>/2>> (stderr のみ) はスキップ — それ以外の数字 fd は content-write
+        if (t ~ /^2>>?([^>]|$)/) continue
+        # bare > / >> / 任意数字fd> / &> standalone
+        if (t ~ /^[0-9]*>>?$/ || t ~ /^&>>?$/) { print "1"; exit }
+        # >file / Nfd>file / &>file 連結形 (2> 以外)
+        if ((t ~ /^[0-9]*>>?[^>]/ || t ~ /^&>>?[^>]/) && t !~ /^2>>?/) {
           print "1"; exit
         }
       }
@@ -303,15 +327,16 @@ _explain_target() {
       delete redir_idx
       for (i=1; i<=n; i++) {
         t=tok[i]
-        # 2>/2>> (stderr) は対象候補から除外(redir_idx に入れてスキップ)
-        if (t ~ /^2>>?/) { redir_idx[i]=1; continue }
-        # standalone > / >> / 1> / 1>> / &> / &>> → このトークンと次トークンを除外
-        if (t ~ /^>>?$/ || t ~ /^1>>?$/ || t ~ /^&>>?$/) {
+        # 全種リダイレクト(2> を含む)を対象候補から除外
+        # 2>/2>> はスキップのみ(content-write 解説は出ない)
+        if (t ~ /^2>>?([^>]|$)/) { redir_idx[i]=1; continue }
+        # standalone 任意fd> / &> / bare > → このトークンと次トークンを除外
+        if (t ~ /^[0-9]*>>?$/ || t ~ /^&>>?$/) {
           redir_idx[i]=1
           if (i+1<=n) redir_idx[i+1]=1
         }
-        # 1>file/&>file/>>file 形式 (content-write 演算子+値が連結) → このトークンだけ除外
-        if (t ~ /^1>>?[^>]/ || t ~ /^&>>?[^>]/ || (t ~ /^>>?[^>]/ && t !~ /^2/)) {
+        # Nfd>file / &>file / >file 連結形 → このトークンだけ除外
+        if ((t ~ /^[0-9]*>>?[^>]/ || t ~ /^&>>?[^>]/) && t !~ /^2>>?/) {
           redir_idx[i]=1
         }
       }
@@ -336,11 +361,18 @@ _explain_target() {
       if (cat=="grep" || cat=="findstr" || cat=="select-string" || cat=="sls") {
         skip=1  # 第1位置引数(パターン)をスキップ
       }
-      pos=0
+      pos=0; cmd_depth=0
       for (i=2; i<=n; i++) {
         if (redir_idx[i]) continue
         t=orig[i]    # 元の文字列からターゲットを返す
         ts=tok[i]    # stripped 版でフラグ判定
+        # コマンド置換の depth 管理: $( や <( で depth++、対応 ) で depth--
+        if (ts ~ /^\$\(/ || ts ~ /^<\(/) { cmd_depth++; continue }
+        if (cmd_depth > 0) {
+          # 閉じ ) を探して depth 調整
+          if (index(ts, ")") > 0) { cmd_depth--; }
+          continue
+        }
         # - フラグ除外
         if (substr(ts,1,1)=="-") continue
         # / スイッチ除外 (Windows del /s /q など)
@@ -391,9 +423,26 @@ _explain_scan_flags() {
   _ecf_sudo=0
   _ecf_delete=0
   _ecf_delete_recurse=0
-  _ecf_write=0    # 書き込み系動詞 or リダイレクト
-  _ecf_exec=0     # 実行系動詞
-  _ecf_perm=0     # 権限変更
+  _ecf_write=0     # 書き込み系動詞 or content-write リダイレクト
+  _ecf_exec=0      # 実行系動詞
+  _ecf_perm=0      # 権限変更
+  _ecf_any_redir=0 # 全文に何らかのリダイレクト(2> 含む)が1つでもある
+  _ecf_cmd_subst=0 # コマンド置換 $(...) <(...) `...` が含まれる
+  _ecf_ro_verb=1   # 全動詞が read-only カテゴリ(list/read/search/cd)のみ
+
+  # コマンド置換の検出(引用符外に $( / <( / ` があれば)
+  local stripped_for_subst
+  stripped_for_subst="$(_explain_strip_quoted "$full")"
+  if printf '%s' "$stripped_for_subst" | grep -qE -- '(\$\(|<\(|`)'; then
+    _ecf_cmd_subst=1
+  fi
+
+  # 任意のリダイレクト演算子(2> 含む)の存在チェック(安心文禁止トリガー)
+  local stripped_for_redir
+  stripped_for_redir="$(_explain_strip_quoted "$full")"
+  if printf '%s' "$stripped_for_redir" | grep -qE -- '>>?|[0-9]>>?|&>>?'; then
+    _ecf_any_redir=1
+  fi
 
   local seg verb_lc lc_seg
   while IFS= read -r seg; do
@@ -408,8 +457,15 @@ _explain_scan_flags() {
     esac
     if printf '%s' "$lc_seg" | grep -qE -- '(runas|\-verb[[:space:]]+runas)'; then _ecf_sudo=1; fi
 
-    # > / >> リダイレクト（全動詞で書き込み）
+    # content-write リダイレクト(2> 除く)→ write フラグ
     if _explain_has_redir "$seg"; then _ecf_write=1; fi
+
+    # 動詞が read-only カテゴリでない場合 ro_verb フラグを落とす
+    case "$verb_lc" in
+      ls|dir|get-childitem|gci|ll|la|cat|head|tail|less|more|type|get-content|gc|\
+grep|findstr|select-string|sls|find|cd|set-location|sl|pushd) ;;
+      *) _ecf_ro_verb=0 ;;
+    esac
 
     case "$verb_lc" in
       # 削除動詞
@@ -477,6 +533,7 @@ explain_command() {
   # 全セグメントを走査してフラグを確定
   _ecf_sudo=0; _ecf_delete=0; _ecf_delete_recurse=0
   _ecf_write=0; _ecf_exec=0; _ecf_perm=0
+  _ecf_any_redir=0; _ecf_cmd_subst=0; _ecf_ro_verb=1
   _explain_scan_flags "$full"
 
   # 主コマンド(先頭セグメント)の動詞を先に取得(DANGER 組み立てで参照)
@@ -499,18 +556,28 @@ explain_command() {
     _danger_append "⚠️ ファイル・フォルダの削除を含みます"
   fi
   if [ "$_ecf_exec" -eq 1 ] && [ "$_ecf_sudo" -eq 0 ]; then
-    # 主コマンドが実行系の時は WHATDO 側で明示するので DANGER 重複を避ける
     case "$verb_lc" in
       bash|sh|zsh|python|python3|node|source|invoke-expression|iex|start-process|'&') ;;
       *) _danger_append "⚠️ スクリプト/プログラムの実行を含みます" ;;
     esac
   fi
+  # RED2: コマンド置換が含まれる場合、内側の実行/削除動詞を best-effort で警告
+  if [ "$_ecf_cmd_subst" -eq 1 ]; then
+    _danger_append "（コマンド内に別のコマンドが埋め込まれています。全文を確認してください）"
+  fi
   EXPLAIN_DANGER="$dangers"
 
-  # read-only フラグ: 全フラグが 0 の時のみ安心文を出す
+  # ホワイトリスト方式の readonly_all:
+  # 以下を全て満たす時のみ安心文「読むだけ。書き換えはしません」を出す。
+  # 1. 全動詞が read-only カテゴリ(list/read/search/cd)のみ
+  # 2. 任意のリダイレクトが一切ない(2> 含む)
+  # 3. コマンド置換が一切ない
+  # 4. delete/exec/sudo/perm/write フラグが全て 0
   local readonly_all=0
   if [ "$_ecf_sudo" -eq 0 ] && [ "$_ecf_delete" -eq 0 ] && \
-     [ "$_ecf_write" -eq 0 ] && [ "$_ecf_exec" -eq 0 ] && [ "$_ecf_perm" -eq 0 ]; then
+     [ "$_ecf_write" -eq 0 ] && [ "$_ecf_exec" -eq 0 ] && [ "$_ecf_perm" -eq 0 ] && \
+     [ "$_ecf_any_redir" -eq 0 ] && [ "$_ecf_cmd_subst" -eq 0 ] && \
+     [ "$_ecf_ro_verb" -eq 1 ]; then
     readonly_all=1
   fi
 

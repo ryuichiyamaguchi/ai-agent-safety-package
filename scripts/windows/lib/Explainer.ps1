@@ -179,45 +179,57 @@ function Test-StderrRedir([string]$Token) {
     return ($Token -match '^2>>?')
 }
 
-# セグメントに content-write リダイレクト(> or >>) が含まれるか判定。
+# セグメントに content-write リダイレクトが含まれるか判定。
 # 除外: 2>/2>> (stderr のみ) と引用符内の >
-# 検出: bare >/>> / 1>/1>> / &>/&>> (standalone or 連結形)
+# 検出: bare >/>> / 任意Nfd>/Nfd>> / &>/&>> (standalone or 連結形)
+# RED1: 2> 以外の任意数字 fd (1>,3>,9> 等) は content-write として検出する。
 function Test-HasRedirect([string]$Seg) {
     $stripped = Remove-QuotedContent $Seg
     $toks = $stripped -split '\s+' | Where-Object { $_ -ne "" }
     foreach ($t in $toks) {
         if (Test-StderrRedir $t) { continue }
-        # bare/1>/&> standalone
-        if ($t -match '^>>?$' -or $t -match '^1>>?$' -or $t -match '^&>>?$') { return $true }
-        # >file / 1>file / &>file 連結形
-        if ($t -match '^1>>?[^>]' -or $t -match '^&>>?[^>]' -or ($t -match '^>>?[^>]' -and $t -notmatch '^2')) {
+        # standalone bare / 任意fd / &>
+        if ($t -match '^[0-9]*>>?$' -or $t -match '^&>>?$') { return $true }
+        # 連結形 Nfd>file / &>file (2> 以外)
+        if (($t -match '^[0-9]*>>?[^>]' -or $t -match '^&>>?[^>]') -and $t -notmatch '^2>>?') {
             return $true
         }
     }
     return $false
 }
 
-# 全文からリダイレクト先(最初の content-write > or >> の被演算子)を取得。なければ空。
+# 全文からリダイレクト先(最初の content-write > or >>の被演算子)を取得。なければ空。
 # 除外: 2>/2>> (stderr のみ) と引用符内の >
-# 検出: >/>> / 1>/1>> / &>/&>> から対象パスを返す
+# 検出: bare>/>> / 任意Nfd>/Nfd>> / &>/&>> から対象パスを返す
+# 引用符付き対象("out file.txt")は引用符除去して返す。
 function Get-RedirectTarget([string]$Full) {
+    $orig = $Full
     $stripped = Remove-QuotedContent $Full
-    $toks = $stripped -split '\s+' | Where-Object { $_ -ne "" }
-    for ($i = 0; $i -lt $toks.Count; $i++) {
-        $t = $toks[$i]
+    $sToks = $stripped -split '\s+' | Where-Object { $_ -ne "" }
+    $aToks = $Full -split '\s+' | Where-Object { $_ -ne "" }
+    for ($i = 0; $i -lt $sToks.Count; $i++) {
+        $t = $sToks[$i]
         if (Test-StderrRedir $t) { continue }
-        # standalone 1> / 1>> / &> / &>>
-        if ($t -match '^1>>?$' -or $t -match '^&>>?$') {
-            if ($i + 1 -lt $toks.Count) { return $toks[$i + 1] }
+        # standalone 任意fd> / &>
+        if ($t -match '^[0-9]*>>?$' -or $t -match '^&>>?$') {
+            if ($i + 1 -lt $aToks.Count) {
+                $tgt = $aToks[$i + 1]
+                if ($tgt -match '^"(.*)"$' -or $tgt -match "^'(.*)'$") { return $Matches[1] }
+                return $tgt
+            }
         }
-        # 1>file / 1>>file / &>file / &>>file 連結形
-        if ($t -match '^(1|&)(>>?)(.+)$') { return $Matches[3] }
-        # standalone bare > / >>
-        if ($t -match '^>>?$') {
-            if ($i + 1 -lt $toks.Count) { return $toks[$i + 1] }
+        # Nfd>file / &>file 連結形 (2> 以外)
+        if (($t -match '^([0-9]+|&)(>>?)(.+)$') -and $t -notmatch '^2>>?') {
+            $tgt = $Matches[3]
+            if ($tgt -match '^"(.*)"$' -or $tgt -match "^'(.*)'$") { return $Matches[1] }
+            return $tgt
         }
-        # >file / >>file 連結形 (2> 以外)
-        if ($t -match '^(>>?)([^>].+)$' -and $t -notmatch '^2') { return $Matches[2] }
+        # bare >file / >>file (2> 以外)
+        if ($t -match '^(>>?)([^>].+)$' -and $t -notmatch '^2') {
+            $tgt = $Matches[2]
+            if ($tgt -match '^"(.*)"$' -or $tgt -match "^'(.*)'$") { return $Matches[1] }
+            return $tgt
+        }
     }
     return ""
 }
@@ -243,13 +255,13 @@ function Get-ExplainTargetFromCmd([string]$Primary, [string]$Category) {
         $t = $sToks[$i]
         # 2>/2>> (stderr) は対象候補から除外
         if (Test-StderrRedir $t) { $redirIdx[$i] = $true; continue }
-        # standalone > / >> / 1> / 1>> / &> / &>> → このトークンと次トークンを除外
-        if ($t -match '^>>?$' -or $t -match '^1>>?$' -or $t -match '^&>>?$') {
+        # standalone 任意fd> / &> / bare > → このトークンと次トークンを除外
+        if ($t -match '^[0-9]*>>?$' -or $t -match '^&>>?$') {
             $redirIdx[$i] = $true
             if ($i + 1 -lt $sToks.Count) { $redirIdx[$i + 1] = $true }
         }
-        # 1>file/&>file/>>file 連結形 → このトークンだけ除外
-        if ($t -match '^1>>?[^>]' -or $t -match '^&>>?[^>]' -or ($t -match '^>>?[^>]' -and $t -notmatch '^2')) {
+        # Nfd>file / &>file / >file 連結形 (2> 以外) → このトークンだけ除外
+        if (($t -match '^[0-9]*>>?[^>]' -or $t -match '^&>>?[^>]') -and $t -notmatch '^2>>?') {
             $redirIdx[$i] = $true
         }
     }
@@ -311,13 +323,21 @@ function Get-CommandFlags([string]$Full) {
     $flags = @{
         Sudo = $false; Delete = $false; DeleteRecurse = $false
         Write = $false; Exec = $false; Perm = $false
+        AnyRedir = $false   # 任意のリダイレクト(2> 含む) が一切あるか(安心文禁止トリガー)
+        CmdSubst = $false   # コマンド置換 $(...) <(...) ` が含まれるか
+        RoVerb   = $true    # 全動詞が read-only カテゴリのみか
     }
     $lc = $Full.ToLowerInvariant()
     # sudo / 権限昇格
     if ($lc -match '(^|\s)sudo(\s|$)' -or $lc -match 'runas' -or $lc -match 'start-process.*-verb\s+runas') {
         $flags.Sudo = $true
     }
-    # リダイレクト(全文)
+    # 任意リダイレクトの存在チェック(2> 含む・安心文禁止トリガー)
+    $strippedRedir = Remove-QuotedContent $Full
+    if ($strippedRedir -match '>>?|[0-9]>>?|&>>?') { $flags.AnyRedir = $true }
+    # コマンド置換の検出 ($( / <( / `)
+    if ($strippedRedir -match '\$\(|<\(|`') { $flags.CmdSubst = $true }
+    # content-write リダイレクト
     if (Test-HasRedirect $Full) { $flags.Write = $true }
 
     $segs = Split-CommandSegments $Full
@@ -348,6 +368,9 @@ function Get-CommandFlags([string]$Full) {
                 $flags.Perm = $true
             }
         }
+        # RoVerb: read-only カテゴリでない動詞があれば false
+        $roVerbs = @('ls','dir','get-childitem','gci','ll','la','cat','head','tail','less','more','type','get-content','gc','grep','findstr','select-string','sls','find','cd','set-location','sl','pushd')
+        if ($vl -notin $roVerbs) { $flags.RoVerb = $false }
         # xargs rm: xargs が先頭 verb の時のみ削除扱い(引数中に xargs rm が現れるだけでは検出しない)
         if ($vl -eq 'xargs' -and $segLc -match '\bxargs\b\s+(-[^\s]+\s+)*rm\b') {
             $flags.Delete = $true
@@ -391,10 +414,17 @@ function Get-CommandExplanation([string]$Full) {
             $dangerLines.Add("⚠️ スクリプト/プログラムの実行を含みます")
         }
     }
+    # RED2: コマンド置換が含まれる場合の警告
+    if ($flags.CmdSubst) {
+        $dangerLines.Add("（コマンド内に別のコマンドが埋め込まれています。全文を確認してください）")
+    }
     $danger = $dangerLines -join "`n"
 
-    # read-only フラグ: 全フラグ false の時のみ安心文を出す
-    $readonlyAll = (-not $flags.Sudo) -and (-not $flags.Delete) -and (-not $flags.Write) -and (-not $flags.Exec) -and (-not $flags.Perm)
+    # ホワイトリスト方式の readonlyAll:
+    # 全動詞が read-only カテゴリ + 任意リダイレクトなし + コマンド置換なし + 全フラグ0
+    $readonlyAll = (-not $flags.Sudo) -and (-not $flags.Delete) -and (-not $flags.Write) -and `
+                  (-not $flags.Exec) -and (-not $flags.Perm) -and (-not $flags.AnyRedir) -and `
+                  (-not $flags.CmdSubst) -and $flags.RoVerb
 
     # 複合コマンドか
     $isCompound = ($Full -match '(\||;|&&|\|\|)')

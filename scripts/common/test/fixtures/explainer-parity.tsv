@@ -6,13 +6,14 @@
 # readonly: true/false (EXPLAIN_WHATDO に「しません」等の安心文が含まれるか)
 # target_hint: 対象として表示されるべき文字列(部分一致。空=チェックしない)
 #
-# bash テスト: scripts/macos/test/explainer.test.sh の T33-T42 が iterate
+# bash テスト: scripts/macos/test/explainer.test.sh の T49 ループが iterate
 # PS テスト: pwsh 不在のため山口さん Windows 実機で確認。このファイルが契約の SSOT。
+# readonly=true: 全動詞が read-only 且つリダイレクト/コマンド置換が一切ない時のみ(ホワイトリスト)
 
 ls /tmp	list	false	true	/tmp
-ls 2>/dev/null	list	false	true
+ls 2>/dev/null	list	false	false
 cat foo.txt	read	false	true	foo.txt
-cat foo.txt 2> err.log	read	false	true	foo.txt
+cat foo.txt 2> err.log	read	false	false	foo.txt
 ls > out.txt	write	false	false	out.txt
 cat readme.txt > dest.txt	write	false	false	dest.txt
 echo "a > b"	unknown	false	false

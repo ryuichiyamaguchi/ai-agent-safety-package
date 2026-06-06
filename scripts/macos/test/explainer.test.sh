@@ -697,6 +697,83 @@ else
   done < "$FIXTURE"
 fi
 
+# ============================================================
+# cycle-5 追加テスト
+# ============================================================
+
+# --- T50: RED1 任意数字fd — cat foo 3> out.txt → 書込検出・「読むだけ」なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo 3> out.txt"}}'
+run_explain_with_json "bash" "$json"
+t50_write=0; t50_no_ro=0
+if [ -f "$html" ] && grep -q '書き込み' "$html" && grep -q 'out.txt' "$html"; then t50_write=1; fi
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then t50_no_ro=1; fi
+if [ "$t50_write" -eq 1 ] && [ "$t50_no_ro" -eq 1 ]; then
+  ok "T50: cat 3> out.txt -> write detected (RED1: any numeric fd is content-write)"
+else
+  ng "T50: cat 3> out.txt -> write detected (write=$t50_write no_ro=$t50_no_ro)"
+fi
+
+# --- T51: RED1 9> — cmd 9>x → 書込検出 ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cmd 9>x"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '書き込み' "$html" && grep -q 'x' "$html" && ! grep -q 'しません' "$html"; then
+  ok "T51: cmd 9>x -> write detected (RED1: 9> is content-write)"
+else
+  ng "T51: cmd 9>x -> write detected"
+fi
+
+# --- T52: RED2 コマンド置換 — cat \$(echo hi) → 安心文「しません」なし + 埋込警告 ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat $(cmd_var)"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && grep -q '埋め込まれています' "$html"; then
+  ok "T52: cat \$(cmd) -> NO calm text, cmd-subst warning present (RED2)"
+else
+  ng "T52: cat \$(cmd) -> NO calm text, cmd-subst warning (got: $(grep -o 'whatdo-body">[^<]*' "$html" | head -1))"
+fi
+
+# --- T53: ホワイトリスト — ls(素) → 安心文あり ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls /tmp"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'しません' "$html"; then
+  ok "T53: ls /tmp -> readonly whitelist: calm text present"
+else
+  ng "T53: ls /tmp -> readonly whitelist: calm text should be present"
+fi
+
+# --- T54: ホワイトリスト境界 — ls 2>/dev/null → 安心文なし(リダイレクトあり) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls 2>/dev/null"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && ! grep -q '<p class="whatdo-danger"' "$html"; then
+  ok "T54: ls 2>/dev/null -> NO calm text (any-redir present), no danger"
+else
+  ng "T54: ls 2>/dev/null -> NO calm text"
+fi
+
+# --- T55: YELLOW 引用符付きリダイレクト先 — 1>'out file.txt' → 対象=out file.txt ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat secret.txt 1> \"out file.txt\""}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'out file.txt' "$html" && grep -q '書き込み' "$html"; then
+  ok "T55: 1>\"out file.txt\" -> target=out file.txt (quoted redir target)"
+else
+  ng "T55: 1>\"out file.txt\" -> target=out file.txt (got: $(grep -o 'whatdo-body">[^<]*' "$html" | head -1))"
+fi
+
+# --- T56: 退行ガード — 1>/&> は書込のまま ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat secret.txt 1> out.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '書き込み' "$html" && ! grep -q 'しません' "$html"; then
+  ok "T56: cat 1> out.txt -> still write (cycle-4 regression guard)"
+else
+  ng "T56: cat 1> out.txt -> still write (regression)"
+fi
+
 echo ""
 echo "explainer.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]
