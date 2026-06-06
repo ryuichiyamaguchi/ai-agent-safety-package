@@ -495,12 +495,21 @@ _explain_scan_flags() {
     _ecf_any_redir=1
   fi
 
-  # 区切り(| ; && || & 改行)の存在チェック(安心文禁止トリガー)
-  # _explain_split_segments の出力が2セグメント以上あれば複合コマンドとみなす。
-  # これにより | ; && || & 改行 を全て正確に検出できる。
+  # 区切り(| ; && || & 改行 CR)の存在チェック(安心文禁止トリガー)
+  # ① _explain_split_segments の非空セグメントが2以上 → 複合。
+  # ② 引用符外に区切り文字が1つでもあれば複合。末尾区切り(cat foo; / cat foo| / 末尾CR)は
+  #    空セグメントが捨てられセグメント数=1になるため、存在ベースの検出を併用する。
   local seg_count
   seg_count="$(_explain_split_segments "$full" | wc -l | tr -d ' ')"
   if [ "${seg_count:-0}" -gt 1 ] 2>/dev/null; then
+    _ecf_compound=1
+  fi
+  # 引用符を除いた全文に | ; & があれば複合(&& || &> 2>&1 も含むが、いずれも安心文を出さない方向で安全)
+  case "$stripped_for_redir" in
+    *'|'*|*';'*|*'&'*) _ecf_compound=1 ;;
+  esac
+  # 改行 / CR が残っていれば複合(末尾 CR は $() で剥がれず残る)
+  if [ "$(printf '%s' "$stripped_for_redir" | tr -dc '\n\r' | wc -c | tr -d ' ')" != "0" ]; then
     _ecf_compound=1
   fi
 

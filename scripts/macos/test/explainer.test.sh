@@ -1157,6 +1157,51 @@ else
   ng "T90: CR separator -> NO calm"
 fi
 
+# --- T91-T93: 末尾区切り(trailing separator)でも安心文を出さない(false-safety防止) ---
+# 複合判定は非空セグメント数だけでなく「区切り文字の存在」も見るため、末尾の ; | CR を捕捉する。
+
+# T91: 末尾 ; → 安心文なし
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt;"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html"; then
+  ok "T91: trailing ; -> NO calm"
+else
+  ng "T91: trailing ; -> NO calm"
+fi
+
+# T92: 末尾 | → 安心文なし
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt|"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html"; then
+  ok "T92: trailing | -> NO calm"
+else
+  ng "T92: trailing | -> NO calm"
+fi
+
+# T93: 末尾 CR → 安心文なし($() で剥がれず残る末尾 CR)
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat foo.txt'"${BS}"'r"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html"; then
+  ok "T93: trailing CR -> NO calm"
+else
+  ng "T93: trailing CR -> NO calm"
+fi
+
+# T94: 退行 — 引用符内の区切りを含むファイル名でも純粋リーダーは過剰警告しすぎない確認は
+#       seg_count が引用符非対応のため calm 消失する既知の保守的挙動(false-safety ではない)。
+#       ここでは「区切りの無い素のリーダーは calm 維持」を退行ガードする。
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"head -n 5 foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'しません' "$html"; then
+  ok "T94-reg: head -n 5 foo.txt -> calm present"
+else
+  ng "T94-reg: head -n 5 foo.txt -> calm present"
+fi
+
 echo ""
 echo "explainer.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

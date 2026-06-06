@@ -365,9 +365,13 @@ function Get-CommandFlags([string]$Full) {
     # コマンド置換の検出: 単一引用符のみ除去(二重引用符内でも $() はアクティブ)
     $strippedSq = Remove-SingleQuotedContent $Full
     if ($strippedSq -match '\$\(|<\(|`') { $flags.CmdSubst = $true }
-    # 区切り(| ; && || & 改行)の検出: Split-CommandSegments の出力が2以上あれば複合
+    # 区切り(| ; && || & 改行 CR)の検出:
+    # ① Split-CommandSegments の非空セグメントが2以上 → 複合。
+    # ② 引用符外に区切り文字が1つでもあれば複合。末尾区切り(cat foo; / cat foo| / 末尾CR)は
+    #    空セグメントが捨てられ数=1になるため、存在ベースの検出を併用する。
     $splitSegs = Split-CommandSegments $Full
     if ($splitSegs.Count -gt 1) { $flags.Compound = $true }
+    if ($strippedRedir -match '[|;&]' -or $strippedRedir -match "[`r`n]") { $flags.Compound = $true }
     # content-write リダイレクト
     if (Test-HasRedirect $Full) { $flags.Write = $true }
 
