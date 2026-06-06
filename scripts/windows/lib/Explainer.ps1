@@ -173,19 +173,24 @@ function Remove-QuotedContent([string]$S) {
     return $r.ToString()
 }
 
-# fd リダイレクトトークン (2>/dev/null, 1>foo, &>bar) かどうかを判定。
-function Test-FdRedir([string]$Token) {
-    return ($Token -match '^[0-9]>>?' -or $Token -match '^&>>?')
+# stderr リダイレクトトークン (2> / 2>> のみ) かどうかを判定。
+# 除外するのは 2>/2>> のみ。1>/&>/bare> は content-write として検出する。
+function Test-StderrRedir([string]$Token) {
+    return ($Token -match '^2>>?')
 }
 
-# セグメントに content-write リダイレクト(> or >>)が含まれるか判定。
-# fd リダイレクト(2> 1> &>)と引用符内 > は除外。
+# セグメントに content-write リダイレクト(> or >>) が含まれるか判定。
+# 除外: 2>/2>> (stderr のみ) と引用符内の >
+# 検出: bare >/>> / 1>/1>> / &>/&>> (standalone or 連結形)
 function Test-HasRedirect([string]$Seg) {
     $stripped = Remove-QuotedContent $Seg
     $toks = $stripped -split '\s+' | Where-Object { $_ -ne "" }
     foreach ($t in $toks) {
-        if (Test-FdRedir $t) { continue }
-        if ($t -match '^>>?$' -or ($t -match '^>>?[^>]' -and $t -notmatch '^[0-9]' -and $t -notmatch '^&')) {
+        if (Test-StderrRedir $t) { continue }
+        # bare/1>/&> standalone
+        if ($t -match '^>>?$' -or $t -match '^1>>?$' -or $t -match '^&>>?$') { return $true }
+        # >file / 1>file / &>file 連結形
+        if ($t -match '^1>>?[^>]' -or $t -match '^&>>?[^>]' -or ($t -match '^>>?[^>]' -and $t -notmatch '^2')) {
             return $true
         }
     }
@@ -193,21 +198,26 @@ function Test-HasRedirect([string]$Seg) {
 }
 
 # 全文からリダイレクト先(最初の content-write > or >> の被演算子)を取得。なければ空。
-# fd リダイレクト(2> 1> &>)と引用符内 > は除外。
+# 除外: 2>/2>> (stderr のみ) と引用符内の >
+# 検出: >/>> / 1>/1>> / &>/&>> から対象パスを返す
 function Get-RedirectTarget([string]$Full) {
     $stripped = Remove-QuotedContent $Full
     $toks = $stripped -split '\s+' | Where-Object { $_ -ne "" }
     for ($i = 0; $i -lt $toks.Count; $i++) {
         $t = $toks[$i]
-        if (Test-FdRedir $t) { continue }
-        # standalone >/>>/
-        if ($t -match '^>>?$' -and -not (Test-FdRedir $t)) {
+        if (Test-StderrRedir $t) { continue }
+        # standalone 1> / 1>> / &> / &>>
+        if ($t -match '^1>>?$' -or $t -match '^&>>?$') {
             if ($i + 1 -lt $toks.Count) { return $toks[$i + 1] }
         }
-        # >>filepath 形式 (>>foo) — fd 以外
-        if ($t -match '^(>>?)([^>].*)$' -and -not (Test-FdRedir $t)) {
-            return $Matches[2]
+        # 1>file / 1>>file / &>file / &>>file 連結形
+        if ($t -match '^(1|&)(>>?)(.+)$') { return $Matches[3] }
+        # standalone bare > / >>
+        if ($t -match '^>>?$') {
+            if ($i + 1 -lt $toks.Count) { return $toks[$i + 1] }
         }
+        # >file / >>file 連結形 (2> 以外)
+        if ($t -match '^(>>?)([^>].+)$' -and $t -notmatch '^2') { return $Matches[2] }
     }
     return ""
 }
@@ -227,16 +237,21 @@ function Get-ExplainTargetFromCmd([string]$Primary, [string]$Category) {
     if ($allToks.Count -eq 0) { return "" }
 
     # redir 除外インデックス (stripped トークン列で判定・orig と同インデックス)
+    # 除外(対象候補から外す): 2>/2>> (stderr) と content-write の redir 演算子+値
     $redirIdx = @{}
     for ($i = 0; $i -lt $sToks.Count; $i++) {
         $t = $sToks[$i]
-        # fd redir (2>/dev/null, &>foo) は除外対象としてマーク
-        if (Test-FdRedir $t) { $redirIdx[$i] = $true; continue }
-        if ($t -match '^>>?$') {
+        # 2>/2>> (stderr) は対象候補から除外
+        if (Test-StderrRedir $t) { $redirIdx[$i] = $true; continue }
+        # standalone > / >> / 1> / 1>> / &> / &>> → このトークンと次トークンを除外
+        if ($t -match '^>>?$' -or $t -match '^1>>?$' -or $t -match '^&>>?$') {
             $redirIdx[$i] = $true
             if ($i + 1 -lt $sToks.Count) { $redirIdx[$i + 1] = $true }
         }
-        if ($t -match '^>>?[^>]' -and $t -notmatch '^[0-9]' -and $t -notmatch '^&') { $redirIdx[$i] = $true }
+        # 1>file/&>file/>>file 連結形 → このトークンだけ除外
+        if ($t -match '^1>>?[^>]' -or $t -match '^&>>?[^>]' -or ($t -match '^>>?[^>]' -and $t -notmatch '^2')) {
+            $redirIdx[$i] = $true
+        }
     }
 
     # URL 最優先 (orig から返す)
@@ -272,6 +287,20 @@ function Get-ExplainTargetFromCmd([string]$Primary, [string]$Category) {
         if ($ts -match '^\s*$') { $pos++; if ($pos -le $skip) { $skip++ }; continue }
         $pos++
         if ($pos -le $skip) { continue }
+        # m3: 引用符始まりトークンは閉じ引用符まで連結し引用符を除去
+        if ($t.StartsWith('"') -or $t.StartsWith("'")) {
+            $q = $t[0]
+            if ($t.EndsWith($q) -and $t.Length -ge 2) {
+                return $t.Substring(1, $t.Length - 2)
+            }
+            $res = $t.Substring(1)
+            for ($j = $i + 1; $j -lt $allToks.Count; $j++) {
+                $p = $allToks[$j].IndexOf($q)
+                if ($p -ge 0) { $res += ' ' + $allToks[$j].Substring(0, $p); break }
+                $res += ' ' + $allToks[$j]
+            }
+            return $res
+        }
         return $t
     }
     return ""

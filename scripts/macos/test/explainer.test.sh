@@ -582,6 +582,121 @@ else
   ng "T42-reg: ls|del still -> NO calm + deletion danger (no_calm=$t_nocalm has_danger=$t_hasdanger)"
 fi
 
+# ============================================================
+# cycle-4 追加テスト: 致命の 1>/ &> 修正 + m1/m2/m3
+# ============================================================
+
+# --- T43: 致命 — cat secret 1> out.txt → 書込検出・「読むだけ」なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat secret.txt 1> out.txt"}}'
+run_explain_with_json "bash" "$json"
+t43_write=0; t43_no_readonly=0
+if [ -f "$html" ] && grep -q '書き込み' "$html" && grep -q 'out.txt' "$html"; then t43_write=1; fi
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then t43_no_readonly=1; fi
+if [ "$t43_write" -eq 1 ] && [ "$t43_no_readonly" -eq 1 ]; then
+  ok "T43: cat 1> out.txt -> write detected, NO read-only text (1> is content-write)"
+else
+  ng "T43: cat 1> out.txt -> write detected, NO read-only text (write=$t43_write no_ro=$t43_no_readonly)"
+fi
+
+# --- T44: 致命 — cmd 1>out.txt (連結形) → 書込検出 ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cmd 1>out.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '書き込み' "$html" && grep -q 'out.txt' "$html"; then
+  ok "T44: cmd 1>out.txt (compact) -> write detected"
+else
+  ng "T44: cmd 1>out.txt (compact) -> write detected"
+fi
+
+# --- T45: 致命 — app &> all.log → 書込検出 ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"app &> all.log"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '書き込み' "$html" && grep -q 'all.log' "$html"; then
+  ok "T45: app &> all.log -> write detected (&> is content-write)"
+else
+  ng "T45: app &> all.log -> write detected"
+fi
+
+# --- T46: N1 退行ガード — ls 2>/dev/null 引き続き書込なし・対象が /dev/null でない ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls 2>/dev/null"}}'
+run_explain_with_json "bash" "$json"
+# /dev/null は action-cmd に出るが whatdo-body には出てはいけない
+if [ -f "$html" ] && ! grep -q '書き込み' "$html" && ! grep -q 'class="whatdo-body">.*dev.null' "$html"; then
+  ok "T46: ls 2>/dev/null -> NO write warning, /dev/null not in whatdo (N1 regression guard)"
+else
+  ng "T46: ls 2>/dev/null -> NO write warning, /dev/null not in whatdo"
+fi
+
+# --- T47: m1 chmod $アンカー — chmod 644 u+xtra.txt → 対象=u+xtra.txt ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"chmod 644 u+xtra.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'u+xtra.txt' "$html" && ! grep -q '現在のフォルダ' "$html"; then
+  ok "T47: chmod 644 u+xtra.txt -> target=u+xtra.txt (not 現在のフォルダ)"
+else
+  ng "T47: chmod 644 u+xtra.txt -> target=u+xtra.txt (m1 anchor fix)"
+fi
+
+# --- T48: m3 quoted path — cat 'my file.txt' → 対象=my file.txt (引用符除去) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat \"my file.txt\""}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'my file.txt' "$html" && ! grep -q '"my' "$html"; then
+  ok "T48: cat \"my file.txt\" -> target=my file.txt (quotes stripped)"
+else
+  ng "T48: cat \"my file.txt\" -> target=my file.txt (m3 quoted path) (got: $(grep -o 'whatdo-body">[^<]*' "$html" | head -1))"
+fi
+
+# --- T49: m2 parity fixture — explainer-parity.tsv を iterate して検証 ---
+FIXTURE="$REPO/scripts/common/test/fixtures/explainer-parity.tsv"
+if [ ! -f "$FIXTURE" ]; then
+  ng "T49-setup: parity fixture not found at $FIXTURE"
+else
+  fixture_pass=0; fixture_fail=0
+  while IFS=$'\t' read -r cmd_raw category danger_expected readonly_expected target_hint; do
+    # コメント行・空行をスキップ
+    case "$cmd_raw" in '#'*|'') continue ;; esac
+    (
+      set -u
+      source "$REPO/scripts/macos/lib/explainer.sh" 2>/dev/null
+      explain_command "$cmd_raw" 2>/dev/null
+      # danger チェック
+      has_danger="false"
+      [ -n "$EXPLAIN_DANGER" ] && has_danger="true"
+      # readonly チェック (安心文: 「しません」「読むだけ」)
+      has_readonly="false"
+      case "$EXPLAIN_WHATDO" in *しません*|*読むだけ*) has_readonly="true" ;; esac
+      printf '%s\t%s\t%s\t%s\n' "$has_danger" "$has_readonly" "$EXPLAIN_WHATDO" "$EXPLAIN_DANGER"
+    ) > "$TD/parity_result.tmp" 2>/dev/null
+    res_danger="$(cut -f1 "$TD/parity_result.tmp")"
+    res_readonly="$(cut -f2 "$TD/parity_result.tmp")"
+    res_whatdo="$(cut -f3 "$TD/parity_result.tmp")"
+    # danger assertion
+    if [ "$res_danger" != "$danger_expected" ]; then
+      ng "T49-parity [$cmd_raw]: danger expected=$danger_expected got=$res_danger"
+      fixture_fail=$((fixture_fail+1))
+      continue
+    fi
+    # readonly assertion
+    if [ "$res_readonly" != "$readonly_expected" ]; then
+      ng "T49-parity [$cmd_raw]: readonly expected=$readonly_expected got=$res_readonly (W=[$res_whatdo])"
+      fixture_fail=$((fixture_fail+1))
+      continue
+    fi
+    # target hint (非空なら部分一致)
+    if [ -n "$target_hint" ] && ! echo "$res_whatdo" | grep -qF "$target_hint"; then
+      ng "T49-parity [$cmd_raw]: target hint [$target_hint] not in whatdo [$res_whatdo]"
+      fixture_fail=$((fixture_fail+1))
+      continue
+    fi
+    fixture_pass=$((fixture_pass+1))
+    ok "T49-parity [$cmd_raw] OK"
+  done < "$FIXTURE"
+fi
+
 echo ""
 echo "explainer.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

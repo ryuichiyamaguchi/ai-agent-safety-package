@@ -192,37 +192,47 @@ _explain_strip_quoted() {
     -e "s/'[^']*'/ /g"
 }
 
-# fd リダイレクト(2> 2>> 1> &> &>>) かどうかを判定するヘルパ。
-# 引数: トークン文字列。fd リダイレクトなら 0(true) を返す。
-_explain_is_fd_redir() {
+# stderr リダイレクト(2> 2>> のみ)かどうかを判定するヘルパ。
+# 除外するのは 2> / 2>> のみ。
+# 1> / 1>> / &> / &>> は content-write として検出する(標準出力・両出力をファイルに書く)。
+_explain_is_stderr_redir() {
   case "$1" in
-    [0-9]'>'*|[0-9]'>>'*|'&>'*|'&>>'*) return 0 ;;
+    '2>'*|'2>>'*) return 0 ;;
     *) return 1 ;;
   esac
 }
 
-# セグメント文字列からリダイレクト先(> or >>)を抽出する。
-# fd リダイレクト(2> 1> &>)・引用符内の > を無視。無ければ空。
+# セグメント文字列からリダイレクト先(content-write > or >>)を抽出する。
+# 2>/2>> は無視。1>file/&>file/1>>file/&>>file/bare>/>>file も対象を抽出。
+# 引用符内の > は無視。無ければ空。
 _explain_redir_target() {
   local stripped
   stripped="$(_explain_strip_quoted "$1")"
-  # fd リダイレクト(数字>)・&> を除いた最初の >/<< を探す
   printf '%s' "$stripped" | awk '
     {
       n=split($0, tok, /[[:space:]]+/)
       for (i=1; i<=n; i++) {
         t=tok[i]
-        # fd redir: 数字> または &> を除外
-        if (t ~ /^[0-9]>>?/ || t ~ /^&>>?/) continue
-        # bare > or >> (standalone)
-        if (t ~ /^>>?$/) {
-          # 次の非空トークンを返す
+        # 2>/2>> は stderr のみ → スキップ
+        if (t ~ /^2>>?/) continue
+        # standalone 1> / 1>> / &> / &>> → 次トークンがターゲット
+        if (t ~ /^1>>?$/ || t ~ /^&>>?$/) {
           for (j=i+1; j<=n; j++) {
             if (tok[j]!="") { print tok[j]; exit }
           }
         }
-        # >>filepath 形式 (>>foo) — fd 以外
-        if (t ~ /^>>?[^>]/ && t !~ /^[0-9]/ && t !~ /^&/) {
+        # 1>file / 1>>file / &>file / &>>file — 先頭の 1 or & と > を剥がして返す
+        if (t ~ /^1>>?[^>]/ || t ~ /^&>>?[^>]/) {
+          sub(/^(1|&)>>?/, "", t); print t; exit
+        }
+        # standalone bare > / >> → 次トークンがターゲット
+        if (t ~ /^>>?$/) {
+          for (j=i+1; j<=n; j++) {
+            if (tok[j]!="") { print tok[j]; exit }
+          }
+        }
+        # bare >file / >>file (1>/&> 以外・2> 以外)
+        if (t ~ /^>>?[^>]/ && t !~ /^2/) {
           sub(/^>>?/, "", t); print t; exit
         }
       }
@@ -230,8 +240,9 @@ _explain_redir_target() {
   ' | head -n1
 }
 
-# セグメントに content-write リダイレクト(> or >>) が含まれるか判定。
-# fd リダイレクト(2> 1> &>) と引用符内の > は除外。
+# セグメントに content-write リダイレクトが含まれるか判定。
+# 除外: 2>/2>> (stderr のみ) と引用符内の >
+# 検出: bare >/>> / 1>/1>> / &>/&>> (standalone or 連結形)
 _explain_has_redir() {
   local stripped
   stripped="$(_explain_strip_quoted "$1")"
@@ -240,8 +251,16 @@ _explain_has_redir() {
       n=split($0, tok, /[[:space:]]+/)
       for (i=1; i<=n; i++) {
         t=tok[i]
-        if (t ~ /^[0-9]>>?/ || t ~ /^&>>?/) continue
-        if (t ~ /^>>?$/ || (t ~ /^>>?[^>]/ && t !~ /^[0-9]/ && t !~ /^&/)) {
+        # 2>/2>> (stderr) はスキップ
+        if (t ~ /^2>>?/) continue
+        # bare > or >> (standalone)
+        if (t ~ /^>>?$/) { print "1"; exit }
+        # 1> or 1>> (standalone: "1>" "1>>")
+        if (t ~ /^1>>?$/) { print "1"; exit }
+        # &> or &>> (standalone)
+        if (t ~ /^&>>?$/) { print "1"; exit }
+        # >file / 1>file / &>file (連結形)
+        if (t ~ /^1>>?[^>]/ || t ~ /^&>>?[^>]/ || (t ~ /^>>?[^>]/ && t !~ /^2/)) {
           print "1"; exit
         }
       }
@@ -279,20 +298,20 @@ _explain_target() {
       # 元の入力からも同じ区切りでトークンを取る（位置対応のため）
       split($0, orig, /[[:space:]]+/)
       # リダイレクト演算子とその後トークンを除外インデックスに登録
+      # 除外(無視): 2>/2>> (stderr のみ)
+      # 検出してredir_idxに入れる: >/>>/ 1>/1>>/&>/&>> (content-write)
       delete redir_idx
       for (i=1; i<=n; i++) {
         t=tok[i]
-        # fd リダイレクト (2>/dev/null, 1>foo, &>bar, &>>baz) はスキップ
-        if (t ~ /^[0-9]>>?/ || t ~ /^&>>?/) {
-          redir_idx[i]=1
-          continue
-        }
-        if (t ~ /^>>?$/) {
+        # 2>/2>> (stderr) は対象候補から除外(redir_idx に入れてスキップ)
+        if (t ~ /^2>>?/) { redir_idx[i]=1; continue }
+        # standalone > / >> / 1> / 1>> / &> / &>> → このトークンと次トークンを除外
+        if (t ~ /^>>?$/ || t ~ /^1>>?$/ || t ~ /^&>>?$/) {
           redir_idx[i]=1
           if (i+1<=n) redir_idx[i+1]=1
         }
-        # トークン自体が >>filepath 形式 (>>foo) のとき演算子として除外
-        if (t ~ /^>>?[^>]/ && t !~ /^[0-9]/ && t !~ /^&/) {
+        # 1>file/&>file/>>file 形式 (content-write 演算子+値が連結) → このトークンだけ除外
+        if (t ~ /^1>>?[^>]/ || t ~ /^&>>?[^>]/ || (t ~ /^>>?[^>]/ && t !~ /^2/)) {
           redir_idx[i]=1
         }
       }
@@ -328,11 +347,29 @@ _explain_target() {
         if (cat=="del" && substr(ts,1,1)=="/") continue
         # 空白のみ(引用符トークンが strip された)はスキップ
         if (ts ~ /^[[:space:]]*$/) { pos++; if (pos<=skip) continue; skip=skip+1; continue }
-        # chmod/chown の mode 除外 (数字3-4桁 or ugoa+rwx 形式・絶対パスは除外しない)
+        # chmod/chown の mode 除外 (数字のみ or ugoa+rwx 形式の完全一致・絶対パスは除外しない)
         if ((cat=="chmod"||cat=="chown") && substr(ts,1,1)!="/" && \
-            (ts ~ /^[0-9]+$/ || ts ~ /^[ugoa]*[+\-=][rwxst,ugoa]+/)) continue
+            (ts ~ /^[0-9]+$/ || ts ~ /^[ugoa]*[+\-=][rwxst,ugoa]+$/)) continue
         pos++
         if (pos <= skip) continue
+        # m3: 引用符で始まるトークンは閉じ引用符まで連結し、引用符を除去して返す
+        if (substr(t,1,1)=="\"" || substr(t,1,1)=="'"'"'") {
+          q=substr(t,1,1)
+          if (substr(t,length(t),1)==q && length(t)>=2) {
+            # 単一トークンで完結: "foo" → foo
+            res=substr(t,2,length(t)-2); print res; exit
+          }
+          # 複数トークンにまたがる: "my file.txt" → my file.txt
+          res=substr(t,2)
+          for (j=i+1; j<=n; j++) {
+            p=index(orig[j],q)
+            if (p > 0) {
+              res=res " " substr(orig[j],1,p-1); break
+            }
+            res=res " " orig[j]
+          }
+          print res; exit
+        }
         print t; exit
       }
       print ""
