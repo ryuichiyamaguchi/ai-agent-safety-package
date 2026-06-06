@@ -559,10 +559,12 @@ function Get-ActionText {
     param([object]$HookInput, [string]$Mode)
     $text = ""
     $label = "操作"
+    $rawCmd = ""
     try {
         switch ($Mode) {
             "bash" {
                 $text = [string](Get-CommandText $HookInput)
+                $rawCmd = $text   # 切り詰め前の生コマンド(複合・危険判定は全文で行う)
                 $label = "コマンド実行"
             }
             "write" {
@@ -596,7 +598,7 @@ function Get-ActionText {
     if ([string]::IsNullOrWhiteSpace($text)) { $text = "（取得できませんでした）" }
     # 800字で切り捨て
     if ($text.Length -gt 800) { $text = $text.Substring(0, 800) + "…(省略)" }
-    return [PSCustomObject]@{ Text = $text; Label = $label }
+    return [PSCustomObject]@{ Text = $text; Label = $label; RawCmd = $rawCmd }
 }
 
 # ----- now.html 書き出し (Phase 1: HTML モニター足場) ---------------------
@@ -780,7 +782,7 @@ function Write-NowHtmlPlaceholder([string]$LogDir) {
 }
 
 function Write-NowHtml {
-    param([string]$Icon, [string]$Title, [string]$BodyRisk, [string]$Ts, [string]$CardId, [string]$Mode, [string]$Body, [string]$LogDir, [string]$ActionText = "", [string]$ActionLabel = "操作")
+    param([string]$Icon, [string]$Title, [string]$BodyRisk, [string]$Ts, [string]$CardId, [string]$Mode, [string]$Body, [string]$LogDir, [string]$ActionText = "", [string]$ActionLabel = "操作", [string]$ActionRawCmd = "")
     try {
         $refresh = 1
         if ($env:AI_SAFE_MONITOR_INTERVAL -match '^\d+$') { $refresh = [int]$env:AI_SAFE_MONITOR_INTERVAL }
@@ -805,7 +807,10 @@ function Write-NowHtml {
             [void]$sb.Append("</div>`n")
             # 「これは何をする？」具体解説（bash モードのみ・決定的・LLM不要）。
             if ($Mode -eq "bash") {
-                $expl = Get-CommandExplanation $ActionText
+                # 解説の複合・危険判定は切り詰め前の全文(ActionRawCmd)で行う。
+                # 表示用 ActionText は 800 字で切られ危険な後続が落ちる可能性があるため使わない。
+                $explCmd = if (-not [string]::IsNullOrEmpty($ActionRawCmd)) { $ActionRawCmd } else { $ActionText }
+                $expl = Get-CommandExplanation $explCmd
                 $hasDanger = -not [string]::IsNullOrEmpty($expl.Danger)
                 $hasWhatdo = -not [string]::IsNullOrEmpty($expl.WhatDo)
                 if ($hasWhatdo -or $hasDanger) {
@@ -866,11 +871,13 @@ function Write-NowCard {
     # 実際の操作文字列を抽出（HookInput が渡された場合のみ）。
     $actionText = ""
     $actionLabel = "操作"
+    $actionRaw = ""
     if ($null -ne $HookInput) {
         try {
             $action = Get-ActionText -HookInput $HookInput -Mode $Mode
             $actionText = $action.Text
             $actionLabel = $action.Label
+            $actionRaw = $action.RawCmd
         } catch { }
     }
 
@@ -887,7 +894,9 @@ function Write-NowCard {
     # 「これは何をする？」具体解説（bash モードのみ）。
     if (-not [string]::IsNullOrWhiteSpace($actionText) -and $Mode -eq "bash") {
         try {
-            $expl = Get-CommandExplanation $actionText
+            # 複合・危険判定は切り詰め前の全文(actionRaw)で行う(切り詰めで危険な後続が落ちるのを防ぐ)。
+            $explCmd = if (-not [string]::IsNullOrEmpty($actionRaw)) { $actionRaw } else { $actionText }
+            $expl = Get-CommandExplanation $explCmd
             if (-not [string]::IsNullOrEmpty($expl.WhatDo)) {
                 $actionLine = $actionLine + "$($expl.Icon) これは何をする？`n  $($expl.WhatDo)`n"
             }
@@ -900,7 +909,7 @@ function Write-NowCard {
     Set-Content -LiteralPath $out -Value ($header + $body) -Encoding UTF8
 
     # now.html を「並立」出力 (now.md は上で確定済み・不変)。失敗しても判定は止めない。
-    Write-NowHtml -Icon $icon -Title $title -BodyRisk $risk -Ts $ts -CardId $CardId -Mode $Mode -Body $body -LogDir $logDir -ActionText $actionText -ActionLabel $actionLabel
+    Write-NowHtml -Icon $icon -Title $title -BodyRisk $risk -Ts $ts -CardId $CardId -Mode $Mode -Body $body -LogDir $logDir -ActionText $actionText -ActionLabel $actionLabel -ActionRawCmd $actionRaw
 
     return $CardId
 }

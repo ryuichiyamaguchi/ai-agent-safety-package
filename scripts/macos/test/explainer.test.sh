@@ -1225,6 +1225,27 @@ else
   ng "T96: backslash continuation + trailing LF -> NO calm"
 fi
 
+# --- T97: sudo + TAB 区切りでも昇格を検出し安心文を出さない(false-safety防止) ---
+# sudo 検出が半角スペース前提だと sudo<TAB>cat を見逃すため [[:space:]] で判定する。
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"sudo'"${BS}"'tcat foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && ! grep -q 'しません' "$html" && grep -qE '昇格|管理者権限' "$html"; then
+  ok "T97: sudo<TAB>cat -> NO calm + escalation warning"
+else
+  ng "T97: sudo<TAB>cat -> NO calm + escalation warning"
+fi
+
+# --- T98: 退行 — TAB 区切りの引数(sudo無し)は純粋リーダーとして calm 維持 ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat'"${BS}"'tfoo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q 'しません' "$html"; then
+  ok "T98-reg: cat<TAB>foo.txt -> calm present"
+else
+  ng "T98-reg: cat<TAB>foo.txt -> calm present"
+fi
+
 echo ""
 echo "explainer.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

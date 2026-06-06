@@ -523,10 +523,10 @@ _explain_scan_flags() {
     verb_lc="$(printf '%s' "$seg" | awk '{ print tolower($1) }')"
     lc_seg="$(printf '%s' "$seg" | tr '[:upper:]' '[:lower:]')"
 
-    # sudo / 権限昇格
-    case " $(_orig_seg_lc "$1") " in
-      *" sudo "*) _ecf_sudo=1 ;;
-    esac
+    # sudo / 権限昇格(空白の種類に依存しないよう [[:space:]] で判定。TAB 区切り sudo<TAB>cat も捕捉)
+    if printf '%s' "$(_orig_seg_lc "$1")" | grep -qE '(^|[[:space:]])sudo([[:space:]]|$)'; then
+      _ecf_sudo=1
+    fi
     if printf '%s' "$lc_seg" | grep -qE -- '(runas|\-verb[[:space:]]+runas)'; then _ecf_sudo=1; fi
 
     # content-write リダイレクト(2> 除く)→ write フラグ
