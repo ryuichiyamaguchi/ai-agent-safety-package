@@ -37,3 +37,9 @@ find . -exec printf {} +	search	true	false
 find . -delete	search	true	false
 find . -name foo	search	false	false
 wc foo.txt	read	false	true	foo.txt
+file foo.txt	read	false	false
+date	unknown	false	false
+more foo.txt	read	false	false
+find . -okdir printf {} +	search	true	false
+wc foo.txt	read	false	true	foo.txt
+stat foo.txt	read	false	true	foo.txt

@@ -396,8 +396,9 @@ function Get-CommandFlags([string]$Full) {
             }
         }
         # RoVerb: reassurance-safe 集合(純粋リーダーのみ)でない動詞があれば false
+        # 除外: file -C(magic DB書込) / date <arg>(時刻設定) / more/less(!cmd でshell out)
         # find/grep/awk/sed は -exec/-w 等で exec/write 可能なため除外
-        $roVerbs = @('ls','dir','get-childitem','gci','ll','la','cat','type','get-content','gc','head','tail','more','wc','file','stat','pwd','whoami','date')
+        $roVerbs = @('ls','dir','get-childitem','gci','ll','la','cat','type','get-content','gc','head','tail','wc','stat','pwd','whoami')
         if ($vl -notin $roVerbs) { $flags.RoVerb = $false }
         # xargs rm: xargs が先頭 verb の時のみ削除扱い
         if ($vl -eq 'xargs' -and $segLc -match '\bxargs\b\s+(-[^\s]+\s+)*rm\b') {
@@ -406,8 +407,8 @@ function Get-CommandFlags([string]$Full) {
         }
         # find -delete → 削除
         if ($vl -eq 'find' -and $segLc -match '\s-delete\b') { $flags.Delete = $true }
-        # find -exec/-execdir/-ok → 実行(任意コマンドを呼ぶ)
-        if ($vl -eq 'find' -and $segLc -match '\s-(exec|execdir|ok)\b') { $flags.Exec = $true }
+        # find -exec/-execdir/-ok/-okdir → 実行(任意コマンドを呼ぶ)
+        if ($vl -eq 'find' -and $segLc -match '\s-(exec|execdir|ok|okdir)\b') { $flags.Exec = $true }
     }
     return $flags
 }

@@ -488,12 +488,13 @@ _explain_scan_flags() {
     if _explain_has_redir "$seg"; then _ecf_write=1; fi
 
     # reassurance-safe 集合: フラグでも絶対に実行/書き込みできない純粋リーダーのみ。
+    # 除外理由: file -C(magic DB 書込) / date <arg>(時刻設定) / more/less(!cmd でshell out)
     # find/grep/awk/sed 等は -exec/-w 等でexec/write 可能なため除外する。
     # このフラグが 0 の時は安心文「見るだけ・しません」を出さない。
     case "$verb_lc" in
       ls|dir|get-childitem|gci|ll|la|\
-cat|type|get-content|gc|head|tail|more|\
-wc|file|stat|pwd|whoami|date) ;;
+cat|type|get-content|gc|head|tail|\
+wc|stat|pwd|whoami) ;;
       *) _ecf_ro_verb=0 ;;
     esac
 
@@ -537,8 +538,8 @@ wc|file|stat|pwd|whoami|date) ;;
     if [ "$verb_lc" = "find" ] && printf '%s' "$lc_seg" | grep -qE -- '[[:space:]]-delete\b'; then
       _ecf_delete=1
     fi
-    # find -exec/-execdir/-ok → 実行(任意コマンドを呼ぶ)
-    if [ "$verb_lc" = "find" ] && printf '%s' "$lc_seg" | grep -qE -- '[[:space:]]-(exec|execdir|ok)\b'; then
+    # find -exec/-execdir/-ok/-okdir → 実行(任意コマンドを呼ぶ)
+    if [ "$verb_lc" = "find" ] && printf '%s' "$lc_seg" | grep -qE -- '[[:space:]]-(exec|execdir|ok|okdir)\b'; then
       _ecf_exec=1
     fi
   done <<EOF

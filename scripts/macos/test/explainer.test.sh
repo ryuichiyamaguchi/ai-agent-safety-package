@@ -967,3 +967,71 @@ fi
 echo ""
 echo "explainer.test summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]
+
+# ============================================================
+# cycle-8 追加テスト: file/date/more 除外 + find -okdir
+# ============================================================
+
+# --- T73: file コマンド → 安心文なし (file -C は magic DB 書込可) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"file foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '<p class="whatdo-body"' "$html" && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then
+  ok "T73: file foo.txt -> category desc shown, NO calm (file not reassurance-safe)"
+else
+  ng "T73: file foo.txt -> NO calm (file -C writes magic DB)"
+fi
+
+# --- T74: date コマンド → 安心文なし (date <arg> は時刻設定可) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"date"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '<p class="whatdo-body"' "$html" && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then
+  ok "T74: date -> category desc shown, NO calm (date <arg> sets time)"
+else
+  ng "T74: date -> NO calm (date <arg> sets time)"
+fi
+
+# --- T75: more foo.txt → 安心文なし (more で !cmd shell out 可) ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"more foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '<p class="whatdo-body"' "$html" && ! grep -q 'しません' "$html" && ! grep -q '読むだけ' "$html"; then
+  ok "T75: more foo.txt -> NO calm (more !cmd can shell out)"
+else
+  ng "T75: more foo.txt -> NO calm"
+fi
+
+# --- T76: find -okdir → 実行警告 + 安心文なし ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"find . -okdir printf {} +"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && grep -q '<p class="whatdo-danger"' "$html" && grep -q '実行' "$html" && ! grep -q 'しません' "$html"; then
+  ok "T76: find -okdir -> exec danger, NO calm"
+else
+  ng "T76: find -okdir -> exec danger, NO calm"
+fi
+
+# --- T77: stat foo.txt(素) → reassurance-safe で安心文あり ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"stat foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && (grep -q 'しません' "$html" || grep -q '読むだけ' "$html"); then
+  ok "T77: stat foo.txt -> calm text present (stat is reassurance-safe)"
+else
+  ng "T77: stat foo.txt -> calm text present (regression)"
+fi
+
+# --- T78: wc退行 — wc foo.txt(素) → 安心文あり ---
+rm -f "$html" "$act"
+json='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"wc foo.txt"}}'
+run_explain_with_json "bash" "$json"
+if [ -f "$html" ] && (grep -q 'しません' "$html" || grep -q '読むだけ' "$html"); then
+  ok "T78-reg: wc foo.txt -> calm text present (regression guard)"
+else
+  ng "T78-reg: wc foo.txt -> calm text present (regression)"
+fi
+
+echo ""
+echo "explainer.test summary: pass=$pass fail=$fail"
+[ "$fail" -eq 0 ]
