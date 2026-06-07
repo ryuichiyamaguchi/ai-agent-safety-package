@@ -24,6 +24,8 @@ $nowHtml = Join-Path $logDir "now.html"
 $serverJs = Join-Path $PSScriptRoot "..\common\monitor-server.js"
 $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
 if ($nodeCmd -and (Test-Path -LiteralPath $serverJs) -and $env:AI_SAFE_MONITOR_NO_SERVER -ne "1") {
+    $proc = $null
+    $started = $false
     try {
         $urlFile = Join-Path $logDir "monitor-url.txt"
         New-Item -ItemType Directory -Force -Path $logDir | Out-Null
@@ -39,15 +41,18 @@ if ($nodeCmd -and (Test-Path -LiteralPath $serverJs) -and $env:AI_SAFE_MONITOR_N
             Start-Process $url
             Write-Host "AI コーチ・モニターを起動しました。"
             Write-Host "（このウィンドウを閉じる、または Ctrl+C で停止します）"
+            $started = $true
             Wait-Process -Id $proc.Id
-            exit 0
         } else {
             Write-Host "サーバ起動を確認できませんでした。従来の file:// モニターに切り替えます。"
-            try { Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue } catch { }
         }
     } catch {
         Write-Host "AI コーチ・モニターの起動に失敗しました。従来のモニターに切り替えます。"
+    } finally {
+        # 中断・終了時に node サーバを確実に止める（プロセスリーク防止）。
+        if ($proc -and -not $proc.HasExited) { try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch { } }
     }
+    if ($started) { exit 0 }
 }
 
 # placeholder 生成は Explainer.ps1 の Write-NowHtmlPlaceholder を再利用する

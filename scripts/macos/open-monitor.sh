@@ -35,9 +35,10 @@ SERVER_JS="$HERE/../common/monitor-server.js"
 if command -v node >/dev/null 2>&1 && [ -r "$SERVER_JS" ] && [ "${AI_SAFE_MONITOR_NO_SERVER:-0}" != "1" ]; then
   URL_FILE="$DIR/monitor-url.txt"
   mkdir -p "$DIR" 2>/dev/null || true
+  chmod 700 "$DIR" 2>/dev/null || true   # トークン付き URL/ログを他ユーザーに読ませない
   rm -f "$URL_FILE" 2>/dev/null || true
-  # node の出力（URL+トークン）はターミナルに出さずログへ。
-  AI_SAFE_LOG_DIR="$DIR" node "$SERVER_JS" >"$DIR/monitor-server.log" 2>&1 &
+  # node の出力（URL+トークン）はターミナルに出さずログへ。umask 077 でログも所有者のみ。
+  ( umask 077; AI_SAFE_LOG_DIR="$DIR" exec node "$SERVER_JS" >"$DIR/monitor-server.log" 2>&1 ) &
   SRV_PID=$!
   # URL ファイル（サーバが listen 後に書く）を最大 5 秒待つ
   for _i in $(seq 1 25); do [ -f "$URL_FILE" ] && break; sleep 0.2; done
