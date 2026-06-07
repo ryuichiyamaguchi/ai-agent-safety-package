@@ -29,6 +29,30 @@ log_dir() {
 DIR="$(log_dir)"
 NOW_HTML="$DIR/now.html"
 
+# --- AI コーチ・モニター（Node サーバ）を優先起動。Node 不在 / 失敗時は file:// にフォールバック ---
+# サーバはこのウィンドウが開いている間だけ動く（閉じる/ Ctrl+C で停止）。常駐デーモンにはしない。
+SERVER_JS="$HERE/../common/monitor-server.js"
+if command -v node >/dev/null 2>&1 && [ -r "$SERVER_JS" ] && [ "${AI_SAFE_MONITOR_NO_SERVER:-0}" != "1" ]; then
+  URL_FILE="$DIR/monitor-url.txt"
+  mkdir -p "$DIR" 2>/dev/null || true
+  rm -f "$URL_FILE" 2>/dev/null || true
+  # node の出力（URL+トークン）はターミナルに出さずログへ。
+  AI_SAFE_LOG_DIR="$DIR" node "$SERVER_JS" >"$DIR/monitor-server.log" 2>&1 &
+  SRV_PID=$!
+  # URL ファイル（サーバが listen 後に書く）を最大 5 秒待つ
+  for _i in $(seq 1 25); do [ -f "$URL_FILE" ] && break; sleep 0.2; done
+  if [ -f "$URL_FILE" ]; then
+    open "$(cat "$URL_FILE")" 2>/dev/null || true
+    echo "AI コーチ・モニターを起動しました。"
+    echo "（このウィンドウを閉じる、または Ctrl+C で停止します）"
+    trap 'kill "$SRV_PID" 2>/dev/null' INT TERM
+    wait "$SRV_PID"
+    exit 0
+  fi
+  echo "サーバ起動を確認できませんでした。従来の file:// モニターに切り替えます。"
+  kill "$SRV_PID" 2>/dev/null || true
+fi
+
 # placeholder 生成は explainer.sh の write_now_html_placeholder を再利用する
 # （重複ロジックを増やさない）。source できない / 失敗しても open は試みる。
 if [ ! -f "$NOW_HTML" ]; then

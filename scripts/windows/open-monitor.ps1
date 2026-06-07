@@ -19,6 +19,37 @@ $logDir = $env:AI_SAFE_LOG_DIR
 if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
 $nowHtml = Join-Path $logDir "now.html"
 
+# --- AI コーチ・モニター（Node サーバ）を優先起動。Node 不在/失敗時は file:// にフォールバック ---
+# サーバはこのウィンドウが開いている間だけ動く（閉じる/Ctrl+C で停止）。常駐デーモンにはしない。
+$serverJs = Join-Path $PSScriptRoot "..\common\monitor-server.js"
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+if ($nodeCmd -and (Test-Path -LiteralPath $serverJs) -and $env:AI_SAFE_MONITOR_NO_SERVER -ne "1") {
+    try {
+        $urlFile = Join-Path $logDir "monitor-url.txt"
+        New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+        Remove-Item -LiteralPath $urlFile -ErrorAction SilentlyContinue
+        $env:AI_SAFE_LOG_DIR = $logDir
+        # node の出力（URL+トークン）はターミナルに出さずログへ。
+        $srvLog = Join-Path $logDir "monitor-server.log"
+        $srvErr = Join-Path $logDir "monitor-server.err.log"
+        $proc = Start-Process -FilePath $nodeCmd.Source -ArgumentList @($serverJs) -NoNewWindow -PassThru -RedirectStandardOutput $srvLog -RedirectStandardError $srvErr
+        for ($i = 0; $i -lt 25; $i++) { if (Test-Path -LiteralPath $urlFile) { break }; Start-Sleep -Milliseconds 200 }
+        if (Test-Path -LiteralPath $urlFile) {
+            $url = (Get-Content -LiteralPath $urlFile -Raw).Trim()
+            Start-Process $url
+            Write-Host "AI コーチ・モニターを起動しました。"
+            Write-Host "（このウィンドウを閉じる、または Ctrl+C で停止します）"
+            Wait-Process -Id $proc.Id
+            exit 0
+        } else {
+            Write-Host "サーバ起動を確認できませんでした。従来の file:// モニターに切り替えます。"
+            try { Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue } catch { }
+        }
+    } catch {
+        Write-Host "AI コーチ・モニターの起動に失敗しました。従来のモニターに切り替えます。"
+    }
+}
+
 # placeholder 生成は Explainer.ps1 の Write-NowHtmlPlaceholder を再利用する
 # （重複ロジックを増やさない）。source / 生成に失敗しても open は試みる。
 if (-not (Test-Path -LiteralPath $nowHtml)) {
