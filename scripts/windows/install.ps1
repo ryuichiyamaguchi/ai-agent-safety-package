@@ -252,6 +252,18 @@ if ($Platform -eq 'win') {
         Write-Host ("ターミナル用ショートカットを配置しました (" + ($shimPlaced -join " / ") + ")")
         Write-Host "  Zed 等のターミナルでは  .\monitor.cmd  と  .\codex-safe.cmd  を実行してください。"
     }
+
+    # さらに PATH 登録して `codex-safe` / `monitor` を `.\` 無し・どのフォルダからでも使えるようにする。
+    # 失敗してもインストール本体は止めない(PATH 登録は付加価値)。
+    $setupCmds = Join-Path $packageRoot "scripts\windows\setup-commands.ps1"
+    if (Test-Path -LiteralPath $setupCmds) {
+        try {
+            & $setupCmds -Workspace $Workspace
+        } catch {
+            Write-Warning ("ターミナルコマンドの PATH 登録に失敗しました(スキップ): " + $_.Exception.Message)
+            Write-Host "  後で手動登録するには: powershell -ExecutionPolicy Bypass -File `"$Workspace\.ai-safety\hooks\windows\setup-commands.ps1`" -Workspace `"$Workspace`""
+        }
+    }
 }
 
 if ($InstallGlobalClaudeSettings) {
