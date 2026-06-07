@@ -23,7 +23,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { execFile } = require('node:child_process');
+const { spawn } = require('node:child_process');
 
 const LOG_DIR = process.env.AI_SAFE_LOG_DIR || path.join(os.homedir(), '.ai-safety', 'logs');
 const TOKEN = process.env.AI_SAFE_MONITOR_TOKEN || crypto.randomBytes(16).toString('hex');
@@ -35,49 +35,62 @@ const REFRESH_MS = Number(process.env.AI_SAFE_MONITOR_INTERVAL || 1) * 1000;
 // トークン付き URL やログを他ユーザーに読まれないよう、本プロセスが作るファイルは所有者のみ。
 try { process.umask(0o077); } catch { /* 一部環境で未サポート */ }
 
-// ---- AI バックエンド（受講者の手元 CLI を流用。新規キー不要） --------------
-// 安全上の理由で claude のみ・ツール全無効で呼ぶ:
-//   --tools ""           … 組み込みツール(Bash/Read/Write/Edit 等)を無効化＝コマンドを実行できない
-//   --strict-mcp-config  … --mcp-config 未指定なので MCP サーバを一切読み込まない＝MCP ツールも無し
-// → 純テキスト生成に限定。コマンド文字列に仕込まれたプロンプトインジェクションで AI が
-//   ローカル操作（Bash 実行 / Slack・Gmail 等の MCP）を行う二次経路を塞ぐ。
-// codex exec は read-only サンドボックスでもファイル読取が可能で「テキスト専用」にできないため使わない。
-//   --setting-sources user … project/local の hook を読み込ませない。これにより、ワークスペースに
-//     仕込まれた(または既存の)UserPromptSubmit 等の hook が、未信頼の command/question を受けて
-//     ローカル実行・漏えいする経路を塞ぐ(hook は tool/MCP の外側の実行経路)。認証(user)は維持。
-//     副次効果: coach の claude 呼び出しがワークスペースのガード hook を発火させ now.html を
-//     自己汚染するのも防ぐ。
-const BACKEND_DEFS = {
-  claude: { cmd: 'claude', args: (p) => ['-p', p, '--tools', '', '--strict-mcp-config', '--setting-sources', 'user'] },
-};
-const BACKEND_ORDER = ['claude'];
-let cachedBackend; // undefined=未試行, null=見つからない, {cmd,args}=確定
+// ---- AI バックエンド（受講者の手元 claude を流用。新規キー不要） ------------
+// 安全上の理由で claude のみ・ツール/MCP/hook を全無効で呼ぶ（純テキスト生成に限定）:
+//   --tools ""             … 組み込みツール(Bash/Read/Write/Edit 等)を無効化＝コマンドを実行できない
+//   --strict-mcp-config    … MCP サーバを一切読み込まない＝MCP ツール(Slack/Gmail 等)も無し
+//   --setting-sources user … project/local の hook を読み込ませない（hook は tool/MCP の外側の
+//     実行経路。ワークスペースに仕込まれた UserPromptSubmit 等が未信頼入力を受けて実行・漏えい
+//     するのを防ぐ。認証=user は維持。coach 呼び出しがガード hook を発火させ now.html を自己汚染
+//     するのも防ぐ）。これらでプロンプトインジェクションによる二次的ローカル操作を塞ぐ。
+// codex exec は read-only でもファイル読取可で「テキスト専用」にできないため使わない。
+const CLAUDE_FLAGS = ['-p', '--tools', '', '--strict-mcp-config', '--setting-sources', 'user'];
 
-function tryBackend(def, prompt) {
-  return new Promise((resolve) => {
-    const child = execFile(def.cmd, def.args(prompt), { timeout: AI_TIMEOUT_MS, maxBuffer: 1 << 20 }, (err, stdout) => {
-      if (err) {
-        if (err.code === 'ENOENT') return resolve({ enoent: true });
-        return resolve({ ok: false });
-      }
-      resolve({ ok: true, text: String(stdout).trim() });
-    });
-    // stdin を即閉じ（claude -p が stdin 待ちで数秒ブロックするのを防ぐ）。
-    try { if (child.stdin) child.stdin.end(); } catch { /* ignore */ }
-  });
+// claude の「node から直接 spawn できる実体」を多層解決する。
+//   ① 環境変数 AI_SAFE_COACH_CMD / CLAUDE_BIN（手動指定の逃げ道＝任意の導入形態に対応）
+//   ② 本パッケージの導入法(npm i -g)の実体 exe（Windows は npm グローバルの bin\claude.exe。
+//      claude.cmd/.ps1 はこの exe を呼ぶラッパーで、node からは直接実行できないため実体を使う）
+//   ③ PATH 上の claude（Windows は .exe を優先）
+//   ④ native installer / unix（~/.local/bin/claude）
+// .cmd/.ps1 ラッパーは避け、必ず実行可能ファイル(.exe / unix スクリプト)を返す。
+let cachedClaude; // undefined=未試行, null=無し, string=path
+function resolveClaude() {
+  if (cachedClaude !== undefined) return cachedClaude;
+  const pick = (p) => { try { return p && fs.existsSync(p) && fs.statSync(p).isFile() ? p : null; } catch { return null; } };
+  const env = process.env.AI_SAFE_COACH_CMD || process.env.CLAUDE_BIN;
+  if (env) { cachedClaude = env; return env; }
+  const isWin = process.platform === 'win32';
+  const cands = [];
+  if (isWin && process.env.APPDATA) {
+    cands.push(path.join(process.env.APPDATA, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'));
+  }
+  const exts = isWin ? ['.exe'] : [''];
+  for (const d of (process.env.PATH || '').split(path.delimiter)) {
+    if (d) for (const e of exts) cands.push(path.join(d, 'claude' + e));
+  }
+  const home = process.env.USERPROFILE || process.env.HOME;
+  if (home) cands.push(path.join(home, '.local', 'bin', isWin ? 'claude.exe' : 'claude'));
+  for (const c of cands) { if (pick(c)) { cachedClaude = c; return c; } }
+  cachedClaude = null;
+  return null;
 }
 
-async function runAI(prompt) {
-  if (cachedBackend) return tryBackend(cachedBackend, prompt);
-  if (cachedBackend === null) return { ok: false, noBackend: true };
-  for (const name of BACKEND_ORDER) {
-    const def = BACKEND_DEFS[name];
-    if (!def) continue;
-    const r = await tryBackend(def, prompt);
-    if (!r.enoent) { cachedBackend = def; return r; }
-  }
-  cachedBackend = null;
-  return { ok: false, noBackend: true };
+// プロンプトは引数でなく STDIN で渡す（シェル/cmd の引数解釈を一切通さない＝注入なし）。
+function runAI(prompt) {
+  return new Promise((resolve) => {
+    const exe = resolveClaude();
+    if (!exe) return resolve({ ok: false, noBackend: true });
+    let child;
+    try { child = spawn(exe, CLAUDE_FLAGS, { stdio: ['pipe', 'pipe', 'ignore'] }); }
+    catch { return resolve({ ok: false }); }
+    let out = ''; let size = 0; let done = false;
+    const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(r); };
+    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* */ } finish({ ok: false }); }, AI_TIMEOUT_MS);
+    child.on('error', () => finish({ ok: false }));
+    child.stdout.on('data', (c) => { size += c.length; if (size <= (1 << 20)) out += c.toString('utf8'); });
+    child.on('close', () => finish({ ok: true, text: out.trim() }));
+    try { child.stdin.write(prompt); child.stdin.end(); } catch { /* */ }
+  });
 }
 
 // ---- now.html から決定的解説を取り出す（explainer は一切変更しない） -------
