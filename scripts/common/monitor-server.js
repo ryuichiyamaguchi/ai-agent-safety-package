@@ -42,21 +42,28 @@ try { process.umask(0o077); } catch { /* 一部環境で未サポート */ }
 // → 純テキスト生成に限定。コマンド文字列に仕込まれたプロンプトインジェクションで AI が
 //   ローカル操作（Bash 実行 / Slack・Gmail 等の MCP）を行う二次経路を塞ぐ。
 // codex exec は read-only サンドボックスでもファイル読取が可能で「テキスト専用」にできないため使わない。
+//   --setting-sources user … project/local の hook を読み込ませない。これにより、ワークスペースに
+//     仕込まれた(または既存の)UserPromptSubmit 等の hook が、未信頼の command/question を受けて
+//     ローカル実行・漏えいする経路を塞ぐ(hook は tool/MCP の外側の実行経路)。認証(user)は維持。
+//     副次効果: coach の claude 呼び出しがワークスペースのガード hook を発火させ now.html を
+//     自己汚染するのも防ぐ。
 const BACKEND_DEFS = {
-  claude: { cmd: 'claude', args: (p) => ['-p', p, '--tools', '', '--strict-mcp-config'] },
+  claude: { cmd: 'claude', args: (p) => ['-p', p, '--tools', '', '--strict-mcp-config', '--setting-sources', 'user'] },
 };
 const BACKEND_ORDER = ['claude'];
 let cachedBackend; // undefined=未試行, null=見つからない, {cmd,args}=確定
 
 function tryBackend(def, prompt) {
   return new Promise((resolve) => {
-    execFile(def.cmd, def.args(prompt), { timeout: AI_TIMEOUT_MS, maxBuffer: 1 << 20 }, (err, stdout) => {
+    const child = execFile(def.cmd, def.args(prompt), { timeout: AI_TIMEOUT_MS, maxBuffer: 1 << 20 }, (err, stdout) => {
       if (err) {
         if (err.code === 'ENOENT') return resolve({ enoent: true });
         return resolve({ ok: false });
       }
       resolve({ ok: true, text: String(stdout).trim() });
     });
+    // stdin を即閉じ（claude -p が stdin 待ちで数秒ブロックするのを防ぐ）。
+    try { if (child.stdin) child.stdin.end(); } catch { /* ignore */ }
   });
 }
 
