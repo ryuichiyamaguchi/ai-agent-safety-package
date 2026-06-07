@@ -88,7 +88,8 @@ function runAI(prompt) {
     const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* */ } finish({ ok: false }); }, AI_TIMEOUT_MS);
     child.on('error', () => finish({ ok: false }));
     child.stdout.on('data', (c) => { size += c.length; if (size <= (1 << 20)) out += c.toString('utf8'); });
-    child.on('close', () => finish({ ok: true, text: out.trim() }));
+    // 非0終了 or 空応答は fail-closed（AI 使えません表示）に倒す。
+    child.on('close', (code) => finish(code === 0 && out.trim() ? { ok: true, text: out.trim() } : { ok: false }));
     try { child.stdin.write(prompt); child.stdin.end(); } catch { /* */ }
   });
 }
