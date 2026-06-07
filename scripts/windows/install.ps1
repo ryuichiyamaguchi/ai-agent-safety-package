@@ -235,6 +235,25 @@ if (Test-Path -LiteralPath $startSrc) {
     Write-Host "スタートフォルダを配置しました: $startDest"
 }
 
+# Zed 等のターミナルから「一発」で起動できる短命名ショートカット (.cmd) を workspace 直下に配置。
+# .bat の中身を貼るのではなく、これを `.\codex-safe.cmd` 等で実行 or ダブルクリックする。
+# %~dp0 で自分の場所からワークスペースを特定するので cwd に依存しない。
+# Windows のみ (mac は ~/.zshrc の codex-safe 等エイリアスで同等)。
+if ($Platform -eq 'win') {
+    $shimPlaced = @()
+    foreach ($shim in @("codex-safe.cmd", "claude-safe.cmd", "agy-safe.cmd", "monitor.cmd")) {
+        $shimSrc = Join-Path $packageRoot ("workspace-template\" + $shim)
+        if (Test-Path -LiteralPath $shimSrc) {
+            Copy-Item -LiteralPath $shimSrc -Destination (Join-Path $Workspace $shim) -Force
+            $shimPlaced += $shim
+        }
+    }
+    if ($shimPlaced.Count -gt 0) {
+        Write-Host ("ターミナル用ショートカットを配置しました (" + ($shimPlaced -join " / ") + ")")
+        Write-Host "  Zed 等のターミナルでは  .\monitor.cmd  と  .\codex-safe.cmd  を実行してください。"
+    }
+}
+
 if ($InstallGlobalClaudeSettings) {
     $globalSrc = Join-Path $packageRoot "configs\claude\settings.windows.json"
     $globalTarget = Join-Path $HOME ".claude\settings.json"
