@@ -23,17 +23,39 @@ if (-not (Test-Path -LiteralPath $env:AI_SAFE_POLICY)) {
     throw "AI Safety package is not installed in workspace: $Workspace"
 }
 
+# claude バイナリ検出（PATH に無くても npm グローバル / native installer から見つける）。
+# npm install -g @anthropic-ai/claude-code は Windows で %APPDATA%\npm\claude.cmd に入る。
+$Claude = $env:CLAUDE_BIN
+if (-not $Claude) {
+    $cmd = Get-Command claude -ErrorAction SilentlyContinue
+    if ($cmd) { $Claude = $cmd.Source }
+}
+if (-not $Claude) {
+    foreach ($c in @(
+        (Join-Path $env:APPDATA "npm\claude.cmd"),
+        (Join-Path $env:APPDATA "npm\claude"),
+        (Join-Path $env:USERPROFILE ".local\bin\claude.exe"),
+        (Join-Path $env:USERPROFILE ".local\bin\claude")
+    )) { if ($c -and (Test-Path -LiteralPath $c)) { $Claude = $c; break } }
+}
+if (-not $Claude) {
+    Write-Host "claude コマンドが見つかりません。"
+    Write-Host "「0_AIツールをまとめて入れる-Windows.bat」を実行したか、'npm install -g @anthropic-ai/claude-code' を確認してください。"
+    Write-Host "（場所を手動指定する場合は環境変数 CLAUDE_BIN にフルパスを設定）"
+    exit 1
+}
+
 $argsList = @("--settings", $settings, "--setting-sources", "user,project,local")
 # claude --help で --permission-mode が存在するか確認してから付ける
 $helpText = ""
-try { $helpText = (& claude --help 2>&1 | Out-String) } catch { $helpText = "" }
+try { $helpText = (& $Claude --help 2>&1 | Out-String) } catch { $helpText = "" }
 if ($helpText -match "--permission-mode") {
     $argsList = @("--permission-mode", "default") + $argsList
 }
 
 if ($Prompt -and $Prompt.Trim().Length -gt 0) {
-    & claude @argsList $Prompt
+    & $Claude @argsList $Prompt
 } else {
-    & claude @argsList
+    & $Claude @argsList
 }
 exit $LASTEXITCODE
