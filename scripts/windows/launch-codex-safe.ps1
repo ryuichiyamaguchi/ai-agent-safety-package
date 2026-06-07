@@ -159,9 +159,31 @@ if ($env:AI_SAFE_DRY_RUN -eq '1') {
     exit 0
 }
 
+# codex バイナリ検出（PATH に無くても npm グローバル等から見つける）。
+# npm install -g @openai/codex は Windows で %APPDATA%\npm\codex.cmd に入る。
+$Codex = $env:CODEX_BIN
+if (-not $Codex) {
+    $cmd = Get-Command codex -ErrorAction SilentlyContinue
+    if ($cmd) { $Codex = $cmd.Source }
+}
+if (-not $Codex) {
+    foreach ($c in @(
+        (Join-Path $env:APPDATA "npm\codex.cmd"),
+        (Join-Path $env:APPDATA "npm\codex"),
+        (Join-Path $env:USERPROFILE ".local\bin\codex.exe"),
+        (Join-Path $env:USERPROFILE ".local\bin\codex")
+    )) { if ($c -and (Test-Path -LiteralPath $c)) { $Codex = $c; break } }
+}
+if (-not $Codex) {
+    Write-Host "codex コマンドが見つかりません。"
+    Write-Host "「0_AIツールをまとめて入れる-Windows.bat」を実行したか、'npm install -g @openai/codex' を確認してください。"
+    Write-Host "（場所を手動指定する場合は環境変数 CODEX_BIN にフルパスを設定）"
+    exit 1
+}
+
 if ($Prompt -and $Prompt.Trim().Length -gt 0) {
-    & codex @argsList $Prompt
+    & $Codex @argsList $Prompt
 } else {
-    & codex @argsList
+    & $Codex @argsList
 }
 exit $LASTEXITCODE
