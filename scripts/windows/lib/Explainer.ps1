@@ -60,7 +60,7 @@ function Find-Card {
     $indexPath = Join-Path $CardsDir "index.tsv"
     if (-not (Test-Path -LiteralPath $indexPath)) { return $null }
 
-    $lines = Get-Content -LiteralPath $indexPath -Encoding UTF8
+    $lines = @(Get-Content -LiteralPath $indexPath -Encoding UTF8)
     foreach ($line in $lines) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         if ($line.StartsWith("#")) { continue }
@@ -85,7 +85,7 @@ function Find-Card {
 
 function Read-FrontmatterField {
     param([string]$Path, [string]$Key)
-    $lines = Get-Content -LiteralPath $Path -Encoding UTF8
+    $lines = @(Get-Content -LiteralPath $Path -Encoding UTF8)
     $inFm = $false
     $first = $true
     foreach ($line in $lines) {
@@ -106,7 +106,7 @@ function Read-FrontmatterField {
 
 function Get-CardBody {
     param([string]$Path)
-    $lines = Get-Content -LiteralPath $Path -Encoding UTF8
+    $lines = @(Get-Content -LiteralPath $Path -Encoding UTF8)
     $inFm = $false
     $doneFm = $false
     $first = $true
@@ -155,7 +155,7 @@ function Split-CommandSegments([string]$Full) {
 
 # sudo を先頭から除去してセグメントを返す。
 function Remove-SudoPrefix([string]$Seg) {
-    $toks = $Seg -split '\s+' | Where-Object { $_ -ne "" }
+    $toks = @($Seg -split '\s+' | Where-Object { $_ -ne "" })
     if ($toks.Count -ge 2 -and $toks[0].ToLowerInvariant() -eq 'sudo') {
         return ($toks[1..($toks.Count - 1)] -join ' ')
     }
@@ -204,7 +204,7 @@ function Test-StderrRedir([string]$Token) {
 # RED1: 2> 以外の任意数字 fd (1>,3>,9> 等) は content-write として検出する。
 function Test-HasRedirect([string]$Seg) {
     $stripped = Remove-QuotedContent $Seg
-    $toks = $stripped -split '\s+' | Where-Object { $_ -ne "" }
+    $toks = @($stripped -split '\s+' | Where-Object { $_ -ne "" })
     foreach ($t in $toks) {
         if (Test-StderrRedir $t) { continue }
         # standalone bare / 任意fd / &>
@@ -224,8 +224,8 @@ function Test-HasRedirect([string]$Seg) {
 function Get-RedirectTarget([string]$Full) {
     $orig = $Full
     $stripped = Remove-QuotedContent $Full
-    $sToks = $stripped -split '\s+' | Where-Object { $_ -ne "" }
-    $aToks = $Full -split '\s+' | Where-Object { $_ -ne "" }
+    $sToks = @($stripped -split '\s+' | Where-Object { $_ -ne "" })
+    $aToks = @($Full -split '\s+' | Where-Object { $_ -ne "" })
     for ($i = 0; $i -lt $sToks.Count; $i++) {
         $t = $sToks[$i]
         if (Test-StderrRedir $t) { continue }
@@ -263,8 +263,8 @@ function Get-RedirectTarget([string]$Full) {
 function Get-ExplainTargetFromCmd([string]$Primary, [string]$Category) {
     # 引用符内の > をスペースに置換したトークン列 (redir 除外判定用)
     $stripped = Remove-QuotedContent $Primary
-    $sToks = $stripped -split '\s+' | Where-Object { $_ -ne "" }
-    $allToks = $Primary -split '\s+' | Where-Object { $_ -ne "" }
+    $sToks = @($stripped -split '\s+' | Where-Object { $_ -ne "" })
+    $allToks = @($Primary -split '\s+' | Where-Object { $_ -ne "" })
     if ($allToks.Count -eq 0) { return "" }
 
     # redir 除外インデックス (stripped トークン列で判定・orig と同インデックス)
@@ -369,16 +369,16 @@ function Get-CommandFlags([string]$Full) {
     # ① Split-CommandSegments の非空セグメントが2以上 → 複合。
     # ② 引用符外に区切り文字が1つでもあれば複合。末尾区切り(cat foo; / cat foo| / 末尾CR)は
     #    空セグメントが捨てられ数=1になるため、存在ベースの検出を併用する。
-    $splitSegs = Split-CommandSegments $Full
+    $splitSegs = @(Split-CommandSegments $Full)
     if ($splitSegs.Count -gt 1) { $flags.Compound = $true }
     if ($strippedRedir -match '[|;&]' -or $strippedRedir -match "[`r`n]") { $flags.Compound = $true }
     # content-write リダイレクト
     if (Test-HasRedirect $Full) { $flags.Write = $true }
 
-    $segs = Split-CommandSegments $Full
+    $segs = @(Split-CommandSegments $Full)
     foreach ($rawSeg in $segs) {
         $seg = Remove-SudoPrefix $rawSeg
-        $segToks = $seg -split '\s+' | Where-Object { $_ -ne "" }
+        $segToks = @($seg -split '\s+' | Where-Object { $_ -ne "" })
         if ($segToks.Count -eq 0) { continue }
         $vl = $segToks[0].ToLowerInvariant()
         $segLc = $seg.ToLowerInvariant()
@@ -433,9 +433,9 @@ function Get-CommandExplanation([string]$Full) {
     $flags = Get-CommandFlags $Full
 
     # 主コマンドの動詞を先に取得(DANGER 組み立てで参照)
-    $segs = Split-CommandSegments $Full
+    $segs = @(Split-CommandSegments $Full)
     $firstSeg = if ($segs.Count -gt 0) { Remove-SudoPrefix $segs[0] } else { "" }
-    $fToks = $firstSeg -split '\s+' | Where-Object { $_ -ne "" }
+    $fToks = @($firstSeg -split '\s+' | Where-Object { $_ -ne "" })
     $verb = if ($fToks.Count -gt 0) { $fToks[0] } else { "" }
     $verbLc = $verb.ToLowerInvariant()
 
