@@ -16,6 +16,14 @@ $env:AI_SAFE_ROOT = Join-Path $Workspace ".ai-safety"
 $env:AI_SAFE_POLICY = Join-Path $env:AI_SAFE_ROOT "policy\safety-policy.json"
 $env:AI_SAFE_LOG_DIR = Join-Path $HOME ".ai-safety\logs"
 
+# claude-safe は「普通の Claude（あなたのログイン認証）」を起動する。DeepSeek 連携(d-claude)が
+# 残したルーティング系の環境変数を引き継ぐと、無効トークンを Anthropic に送って 401 になる
+# (永続 setx の置き土産=footgun)。このプロセス内で消し、claude-safe を常に素の Anthropic に向ける。
+# (d-claude 側はファイルの鍵を別プロセスで使うので影響しない)
+foreach ($v in @('ANTHROPIC_AUTH_TOKEN','ANTHROPIC_BASE_URL','ANTHROPIC_MODEL','ANTHROPIC_DEFAULT_HAIKU_MODEL','ANTHROPIC_CUSTOM_MODEL_OPTION')) {
+    if (Test-Path "Env:\$v") { Remove-Item "Env:\$v" -ErrorAction SilentlyContinue }
+}
+
 if (-not (Test-Path -LiteralPath $settings)) {
     throw "Claude safety settings were not found: $settings"
 }

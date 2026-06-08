@@ -14,6 +14,11 @@ export AI_SAFE_ROOT="$workspace/.ai-safety"
 export AI_SAFE_POLICY="$AI_SAFE_ROOT/policy/safety-policy.json"
 export AI_SAFE_LOG_DIR="$HOME/.ai-safety/logs"
 
+# claude-safe は「普通の Claude（ログイン認証）」を起動する。DeepSeek 連携が残した
+# ルーティング系 env を引き継ぐと無効トークンで 401 になりうるため、このシェル内で外す
+# （d-claude 側はファイルの鍵を別プロセスで使うので影響しない）。
+unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_CUSTOM_MODEL_OPTION
+
 [ -f "$settings" ] || { echo "Claude safety settings were not found: $settings" >&2; exit 2; }
 [ -f "$AI_SAFE_POLICY" ] || { echo "AI Safety package is not installed in workspace: $workspace" >&2; exit 2; }
 
