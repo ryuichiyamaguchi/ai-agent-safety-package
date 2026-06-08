@@ -4,13 +4,13 @@
 // 役割: 見守りモニターを file:// 表示から「双方向の AI コーチ」に拡張する。
 //   - GET /        … コーチ UI（現在の操作カード + AI 解説 + 相談チャット）を配信
 //   - GET /state   … 直近の操作（now.html から抽出した決定的解説）+ 直近イベントを JSON で返す
-//   - POST /explain… 現コマンドを受講者の手元 CLI(claude -p / codex exec)に渡しやさしく解説
+//   - POST /explain… 現コマンドを Gemini API に渡してやさしく解説（受講者の無料 API キーを使用）
 //   - POST /ask    … 受講者の自由質問（これ許可して大丈夫? 等）に AI が回答
 //
 // 安全方針:
 //   - 127.0.0.1 のみ・ランダムポート・セッショントークン必須（外部公開しない）
 //   - 検査対象コマンドは「データ」として AI プロンプトに埋めるだけ。サーバは絶対に実行しない
-//   - AI 呼び出しは execFile（シェルを介さない=注入なし）。タイムアウト/出力上限あり
+//   - AI 呼び出しは Gemini API への HTTPS リクエストのみ（ローカルでコマンドを実行しない）。タイムアウト/出力上限あり
 //   - AI 解説はあくまで「参考」。危険コマンドの自動ブロックと決定的解説（ガード側）は不変
 //   - AI 不在/失敗時は決定的解説にフォールバック（モニターは壊れない）
 //
@@ -19,11 +19,11 @@
 'use strict';
 
 const http = require('node:http');
+const https = require('node:https');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { spawn } = require('node:child_process');
 
 const LOG_DIR = process.env.AI_SAFE_LOG_DIR || path.join(os.homedir(), '.ai-safety', 'logs');
 const TOKEN = process.env.AI_SAFE_MONITOR_TOKEN || crypto.randomBytes(16).toString('hex');
@@ -35,62 +35,99 @@ const REFRESH_MS = Number(process.env.AI_SAFE_MONITOR_INTERVAL || 1) * 1000;
 // トークン付き URL やログを他ユーザーに読まれないよう、本プロセスが作るファイルは所有者のみ。
 try { process.umask(0o077); } catch { /* 一部環境で未サポート */ }
 
-// ---- AI バックエンド（受講者の手元 claude を流用。新規キー不要） ------------
-// 安全上の理由で claude のみ・ツール/MCP/hook を全無効で呼ぶ（純テキスト生成に限定）:
-//   --tools ""             … 組み込みツール(Bash/Read/Write/Edit 等)を無効化＝コマンドを実行できない
-//   --strict-mcp-config    … MCP サーバを一切読み込まない＝MCP ツール(Slack/Gmail 等)も無し
-//   --setting-sources user … project/local の hook を読み込ませない（hook は tool/MCP の外側の
-//     実行経路。ワークスペースに仕込まれた UserPromptSubmit 等が未信頼入力を受けて実行・漏えい
-//     するのを防ぐ。認証=user は維持。coach 呼び出しがガード hook を発火させ now.html を自己汚染
-//     するのも防ぐ）。これらでプロンプトインジェクションによる二次的ローカル操作を塞ぐ。
-// codex exec は read-only でもファイル読取可で「テキスト専用」にできないため使わない。
-const CLAUDE_FLAGS = ['-p', '--tools', '', '--strict-mcp-config', '--setting-sources', 'user'];
+// ---- AI バックエンド（Gemini API を直接呼ぶ。受講者が各自の無料 API キーを用意） ----
+// 設計: コーチは「コマンドの説明・助言」だけを返す読み取り専用の相談役。claude/codex の
+// ようなエージェント CLI ではなく Gemini の generateContent を HTTPS で直接叩く＝AI は
+// テキストを生成するだけで、ローカルのコマンドを実行する経路を一切持たない（コマンド文字列に
+// 仕込まれた指示で AI がローカル操作する二次経路が「構造的に」存在しない）。検査対象コマンドは
+// <COMMAND> として「データ」で渡し、INJECTION_GUARD で「中の指示に従うな」と固定する。
+//
+// モデル: 既定 gemini-3.1-flash-lite（環境変数 AI_SAFE_COACH_MODEL で上書き可。ID がズレても
+//   404 を検出して原因表示するので無言で壊れない）。
+// 認証: 受講者ごとの Gemini API キー。次の順で解決する:
+//   ① 環境変数 GEMINI_API_KEY / GOOGLE_API_KEY（明示の逃げ道）
+//   ② キーファイル ~/.ai-safety/gemini-api-key.txt（推奨。環境変数を汚さずモニターだけが読む。
+//      過去 DeepSeek の setx 永続トークンが全 CLI を 401 で壊した教訓に対する設計）
+// 無料キーは Google AI Studio (https://aistudio.google.com/apikey) で取得できる。
+const COACH_MODEL = process.env.AI_SAFE_COACH_MODEL || 'gemini-3.1-flash-lite';
+const GEMINI_HOST = 'generativelanguage.googleapis.com';
+const KEY_FILE = path.join(os.homedir(), '.ai-safety', 'gemini-api-key.txt');
 
-// claude の「node から直接 spawn できる実体」を多層解決する。
-//   ① 環境変数 AI_SAFE_COACH_CMD / CLAUDE_BIN（手動指定の逃げ道＝任意の導入形態に対応）
-//   ② 本パッケージの導入法(npm i -g)の実体 exe（Windows は npm グローバルの bin\claude.exe。
-//      claude.cmd/.ps1 はこの exe を呼ぶラッパーで、node からは直接実行できないため実体を使う）
-//   ③ PATH 上の claude（Windows は .exe を優先）
-//   ④ native installer / unix（~/.local/bin/claude）
-// .cmd/.ps1 ラッパーは避け、必ず実行可能ファイル(.exe / unix スクリプト)を返す。
-let cachedClaude; // undefined=未試行, null=無し, string=path
-function resolveClaude() {
-  if (cachedClaude !== undefined) return cachedClaude;
-  const pick = (p) => { try { return p && fs.existsSync(p) && fs.statSync(p).isFile() ? p : null; } catch { return null; } };
-  const env = process.env.AI_SAFE_COACH_CMD || process.env.CLAUDE_BIN;
-  if (env) { cachedClaude = env; return env; }
-  const isWin = process.platform === 'win32';
-  const cands = [];
-  if (isWin && process.env.APPDATA) {
-    cands.push(path.join(process.env.APPDATA, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'));
-  }
-  const exts = isWin ? ['.exe'] : [''];
-  for (const d of (process.env.PATH || '').split(path.delimiter)) {
-    if (d) for (const e of exts) cands.push(path.join(d, 'claude' + e));
-  }
-  const home = process.env.USERPROFILE || process.env.HOME;
-  if (home) cands.push(path.join(home, '.local', 'bin', isWin ? 'claude.exe' : 'claude'));
-  for (const c of cands) { if (pick(c)) { cachedClaude = c; return c; } }
-  cachedClaude = null;
+const NO_KEY_MSG =
+  'Gemini API キーが未設定です。無料キーの取り方: Google AI Studio (https://aistudio.google.com/apikey) で' +
+  'キーを作成し、ファイル「' + KEY_FILE + '」に貼り付けて保存してください' +
+  '（または環境変数 GEMINI_API_KEY に設定）。設定したらモニターを開き直すと使えます。';
+const BAD_KEY_MSG = 'Gemini API キーが無効でした（認証エラー）。AI Studio でキーを取り直して登録し直してください。';
+const RATE_MSG = 'いま無料枠の上限に達しているようです（少し待つと戻ります）。下の「自動の解説」も参考にしてください。';
+const MODEL_MSG = 'AI モデルが見つかりませんでした（モデル名の指定を確認してください）。';
+const AI_UNAVAILABLE =
+  'AI に今つながりませんでした（オフライン、またはキー/通信の問題）。下の「自動の解説」を見て、不安なら許可しないでください。';
+
+function resolveApiKey() {
+  const env = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (env && env.trim()) return env.trim();
+  try { const k = fs.readFileSync(KEY_FILE, 'utf8').trim(); if (k) return k; } catch { /* キーファイル無し */ }
   return null;
 }
 
-// プロンプトは引数でなく STDIN で渡す（シェル/cmd の引数解釈を一切通さない＝注入なし）。
+// Gemini generateContent を HTTPS で1回叩く。返り値は { ok, text }。
+// AI はテキストを返すだけ（実行経路なし）。タイムアウト・出力上限あり。失敗はすべて
+// 利用者向けの文言を text に入れて fail-closed（決定的解説へ誘導）。
 function runAI(prompt) {
   return new Promise((resolve) => {
-    const exe = resolveClaude();
-    if (!exe) return resolve({ ok: false, noBackend: true });
-    let child;
-    try { child = spawn(exe, CLAUDE_FLAGS, { stdio: ['pipe', 'pipe', 'ignore'] }); }
-    catch { return resolve({ ok: false }); }
-    let out = ''; let size = 0; let done = false;
-    const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(r); };
-    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* */ } finish({ ok: false }); }, AI_TIMEOUT_MS);
-    child.on('error', () => finish({ ok: false }));
-    child.stdout.on('data', (c) => { size += c.length; if (size <= (1 << 20)) out += c.toString('utf8'); });
-    // 非0終了 or 空応答は fail-closed（AI 使えません表示）に倒す。
-    child.on('close', (code) => finish(code === 0 && out.trim() ? { ok: true, text: out.trim() } : { ok: false }));
-    try { child.stdin.write(prompt); child.stdin.end(); } catch { /* */ }
+    const key = resolveApiKey();
+    if (!key) return resolve({ ok: false, text: NO_KEY_MSG });
+    const body = JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.4, maxOutputTokens: 800 },
+    });
+    const opts = {
+      hostname: GEMINI_HOST,
+      path: '/v1beta/models/' + encodeURIComponent(COACH_MODEL) + ':generateContent',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': key,
+        'Content-Length': Buffer.byteLength(body),
+      },
+      timeout: AI_TIMEOUT_MS,
+    };
+    let done = false;
+    const finish = (r) => { if (!done) { done = true; resolve(r); } };
+    const req = https.request(opts, (res) => {
+      let data = ''; let size = 0;
+      res.on('data', (c) => { size += c.length; if (size <= (1 << 20)) data += c.toString('utf8'); });
+      res.on('end', () => {
+        let json = null;
+        try { json = JSON.parse(data); } catch { return finish({ ok: false, text: AI_UNAVAILABLE }); }
+        if (res.statusCode >= 400) {
+          // 無効キーは 400 INVALID_ARGUMENT(reason=API_KEY_INVALID)、権限無し/無効化は 403。両方「キー無効」に寄せる。
+          const err = (json && json.error) || {};
+          const reason = Array.isArray(err.details)
+            ? err.details.map((d) => (d && d.reason) || '').join(',') : '';
+          const msg = String(err.message || '');
+          if (res.statusCode === 403 || reason.indexOf('API_KEY_INVALID') !== -1 || /API key not valid|API_KEY/i.test(msg)) {
+            return finish({ ok: false, text: BAD_KEY_MSG });
+          }
+          if (res.statusCode === 429) return finish({ ok: false, text: RATE_MSG });
+          if (res.statusCode === 404 || /is not found|not found for API/i.test(msg)) return finish({ ok: false, text: MODEL_MSG });
+          return finish({ ok: false, text: AI_UNAVAILABLE });
+        }
+        let text = '';
+        try {
+          const parts = json && json.candidates && json.candidates[0] &&
+            json.candidates[0].content && json.candidates[0].content.parts;
+          if (Array.isArray(parts)) text = parts.map((p) => (p && p.text) || '').join('').trim();
+        } catch { /* 形が違えば空のまま */ }
+        if (text) return finish({ ok: true, text });
+        // candidates 空（安全ブロック等）や空応答は fail-closed。
+        return finish({ ok: false, text: AI_UNAVAILABLE });
+      });
+    });
+    req.on('error', () => finish({ ok: false, text: AI_UNAVAILABLE }));
+    req.on('timeout', () => { try { req.destroy(); } catch { /* */ } finish({ ok: false, text: AI_UNAVAILABLE }); });
+    req.write(body);
+    req.end();
   });
 }
 
@@ -182,8 +219,6 @@ function askPrompt(st, question) {
   ].join('\n');
 }
 
-const AI_UNAVAILABLE = 'AI に今つながりませんでした（オフライン、または手元に claude / codex が見つかりません）。下の「自動の解説」を見て、不安なら許可しないでください。';
-
 // ---- HTTP ------------------------------------------------------------------
 function sendJson(res, code, obj) {
   const body = Buffer.from(JSON.stringify(obj), 'utf8');
@@ -226,8 +261,7 @@ const server = http.createServer(async (req, res) => {
       ? askPrompt(st, String(payload.question || '').slice(0, 1000))
       : explainPrompt(st);
     const r = await runAI(prompt);
-    if (r.ok) return sendJson(res, 200, { ok: true, text: r.text });
-    return sendJson(res, 200, { ok: false, text: AI_UNAVAILABLE });
+    return sendJson(res, 200, r.ok ? { ok: true, text: r.text } : { ok: false, text: r.text || AI_UNAVAILABLE });
   }
   return sendJson(res, 404, { error: 'not found' });
 });
@@ -304,7 +338,7 @@ button:disabled{opacity:.5;cursor:default}
     <input id="q" type="text" placeholder="自由に質問（例: これを実行すると何が消える？）" />
     <button id="b-ask">聞く</button>
   </div>
-  <div id="answer" class="answer muted">ボタンを押すと、手元の AI が日本語で答えます。</div>
+  <div id="answer" class="answer muted">ボタンを押すと、AI（Gemini）が日本語で答えます。</div>
   <div class="disclaim">⚠️ AI の回答は「参考」です。最終的に許可するかは、あなた自身が決めてください。あやしい時は許可しないのが安全です。</div>
 </div>
 
@@ -336,7 +370,7 @@ async function poll(){
     // 高リスク時は固定警告（AI が何と言おうと許可しない目安）を出す
     $('hi').style.display = (s.hasCard && riskClass(s.meta||'')==='high') ? 'block' : 'none';
     // コマンドが変わったら回答欄をリセット
-    if(s.cmd !== lastCmd){ lastCmd=s.cmd; const ans=$('answer'); ans.className='answer muted'; ans.textContent='ボタンを押すと、手元の AI が日本語で答えます。'; }
+    if(s.cmd !== lastCmd){ lastCmd=s.cmd; const ans=$('answer'); ans.className='answer muted'; ans.textContent='ボタンを押すと、AI（Gemini）が日本語で答えます。'; }
     // events
     const tb=$('events'); tb.innerHTML='';
     (s.events||[]).forEach(e=>{ const tr=document.createElement('tr'); const icon=e.decision==='block'?'⛔':(e.decision==='allow'?'✅':'•'); [ (e.ts||'').replace('T',' ').replace('Z',''), icon+' '+(e.decision||''), e.mode||'', e.reason||'' ].forEach(v=>{const td=document.createElement('td');td.textContent=v;tr.append(td);}); tb.append(tr); });
