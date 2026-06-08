@@ -242,6 +242,25 @@ if (Test-Path -LiteralPath $nowHtml) {
 Add-Result "html-write now.html has charset + refresh + JS-reload tags" $htmlOk ("path=" + $nowHtml)
 try { Remove-Item -LiteralPath $htmlDrillLogDir -Recurse -Force -ErrorAction SilentlyContinue } catch { }
 
+# Encoding integrity: 配置された全 .ps1 の先頭 UTF-8 BOM が「ちょうど1個」であることを検査する。
+# PS 5.1 は二重 BOM (EF BB BF EF BB BF) だと2個目の U+FEFF が1行目の先頭に残り、
+# コメント行をコードとして実行して即死する (open-monitor.ps1 v1.10.1 実機事故の真因)。
+# 逆に BOM 無しだと日本語 .ps1 が cp932 と誤認され文字化けする。→ ちょうど1個が正。
+$bomBytes = [byte[]](0xEF, 0xBB, 0xBF)
+$ps1Files = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter *.ps1 -Recurse -File -ErrorAction SilentlyContinue)
+$bomBad = New-Object System.Collections.ArrayList
+foreach ($f in $ps1Files) {
+    $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+    $hasBom    = ($bytes.Length -ge 3) -and ($bytes[0] -eq $bomBytes[0]) -and ($bytes[1] -eq $bomBytes[1]) -and ($bytes[2] -eq $bomBytes[2])
+    $doubleBom = ($bytes.Length -ge 6) -and ($bytes[3] -eq $bomBytes[0]) -and ($bytes[4] -eq $bomBytes[1]) -and ($bytes[5] -eq $bomBytes[2])
+    if ((-not $hasBom) -or $doubleBom) {
+        $why = if ($doubleBom) { "double BOM" } else { "missing BOM" }
+        [void]$bomBad.Add($f.Name + " (" + $why + ")")
+    }
+}
+$bomDetail = if ($bomBad.Count -eq 0) { "all " + $ps1Files.Count + " .ps1 have exactly one BOM" } else { "bad: " + ($bomBad -join ", ") }
+Add-Result ".ps1 files have exactly one UTF-8 BOM (no double BOM)" ($bomBad.Count -eq 0) $bomDetail
+
 # Safe Auto Mode: 隔離ドリルをフル doctor にも組み込む(集計に反映)。
 # codex が無い等で HOLD のときは SKIP 扱い(集計から除外)。
 # フル doctor の HOLD=SKIP は表示専用。launcher の自動判定は -IsolationCheck(strict: HOLD=非0)を

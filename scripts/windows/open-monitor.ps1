@@ -1,4 +1,4 @@
-﻿﻿# open-monitor.ps1 — HTML 見守りモニター(now.html)を既定ブラウザで開く。
+﻿# open-monitor.ps1 — HTML 見守りモニター(now.html)を既定ブラウザで開く。
 #
 # 「見守りモニターを起動」ボタンの実体。
 #   1. ログディレクトリを解決（guards / monitor.ps1 と同一ロジック）
