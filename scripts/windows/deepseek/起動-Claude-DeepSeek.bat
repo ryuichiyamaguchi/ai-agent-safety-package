@@ -61,8 +61,14 @@ if exist "%DEEPSEEK_GATE%" (
 )
 
 :: -- 3. DeepSeek バックエンドへ向ける環境変数を前差し --------------
-:: ANTHROPIC_AUTH_TOKEN は「登録-初回だけ.bat」で setx 済み（ここには書かない）。
+:: ANTHROPIC_AUTH_TOKEN は「登録-初回だけ.bat」が保存したファイルから読み、
+:: このプロセス内だけに set する（永続化しない＝素の claude を壊さない）。
 :: BASE_URL is set by the gateway launcher (launch-deepseek-gateway.ps1)
+set "AUTH_FILE=%USERPROFILE%\.deepseek-claude\auth"
+set "ANTHROPIC_AUTH_TOKEN="
+if exist "%AUTH_FILE%" (
+    for /f "usebackq delims=" %%K in ("%AUTH_FILE%") do set "ANTHROPIC_AUTH_TOKEN=%%K"
+)
 set "ANTHROPIC_MODEL=deepseek-v4-pro"
 set "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash"
 set "GATEWAY_LAUNCH=%HOOKS%\deepseek\launch-deepseek-gateway.ps1"
@@ -76,11 +82,13 @@ set "GATEWAY_LAUNCH=%HOOKS%\deepseek\launch-deepseek-gateway.ps1"
 
 if "%ANTHROPIC_AUTH_TOKEN%"=="" (
     echo.
-    echo 【注意】ANTHROPIC_AUTH_TOKEN が未登録のようです。
-    echo   先に「登録-初回だけ.bat」を実行してから、この
-    echo   ウィンドウを一度閉じ、もう一度この .bat を開いてください。
-    echo   （環境変数は新しいウィンドウから反映されます）
+    echo 【注意】DeepSeek の API キーが未登録です。
+    echo   先に「登録-初回だけ.bat」（またはスタートの（上級）1）で
+    echo   キーを登録してから、もう一度これを開いてください。
+    echo   （ファイル方式なので登録後すぐ反映されます。再起動は不要です）
     echo.
+    pause
+    exit /b 1
 )
 
 :: -- 4. ガード付き Claude Code を起動（素の claude は呼ばない） -----
