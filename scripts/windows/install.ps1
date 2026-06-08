@@ -241,7 +241,7 @@ if (Test-Path -LiteralPath $startSrc) {
 # Windows のみ (mac は ~/.zshrc の codex-safe 等エイリアスで同等)。
 if ($Platform -eq 'win') {
     $shimPlaced = @()
-    foreach ($shim in @("codex-safe.cmd", "claude-safe.cmd", "agy-safe.cmd", "monitor.cmd")) {
+    foreach ($shim in @("codex-safe.cmd", "claude-safe.cmd", "agy-safe.cmd", "monitor.cmd", "d-claude.cmd")) {
         $shimSrc = Join-Path $packageRoot ("workspace-template\" + $shim)
         if (Test-Path -LiteralPath $shimSrc) {
             Copy-Item -LiteralPath $shimSrc -Destination (Join-Path $Workspace $shim) -Force

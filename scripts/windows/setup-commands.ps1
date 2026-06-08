@@ -17,23 +17,33 @@ if (-not (Test-Path -LiteralPath $hooksDir)) {
 
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
-# name -> 呼び出すランチャー ps1 と、-Workspace 引数の要否
+# name -> 呼び出すランチャー(ps1 or bat) と、-Workspace 引数の要否
+# bat 指定は DeepSeek 起動チェーン等(同意ゲート込み)を call する用。
 $cmds = @(
     @{ name = "codex-safe";  ps1 = "launch-codex-safe.ps1";  ws = $true },
     @{ name = "claude-safe"; ps1 = "launch-claude-safe.ps1"; ws = $true },
     @{ name = "agy-safe";    ps1 = "launch-agy-safe.ps1";    ws = $true },
-    @{ name = "monitor";     ps1 = "open-monitor.ps1";       ws = $false }
+    @{ name = "monitor";     ps1 = "open-monitor.ps1";       ws = $false },
+    @{ name = "d-claude";    bat = "deepseek\起動-Claude-DeepSeek.bat" }
 )
 
 # CP932 で書く(ワークスペースパスに日本語が含まれても cmd.exe が正しく読めるように)。
 $cp932 = [System.Text.Encoding]::GetEncoding(932)
 foreach ($c in $cmds) {
-    $target = Join-Path $hooksDir $c.ps1
-    $wsArg = ""
-    if ($c.ws) { $wsArg = " -Workspace `"$Workspace`"" }
-    $body = "@echo off`r`n" +
-            "chcp 932 >nul`r`n" +
-            "powershell -NoProfile -ExecutionPolicy Bypass -File `"$target`"$wsArg %*`r`n"
+    if ($c.bat) {
+        # .bat ターゲット(同意ゲート込みの DeepSeek 起動チェーン等)はそのまま call する。
+        $target = Join-Path $hooksDir $c.bat
+        $body = "@echo off`r`n" +
+                "chcp 932 >nul`r`n" +
+                "call `"$target`" %*`r`n"
+    } else {
+        $target = Join-Path $hooksDir $c.ps1
+        $wsArg = ""
+        if ($c.ws) { $wsArg = " -Workspace `"$Workspace`"" }
+        $body = "@echo off`r`n" +
+                "chcp 932 >nul`r`n" +
+                "powershell -NoProfile -ExecutionPolicy Bypass -File `"$target`"$wsArg %*`r`n"
+    }
     $dest = Join-Path $BinDir ($c.name + ".cmd")
     [System.IO.File]::WriteAllText($dest, $body, $cp932)
     Write-Host ("  生成: " + $dest)
@@ -68,3 +78,4 @@ Write-Host "  monitor       … 見守りモニターを開く"
 Write-Host "  codex-safe    … 監視つき Codex を起動"
 Write-Host "  claude-safe   … 監視つき Claude を起動"
 Write-Host "  agy-safe      … 監視つき AntiGravity を起動"
+Write-Host "  d-claude      … DeepSeek版 Claude Code を起動"
