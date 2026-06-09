@@ -73,10 +73,15 @@ else
 fi
 rm -f "$win_installer_txt"
 
-# 9) 期待される番号ファイルが揃う（2..5 と 上級1/2/9）
-for base in "2_セーフCodexを起動" "3_セーフClaudeを起動" "4_セーフAntiGravityを起動" "5_見守りモニターを起動" "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）9_DeepSeekキーを削除"; do
+# 9) 期待される番号ファイルが揃う（2..5 と 上級1/2/3/9）
+for base in "2_セーフCodexを起動" "3_セーフClaudeを起動" "4_セーフAntiGravityを起動" "5_見守りモニターを起動" "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）3_セーフCodexをオートで起動" "（上級）9_DeepSeekキーを削除"; do
   [ -f "$START_DIR/$base.command" ] || { note "FAIL: $base.command がない"; fail=1; }
   [ -f "$START_DIR/$base.bat" ] || { note "FAIL: $base.bat がない"; fail=1; }
 done
+
+# 9b) Safe Auto Mode のワンクリック導線が --auto を launcher に渡す
+grep -q -- '"" --auto' "$START_DIR/（上級）3_セーフCodexをオートで起動.command" || { note "FAIL: auto .command が --auto を渡さない"; fail=1; }
+grep -q -- '-AutoFlag "--auto"' "$START_DIR/（上級）3_セーフCodexをオートで起動.bat" || { note "FAIL: auto .bat が -AutoFlag --auto を渡さない"; fail=1; }
+grep -Fq '（上級）3_セーフCodexをオートで起動' "$HTML" || { note "FAIL: スタート.html にオート起動の案内がない"; fail=1; }
 
 if [ $fail -eq 0 ]; then note "ALL PASS"; else note "FAILURES ABOVE"; exit 1; fi
