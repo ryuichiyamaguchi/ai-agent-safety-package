@@ -21,9 +21,13 @@ $env:CODEX_HOME = $safeCodexHome
 
 # workspace 内 .codex/ に config.toml が置かれている場合は .codex-safe/ へコピーして使う。
 # auth.json は絶対にコピーしない。
+# codex 0.135 fix: 旧版が置いた legacy config.toml (`[profiles.safe]` 入り) が .codex-safe/ に
+# 残っていると --profile safe と衝突して fatal error になる。SSOT は workspace の
+# .codex\config.toml (install が管理する新版) なので、safe.config.toml と同じく毎回上書きして
+# 常に最新を反映させる ("既存ならスキップ" は legacy が永久に残る罠だったため撤廃)。
 $workspaceCodexConfigSrc = Join-Path $Workspace ".codex\config.toml"
 $safeCodexConfig = Join-Path $safeCodexHome "config.toml"
-if ((Test-Path -LiteralPath $workspaceCodexConfigSrc) -and (-not (Test-Path -LiteralPath $safeCodexConfig))) {
+if (Test-Path -LiteralPath $workspaceCodexConfigSrc) {
     Copy-Item -LiteralPath $workspaceCodexConfigSrc -Destination $safeCodexConfig -Force
 }
 

@@ -18,9 +18,13 @@ export CODEX_HOME="$SAFE_CODEX_HOME"
 
 # workspace 内 .codex/config.toml が存在すれば .codex-safe/ へコピーして使う。
 # auth.json は絶対にコピーしない。
+# codex 0.135 fix: 旧版が置いた legacy config.toml (`[profiles.safe]` 入り) が .codex-safe/ に
+# 残っていると --profile safe と衝突して fatal error になる。SSOT は workspace の
+# .codex/config.toml (install が管理する新版) なので、safe.config.toml と同じく毎回上書きして
+# 常に最新を反映させる ("既存ならスキップ" は legacy が永久に残る罠だったため撤廃)。
 WORKSPACE_CONFIG="$workspace/.codex/config.toml"
 SAFE_CONFIG="$SAFE_CODEX_HOME/config.toml"
-if [ -f "$WORKSPACE_CONFIG" ] && [ ! -f "$SAFE_CONFIG" ]; then
+if [ -f "$WORKSPACE_CONFIG" ]; then
   cp "$WORKSPACE_CONFIG" "$SAFE_CONFIG"
 fi
 
