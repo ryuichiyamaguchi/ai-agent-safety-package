@@ -1,23 +1,25 @@
 @echo off
-chcp 932 >nul
+chcp 65001 >nul
 setlocal
+set "HERE=%~dp0"
+for %%I in ("%HERE%..") do set "WORKSPACE=%%~fI"
 :: ============================================================
-:: 6_AIƒR[ƒ`‚ÌƒL[‚ð“o˜^.bat
-:: Œ©Žç‚èƒ‚ƒjƒ^[‚ÌuAIƒR[ƒ`v‚ªŽg‚¤A–³—¿‚Ì Gemini API ƒL[‚ð“o˜^‚µ‚Ü‚·B
-:: ƒL[‚Í‚±‚Ì PC ‚Ì‚ ‚È‚½‚ÌƒtƒHƒ‹ƒ_“à‚Ìƒtƒ@ƒCƒ‹‚É•Û‘¶‚µ‚Ü‚·(ŠÂ‹«•Ï”‚Í‰˜‚µ‚Ü‚¹‚ñ)B
+:: 6_AIã‚³ãƒ¼ãƒã®ã‚­ãƒ¼ã‚’ç™»éŒ².bat
+:: è¦‹å®ˆã‚Šãƒ¢ãƒ‹ã‚¿ãƒ¼ã®ã€ŒAIã‚³ãƒ¼ãƒã€ãŒä½¿ã†ã€ç„¡æ–™ã® Gemini API ã‚­ãƒ¼ã‚’ç™»éŒ²ã—ã¾ã™ã€‚
+:: ã‚­ãƒ¼ã¯ã“ã® PC ã®ã‚ãªãŸã®ãƒ•ã‚©ãƒ«ãƒ€å†…ã®ãƒ•ã‚¡ã‚¤ãƒ«ã«ä¿å­˜ã—ã¾ã™(ç’°å¢ƒå¤‰æ•°ã¯æ±šã—ã¾ã›ã‚“)ã€‚
 :: ============================================================
 echo.
-echo  AIƒR[ƒ`—p‚Ì–³—¿ Gemini API ƒL[‚ð“o˜^‚µ‚Ü‚·B
+echo  AIã‚³ãƒ¼ãƒç”¨ã®ç„¡æ–™ Gemini API ã‚­ãƒ¼ã‚’ç™»éŒ²ã—ã¾ã™ã€‚
 echo.
-echo  ƒL[‚ÌŽæ‚è•û:
-echo    1. ƒuƒ‰ƒEƒU‚Å  https://aistudio.google.com/apikey  ‚ðŠJ‚­
-echo    2. Google ‚ÅƒƒOƒCƒ“‚µ‚ÄuCreate API key(APIƒL[‚ðì¬)v
-echo    3. •\Ž¦‚³‚ê‚½ƒL[‚ðƒRƒs[
+echo  ã‚­ãƒ¼ã®å–ã‚Šæ–¹:
+echo    1. ãƒ–ãƒ©ã‚¦ã‚¶ã§  https://aistudio.google.com/apikey  ã‚’é–‹ã
+echo    2. Google ã§ãƒ­ã‚°ã‚¤ãƒ³ã—ã¦ã€ŒCreate API key(APIã‚­ãƒ¼ã‚’ä½œæˆ)ã€
+echo    3. è¡¨ç¤ºã•ã‚ŒãŸã‚­ãƒ¼ã‚’ã‚³ãƒ”ãƒ¼
 echo.
-set /p KEY=APIƒL[‚ð“\‚è•t‚¯‚Ä Enter: 
+set /p KEY=APIã‚­ãƒ¼ã‚’è²¼ã‚Šä»˜ã‘ã¦ Enter: 
 if "%KEY%"=="" (
   echo.
-  echo ‰½‚à“ü—Í‚³‚ê‚Ü‚¹‚ñ‚Å‚µ‚½B’†Ž~‚µ‚Ü‚·B
+  echo ä½•ã‚‚å…¥åŠ›ã•ã‚Œã¾ã›ã‚“ã§ã—ãŸã€‚ä¸­æ­¢ã—ã¾ã™ã€‚
   pause
   exit /b 1
 )
@@ -25,12 +27,12 @@ set "GEMINI_KEY=%KEY%"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$d=Join-Path $env:USERPROFILE '.ai-safety'; [void](New-Item -ItemType Directory -Force $d); Set-Content -NoNewline -Encoding ascii -Path (Join-Path $d 'gemini-api-key.txt') -Value $env:GEMINI_KEY"
 if errorlevel 1 (
   echo.
-  echo •Û‘¶‚ÉŽ¸”s‚µ‚Ü‚µ‚½B‚à‚¤ˆê“x‚¨ŽŽ‚µ‚­‚¾‚³‚¢B
+  echo ä¿å­˜ã«å¤±æ•—ã—ã¾ã—ãŸã€‚ã‚‚ã†ä¸€åº¦ãŠè©¦ã—ãã ã•ã„ã€‚
   pause
   exit /b 1
 )
 echo.
-echo  “o˜^‚Å‚«‚Ü‚µ‚½B
-echo  Œ©Žç‚èƒ‚ƒjƒ^[‚ðŠJ‚«’¼‚·‚ÆAAIƒR[ƒ`‚ªŽg‚¦‚Ü‚·B
+echo  ç™»éŒ²ã§ãã¾ã—ãŸã€‚
+echo  è¦‹å®ˆã‚Šãƒ¢ãƒ‹ã‚¿ãƒ¼ã‚’é–‹ãç›´ã™ã¨ã€AIã‚³ãƒ¼ãƒãŒä½¿ãˆã¾ã™ã€‚
 echo.
 pause

@@ -95,6 +95,19 @@ codex-cli 0.135.0 で `codex sandbox windows` が `CreateProcessAsUserW failed: 
 
 詳しい手順は [01_学校PCで使う.md のステップ 0.5](01_学校PCで使う.md) を参照。
 
+### PowerShell に `@echo off` のエラーが出る
+
+`@echo off`、`if not exist`、`%~dp0`、`%TARGET%` などのエラーが PowerShell に出る場合、`.bat` ファイルの中身を PowerShell に貼り付けています。`.bat` は CMD 用なので、PowerShell では文法エラーになります。
+
+回避：
+1. まずは `.bat` の中身を貼らず、ファイルとしてダブルクリックする
+2. `.bat` がセキュリティで止められる場合は、展開したフォルダ（`スタート.html` がある場所）で PowerShell を開く
+3. 次の 1 行を貼る
+
+```powershell
+if (Test-Path ".\scripts\windows\install.ps1") { Get-ChildItem -LiteralPath . -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue; powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\install.ps1" -Workspace "$env:USERPROFILE\Documents\my-ai-workspace" } else { Write-Host "スタート.html があるフォルダで PowerShell を開き直してください" }
+```
+
 ### ZIP 解凍で日本語ファイル名が文字化け
 
 回避：Windows 標準の「すべて展開」を使う。Lhaplus 等の古いツールは UTF-8 ZIP を扱えないことがある。

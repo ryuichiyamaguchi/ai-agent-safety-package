@@ -29,6 +29,11 @@ grep -q 'show-win' "$HTML" && grep -q 'show-mac' "$HTML" || { note "FAIL: OS ト
 bash -n "$ROOT/1_安全パッケージを準備-Mac.command" || { note "FAIL: Step1 Mac 構文"; fail=1; }
 grep -q '"%ComSpec%" /k call "%TARGET%"' "$ROOT/1_安全パッケージを準備-Windows.bat" || { note "FAIL: Step1 Win ラッパーが同じ画面に残る cmd /k で installer を起動しない"; fail=1; }
 
+# 5b) Windows で .bat が PowerShell に流れた/ブロックされた時の代替導線
+grep -Fq '.bat の中身を PowerShell に貼らない' "$HTML" || { note "FAIL: PowerShell に .bat 中身を貼らない注意がない"; fail=1; }
+grep -Fq 'Unblock-File -ErrorAction SilentlyContinue; powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\install.ps1"' "$HTML" || { note "FAIL: Step1 の PowerShell 代替コマンドがない"; fail=1; }
+grep -Fq 'powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\install.ps1"' "$ROOT/docs/00_クイックスタート.md" || { note "FAIL: クイックスタートに PowerShell 代替コマンドがない"; fail=1; }
+
 # 6) workspace 内ラッパー（.command）構文 + 相対 ws 解決
 for f in "$START_DIR/"*.command; do
   bash -n "$f" || { note "FAIL syntax: $f"; fail=1; }

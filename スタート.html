@@ -537,6 +537,14 @@
             <span class="ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M7 7l5 3 5-3M12 10v8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" stroke="currentColor" stroke-width="1.6"/></svg></span>
             <div><b>Windows：</b><span class="fname">1_安全パッケージを準備-Windows.bat</span> を<b>ダブルクリック</b>します。</div>
           </div>
+          <div class="info os-win">
+            <span class="ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v5M12 16h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+            <div><b>.bat の中身を PowerShell に貼らないでください。</b>　<code>@echo off</code> や <code>%~dp0</code> は PowerShell では動きません。セキュリティで .bat が止められた時だけ、下の代替手順を使います。</div>
+          </div>
+          <div class="os-win">
+            <p class="cmd-label">.bat が止められた時だけ：この「スタート.html」があるフォルダで PowerShell を開いて貼る</p>
+            <div class="cmd"><span class="prompt">PS&gt;</span><code>if (Test-Path ".\scripts\windows\install.ps1") { Get-ChildItem -LiteralPath . -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue; powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\install.ps1" -Workspace "$env:USERPROFILE\Documents\my-ai-workspace" } else { Write-Host "スタート.html があるフォルダで PowerShell を開き直してください" }</code><button type="button" class="copy" data-copy='if (Test-Path ".\scripts\windows\install.ps1") { Get-ChildItem -LiteralPath . -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue; powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\install.ps1" -Workspace "$env:USERPROFILE\Documents\my-ai-workspace" } else { Write-Host "スタート.html があるフォルダで PowerShell を開き直してください" }' onclick="copyText(this)">コピー</button></div>
+          </div>
           <div class="do os-mac">
             <span class="ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M7 7l5 3 5-3M12 10v8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" stroke="currentColor" stroke-width="1.6"/></svg></span>
             <div><b>Mac：</b><span class="fname">1_安全パッケージを準備-Mac.command</span> を<b>右クリック → 「開く」→ もう一度「開く」</b>を押します。</div>
@@ -551,7 +559,7 @@
             <summary><span class="chev" aria-hidden="true">▸</span> うまくいかない時（クリックで開く）</summary>
             <div class="help-body">
               <ul>
-                <li class="os-win"><b>Windows：</b>黒い画面が一瞬で消える／「実行できません」→ <b>Step 0-4</b>（PowerShellの実行許可）を先に済ませてください。</li>
+                <li class="os-win"><b>Windows：</b>黒い画面が一瞬で消える／「実行できません」→ <b>Step 0-4</b>（PowerShellの実行許可）を先に済ませてください。それでも .bat が止められる場合は、上の PowerShell 代替コマンドを使ってください。</li>
                 <li class="os-mac"><b>Mac：</b>「開けません」と言われる→ <b>Step 0-4</b>（初回の安全許可）を先に済ませてください。ダブルクリックではなく<b>右クリック→開く</b>が大切です。</li>
                 <li>途中で止まったように見えても、文字が流れている間は<b>動いています</b>。終わるまで待ちましょう。</li>
               </ul>

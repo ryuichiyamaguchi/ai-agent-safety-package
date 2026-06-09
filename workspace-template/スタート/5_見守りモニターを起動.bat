@@ -1,15 +1,15 @@
 @echo off
-chcp 932 >nul
+chcp 65001 >nul
 setlocal
-REM Œ©Žç‚èƒ‚ƒjƒ^[‹N“®i”–‚¢ƒ‰ƒbƒp[jBHTML ƒ‚ƒjƒ^[(now.html)‚ðŠù’èƒuƒ‰ƒEƒU‚ÅŠJ‚­B
+REM è¦‹å®ˆã‚Šãƒ¢ãƒ‹ã‚¿ãƒ¼èµ·å‹•ï¼ˆè–„ã„ãƒ©ãƒƒãƒ‘ãƒ¼ï¼‰ã€‚HTML ãƒ¢ãƒ‹ã‚¿ãƒ¼(now.html)ã‚’æ—¢å®šãƒ–ãƒ©ã‚¦ã‚¶ã§é–‹ãã€‚
 set "HERE=%~dp0"
 for %%I in ("%HERE%..") do set "WORKSPACE=%%~fI"
 set "TARGET=%WORKSPACE%\.ai-safety\hooks\windows\open-monitor.ps1"
 if not exist "%TARGET%" (
-  echo ‹N“®ƒXƒNƒŠƒvƒg‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñ: %TARGET%
-  echo æ‚Éu1_ˆÀ‘SƒpƒbƒP[ƒW‚ð€”õv‚ðŽÀs‚µ‚Ä‚­‚¾‚³‚¢B
+  echo èµ·å‹•ã‚¹ã‚¯ãƒªãƒ—ãƒˆãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“: %TARGET%
+  echo å…ˆã«ã€Œ1_å®‰å…¨ãƒ‘ãƒƒã‚±ãƒ¼ã‚¸ã‚’æº–å‚™ã€ã‚’å®Ÿè¡Œã—ã¦ãã ã•ã„ã€‚
   pause
   exit /b 1
 )
 powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%"
-if errorlevel 1 ( echo –â‘è‚ª‹N‚«‚Ü‚µ‚½B & pause )
+if errorlevel 1 ( echo å•é¡ŒãŒèµ·ãã¾ã—ãŸã€‚ & pause )

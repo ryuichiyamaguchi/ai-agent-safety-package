@@ -2,7 +2,10 @@
 # 6_AIコーチのキーを登録.command
 # 見守りモニターの「AIコーチ」が使う、無料の Gemini API キーを登録します。
 # キーは ~/.ai-safety/gemini-api-key.txt に保存します（環境変数は汚しません）。
-cd "$(dirname "$0")" 2>/dev/null || true
+set -u
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE="$(cd "$HERE/.." && pwd)"
+cd "$WORKSPACE" 2>/dev/null || true
 echo ""
 echo " AIコーチ用の無料 Gemini API キーを登録します。"
 echo ""
