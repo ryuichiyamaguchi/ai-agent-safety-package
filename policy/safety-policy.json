@@ -60,7 +60,7 @@
     { "name": "Private key block", "pattern": "-----BEGIN (RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----" },
     { "name": "Generic sensitive assignment", "pattern": "(?i)(api[_-]?key|secret|token|password|passwd|pwd)\\s*[:=]\\s*['\\\"]?[A-Za-z0-9_\\.\\-\\/+=]{12,}" }
   ],
-  "_comment_dangerousCommand": "curl/wget/Invoke-WebRequest/nc 等は引数なしでも一律 deny する。man curl のような閲覧目的でも止まるが、これは仕様（launcher 配下では学習者がポリシーを迂回できないようにあえて広めに deny する）。閲覧したい場合は launcher 外（通常のターミナル）で実行すること。POST/通信実行系だけに絞らないのは、curl example.com のような GET でも外部 exfil の足がかりになるため。詳細は docs/90_守れる-守れない.md の dangerousCommandRegex 解説を参照。",
+  "_comment_dangerousCommand": "curl/wget/Invoke-WebRequest/nc 等は引数なしでも一律 deny する。man curl のような閲覧目的でも止まるが、これは仕様（launcher 配下では学習者がポリシーを迂回できないようにあえて広めに deny する）。閲覧したい場合は launcher 外（通常のターミナル）で実行すること。POST/通信実行系だけに絞らないのは、curl example.com のような GET でも外部 exfil の足がかりになるため。最後のエントリは python -c / node -e / ruby -e / perl -e / php -r 等のインタプリタ・ワンライナーがネットワーク呼び出し（socket/urllib/fetch/Net::HTTP/file_get_contents 等）を含む場合を deny する＝curl/wget を塞いでも残る『生送信の抜け道』を閉じるため（ネットワーク語を含まない通常の -c/-e は通す）。詳細は docs/90_守れる-守れない.md の dangerousCommandRegex 解説を参照。",
   "dangerousCommandRegex": [
     "(?i)\\b(cat|type|Get-Content|gc|more|less)\\b.*(^|\\s|[\\\\/])[.]env([.].*)?(\\s|$)",
     "(?i)\\bpython(3)?\\b.*open\\s*\\(\\s*['\\\"][^'\\\"]*[.]env",
@@ -74,7 +74,8 @@
     "(?i)\\b(ssh|scp|sftp|rsync)\\b",
     "(?i)\\b(git\\s+push|npm\\s+publish|twine\\s+upload)\\b",
     "(?i)\\b(env|printenv|set)\\b.*(KEY|TOKEN|SECRET|PASSWORD)",
-    "(?i)\\b(Get-ChildItem|gci|dir)\\s+Env:"
+    "(?i)\\b(Get-ChildItem|gci|dir)\\s+Env:",
+    "(?i)\\b(python3?|node|nodejs|ruby|perl|php)\\b.*\\s(-c|-e|-E|-p|--eval|-r)\\s.*(socket|urllib|urlopen|requests\\.|httplib|http\\.client|httpx|open-uri|Net::HTTP|LWP|file_get_contents|fsockopen|curl_init|create_connection|getaddrinfo|XMLHttpRequest|fetch\\(|https?://)"
   ],
   "generatedCodeDenyRegex": [
     "(?i)open\\s*\\(\\s*['\\\"][^'\\\"]*[.]env",
