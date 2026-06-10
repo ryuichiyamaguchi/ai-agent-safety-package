@@ -5,7 +5,7 @@
   },
   "cleanupPeriodDays": 120,
   "permissions": {
-    "defaultMode": "dontAsk",
+    "defaultMode": "default",
     "disableBypassPermissionsMode": "disable",
     "allow": [
       "Read(./**)",
@@ -33,7 +33,17 @@
       "WebFetch(domain:cloud.google.com)"
     ],
     "ask": [
-      "Bash(*)"
+      "Bash(npm install*)",
+      "Bash(npm i *)",
+      "Bash(pnpm install*)",
+      "Bash(yarn install*)",
+      "Bash(yarn add *)",
+      "Bash(pip install*)",
+      "Bash(pip3 install*)",
+      "Bash(gem install*)",
+      "Bash(git clone*)",
+      "Bash(git fetch*)",
+      "Bash(git pull*)"
     ],
     "deny": [
       "Bash(curl *)",
