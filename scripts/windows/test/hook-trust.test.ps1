@@ -1,4 +1,4 @@
-# hook-trust.test.ps1 — launch-codex-safe.ps1 が codex 0.135+ の「未信頼フックは
+﻿# hook-trust.test.ps1 — launch-codex-safe.ps1 が codex 0.135+ の「未信頼フックは
 # 黙ってスキップ」仕様に対し、同梱 guard フックの trusted_hash を safe.config.toml の
 # [hooks.state] に自動注入することを検証する (mac hook-trust.test.sh のミラー)。
 # 注: trusted_hash のキー内パス区切り (\ か /) は実機 codex の書式に依存するため、
