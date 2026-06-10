@@ -19,9 +19,13 @@ $env:AI_SAFE_LOG_DIR = Join-Path $HOME ".ai-safety\logs"
 # claude-safe は「普通の Claude（あなたのログイン認証）」を起動する。DeepSeek 連携(d-claude)が
 # 残したルーティング系の環境変数を引き継ぐと、無効トークンを Anthropic に送って 401 になる
 # (永続 setx の置き土産=footgun)。このプロセス内で消し、claude-safe を常に素の Anthropic に向ける。
-# (d-claude 側はファイルの鍵を別プロセスで使うので影響しない)
-foreach ($v in @('ANTHROPIC_AUTH_TOKEN','ANTHROPIC_BASE_URL','ANTHROPIC_MODEL','ANTHROPIC_DEFAULT_HAIKU_MODEL','ANTHROPIC_CUSTOM_MODEL_OPTION')) {
-    if (Test-Path "Env:\$v") { Remove-Item "Env:\$v" -ErrorAction SilentlyContinue }
+# ただし d-claude (DeepSeek 駆動) は gateway 経由でこのスクリプトを呼び、DeepSeek キーと
+# Gateway の BASE_URL/MODEL を「使う」ために渡してくる。その経路では gateway が
+# DS_CLAUDE_MODE=1 を立てるので Remove をスキップする (消すと "not logged in" になる)。
+if ($env:DS_CLAUDE_MODE -ne '1') {
+    foreach ($v in @('ANTHROPIC_AUTH_TOKEN','ANTHROPIC_BASE_URL','ANTHROPIC_MODEL','ANTHROPIC_DEFAULT_HAIKU_MODEL','ANTHROPIC_CUSTOM_MODEL_OPTION')) {
+        if (Test-Path "Env:\$v") { Remove-Item "Env:\$v" -ErrorAction SilentlyContinue }
+    }
 }
 
 if (-not (Test-Path -LiteralPath $settings)) {

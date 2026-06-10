@@ -61,5 +61,9 @@ if ! kill -0 "$GW_PID" 2>/dev/null; then
 fi
 
 export ANTHROPIC_BASE_URL="http://127.0.0.1:$PORT"
+# d-claude 経路の目印。launch-claude-safe.sh はこのフラグがあるとき
+# DeepSeek ルーティング env (AUTH_TOKEN/BASE_URL/MODEL) の unset をスキップする
+# （消すと DeepSeek に繋がらず claude が "not logged in" になるため）。
+export DS_CLAUDE_MODE=1
 echo "送信検査 Gateway 稼働中（127.0.0.1:${PORT}）。DeepSeek へは検査後に転送されます。"
 bash "$LAUNCH_CLAUDE" "$WORKSPACE"

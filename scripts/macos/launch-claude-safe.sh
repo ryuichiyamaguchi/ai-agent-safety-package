@@ -15,9 +15,14 @@ export AI_SAFE_POLICY="$AI_SAFE_ROOT/policy/safety-policy.json"
 export AI_SAFE_LOG_DIR="$HOME/.ai-safety/logs"
 
 # claude-safe は「普通の Claude（ログイン認証）」を起動する。DeepSeek 連携が残した
-# ルーティング系 env を引き継ぐと無効トークンで 401 になりうるため、このシェル内で外す
-# （d-claude 側はファイルの鍵を別プロセスで使うので影響しない）。
-unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_CUSTOM_MODEL_OPTION
+# ルーティング系 env を引き継ぐと無効トークンで 401 になりうるため、このシェル内で外す。
+# ただし d-claude（DeepSeek 駆動）は gateway 経由でこのスクリプトを呼び、DeepSeek キー
+# (ANTHROPIC_AUTH_TOKEN) と Gateway の BASE_URL/MODEL を「使う」ために渡してくる。
+# その経路では gateway が DS_CLAUDE_MODE=1 を立てるので unset をスキップする
+# （ここで消すと DeepSeek に繋がらず claude が "not logged in" になる）。
+if [ "${DS_CLAUDE_MODE:-}" != "1" ]; then
+  unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_CUSTOM_MODEL_OPTION
+fi
 
 [ -f "$settings" ] || { echo "Claude safety settings were not found: $settings" >&2; exit 2; }
 [ -f "$AI_SAFE_POLICY" ] || { echo "AI Safety package is not installed in workspace: $workspace" >&2; exit 2; }

@@ -69,6 +69,9 @@ try {
     exit 1
   }
   $env:ANTHROPIC_BASE_URL = "http://127.0.0.1:$port"
+  # d-claude 経路の目印。launch-claude-safe.ps1 はこのフラグがあるとき
+  # DeepSeek ルーティング env の Remove をスキップする (消すと not logged in になる)。
+  $env:DS_CLAUDE_MODE = "1"
   Write-Host "送信検査 Gateway 稼働中 (127.0.0.1:$port)。DeepSeek へは検査後に転送されます。"
   & $launchClaude -Workspace $Workspace
 } finally {
