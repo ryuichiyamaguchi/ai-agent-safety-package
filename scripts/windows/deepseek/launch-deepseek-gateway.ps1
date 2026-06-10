@@ -8,6 +8,9 @@ $hooks = Join-Path $Workspace '.ai-safety\hooks'
 $gatewayJs = Join-Path $hooks 'common\ds-gateway.js'
 $launchClaude = Join-Path $hooks 'windows\launch-claude-safe.ps1'
 $port = if ($env:DS_GATEWAY_PORT) { $env:DS_GATEWAY_PORT } else { '8788' }
+# AI コーチ(モニター)に d-claude セッションを伝える目印(別プロセスなのでファイル方式)。
+$coachLogDir = if ($env:AI_SAFE_LOG_DIR) { $env:AI_SAFE_LOG_DIR } else { Join-Path $env:USERPROFILE '.ai-safety\logs' }
+$coachMarker = Join-Path $coachLogDir 'coach-engine'
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   Write-Host "[ERROR] node not found. Claude Code requires Node.js."; exit 1
@@ -72,8 +75,11 @@ try {
   # d-claude 経路の目印。launch-claude-safe.ps1 はこのフラグがあるとき
   # DeepSeek ルーティング env の Remove をスキップする (消すと not logged in になる)。
   $env:DS_CLAUDE_MODE = "1"
+  # モニターへ d-claude 目印を置く（AI コーチが Gemini へコマンド本文を送らないように）。
+  try { New-Item -ItemType Directory -Force -Path $coachLogDir | Out-Null; Set-Content -NoNewline -Encoding ascii -LiteralPath $coachMarker -Value 'd-claude' } catch {}
   Write-Host "送信検査 Gateway 稼働中 (127.0.0.1:$port)。DeepSeek へは検査後に転送されます。"
   & $launchClaude -Workspace $Workspace
 } finally {
   if ($gw -and -not $gw.HasExited) { Stop-Process -Id $gw.Id -Force -ErrorAction SilentlyContinue }
+  Remove-Item -LiteralPath $coachMarker -Force -ErrorAction SilentlyContinue
 }

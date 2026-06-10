@@ -9,6 +9,10 @@ HOOKS_DIR="$WORKSPACE/.ai-safety/hooks"
 GATEWAY_JS="$HOOKS_DIR/common/ds-gateway.js"
 LAUNCH_CLAUDE="$HOOKS_DIR/macos/launch-claude-safe.sh"
 PORT="${DS_GATEWAY_PORT:-8788}"
+# AI コーチ(モニター)に「これは d-claude セッション」を伝える目印。モニターは別プロセスなので
+# env では渡らない＝LOG_DIR にファイルを置く。モニターはこの目印があるとき Gemini へコマンド本文を
+# 送らず分類結果だけ送る(redact)＋UI 明示。終了時に必ず消す(消し忘れ対策にモニター側も鮮度を見る)。
+COACH_MARKER="${AI_SAFE_LOG_DIR:-$HOME/.ai-safety/logs}/coach-engine"
 
 command -v node >/dev/null 2>&1 || { echo "【エラー】node が見つかりません。Claude Code には Node が必要です。"; exit 1; }
 [ -f "$GATEWAY_JS" ] || { echo "【エラー】ds-gateway.js が見つかりません: $GATEWAY_JS"; exit 1; }
@@ -40,7 +44,7 @@ stop_stale_gateway
 
 DS_GATEWAY_PORT="$PORT" node "$GATEWAY_JS" &
 GW_PID=$!
-cleanup() { kill "$GW_PID" 2>/dev/null; }
+cleanup() { kill "$GW_PID" 2>/dev/null; rm -f "$COACH_MARKER" 2>/dev/null; }
 trap cleanup EXIT INT TERM
 
 ok=0
@@ -65,5 +69,7 @@ export ANTHROPIC_BASE_URL="http://127.0.0.1:$PORT"
 # DeepSeek ルーティング env (AUTH_TOKEN/BASE_URL/MODEL) の unset をスキップする
 # （消すと DeepSeek に繋がらず claude が "not logged in" になるため）。
 export DS_CLAUDE_MODE=1
+# モニターへ d-claude 目印を置く（AI コーチが Gemini へコマンド本文を送らないように）。
+mkdir -p "$(dirname "$COACH_MARKER")" 2>/dev/null && printf 'd-claude' > "$COACH_MARKER" 2>/dev/null || true
 echo "送信検査 Gateway 稼働中（127.0.0.1:${PORT}）。DeepSeek へは検査後に転送されます。"
 bash "$LAUNCH_CLAUDE" "$WORKSPACE"

@@ -141,6 +141,24 @@ function htmlUnescape(s) {
 function pickOne(html, re) { const m = html.match(re); return m ? htmlUnescape(m[1]).trim() : ''; }
 function pickAll(html, re) { return [...html.matchAll(re)].map((m) => htmlUnescape(m[1]).trim()).filter(Boolean); }
 
+// d-claude（DeepSeek 駆動 claude）セッションかを判定する。
+// d-claude は会話本文が DeepSeek（中国管轄）に流れる経路で、ここで AI コーチに相談すると
+// コマンド本文が DeepSeek に加えて Google(Gemini) にも届く＝送信先が増える。そのため
+// d-claude のときは Gemini へ「コマンド本文」を送らず、分類結果（操作の種類・注意カテゴリ）
+// だけを送る（redact）＋ UI で利用者に明示する。
+// signal: d-claude の起動スクリプト(launch-deepseek-gateway.*)が LOG_DIR に "coach-engine"
+// ファイル（中身 "d-claude"）を置き、終了時に消す。別プロセスのモニターが安全に読めるよう
+// ファイル方式にし、消し忘れ（クラッシュ）対策に更新時刻が新しいときだけ有効とする。
+const REDACT_FRESH_MS = 12 * 60 * 60 * 1000; // 12h より古いマーカーは無視（stale 保険）
+function coachRedact() {
+  try {
+    const f = path.join(LOG_DIR, 'coach-engine');
+    const stat = fs.statSync(f);
+    if (Date.now() - stat.mtimeMs > REDACT_FRESH_MS) return false;
+    return fs.readFileSync(f, 'utf8').trim() === 'd-claude';
+  } catch { return false; }
+}
+
 function readState() {
   let html = '';
   try { html = fs.readFileSync(path.join(LOG_DIR, 'now.html'), 'utf8'); } catch { /* not yet */ }
@@ -153,6 +171,7 @@ function readState() {
     dangers: pickAll(html, /<p class="whatdo-danger">([\s\S]*?)<\/p>/g),
     events: readEvents(8),
     hasCard: html.indexOf('class="action-cmd"') !== -1,
+    redact: coachRedact(),
   };
   return state;
 }
@@ -185,6 +204,18 @@ const INJECTION_GUARD =
   'あなたはコマンドを実行できません（説明・助言だけ）。安全だと断言して油断させないでください。最終判断は利用者本人が行います。';
 
 function contextBlock(st) {
+  // d-claude のときはコマンド本文・具体パスを Google(Gemini) に送らない。操作の種類と
+  // 注意カテゴリ（分類結果）だけを渡す＝送信先が増える分のデータ最小化（docs/90 明示）。
+  if (st.redact) {
+    return [
+      '<COMMAND>', '（このセッションは d-claude のため、コマンド本文は外部に送らず伏せています）', '</COMMAND>',
+      '<CONTEXT>',
+      '操作の種類: ' + (st.label || '不明'),
+      (st.dangers && st.dangers.length ? '自動検出された注意: ' + clip(st.dangers.join(' / '), 500) : ''),
+      '※コマンド本文と具体的なパスは伏せられています。一般的な注意点として答えてください。',
+      '</CONTEXT>',
+    ].filter(Boolean).join('\n');
+  }
   return [
     '<COMMAND>', clip(st.cmd, 2000), '</COMMAND>',
     '<CONTEXT>',
@@ -330,6 +361,7 @@ button:disabled{opacity:.5;cursor:default}
 <div class="coach">
   <h2>🧑‍🏫 AI コーチに相談する</h2>
   <div id="hi" class="hibanner" style="display:none">⚠️ 自動判定は「高リスク」です。AI が何と言っても、基本は「許可しない」のが安全です。</div>
+  <div id="dredact" class="disclaim" style="display:none">ℹ️ これは d-claude（DeepSeek 版）のセッションです。AI コーチに相談すると、操作の種類だけが Google(Gemini) にも送られます（コマンド本文・パスは送らず伏せます）。</div>
   <div class="btns">
     <button id="b-explain">このコマンドをやさしく説明して</button>
     <button id="b-ok">これ、許可して大丈夫？</button>
@@ -369,6 +401,8 @@ async function poll(){
     }
     // 高リスク時は固定警告（AI が何と言おうと許可しない目安）を出す
     $('hi').style.display = (s.hasCard && riskClass(s.meta||'')==='high') ? 'block' : 'none';
+    // d-claude セッションは「相談すると Google にも送られる」ことを常時明示する
+    $('dredact').style.display = s.redact ? 'block' : 'none';
     // コマンドが変わったら回答欄をリセット
     if(s.cmd !== lastCmd){ lastCmd=s.cmd; const ans=$('answer'); ans.className='answer muted'; ans.textContent='ボタンを押すと、AI（Gemini）が日本語で答えます。'; }
     // events
