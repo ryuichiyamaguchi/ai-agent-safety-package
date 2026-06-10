@@ -40,6 +40,35 @@ if (Test-Path -LiteralPath $workspaceSafeProfile) {
     Copy-Item -LiteralPath $workspaceSafeProfile -Destination $safeCodexProfile -Force
 }
 
+# Hook trust 自動付与 (codex 0.135+ 対応・最重要) — mac launch-codex-safe.sh と同型。
+# codex 0.135 以降は信頼していないフックを黙ってスキップするため、受講者が /hooks を手動で
+# 信頼するまで guard が一切発火せず見守りモニターも無反応になる。launcher が起動のたびに
+# 同梱フックの trusted_hash を safe.config.toml の [hooks.state] に注入して最初から Active にする。
+# - trusted_hash はフックのコマンド内容由来で workspace パスに依存しない。
+# - Windows の値は mac codex に hooks.windows.json を読ませて採取した暫定値。
+#   Windows 実機の codex がキーをどの区切り (\ か /)・どの正規化で書くかは未確認なので、
+#   実機検証で /hooks の Active を確認し、ずれていれば codex が書く [hooks.state] の
+#   書式に合わせてここを調整すること (runbook 参照)。
+# - IMPORTANT: hooks.windows.json を変更したらこのハッシュ表も再採取して更新する。
+$hooksJson = Join-Path $Workspace ".codex\hooks.json"
+if ((Test-Path -LiteralPath $hooksJson) -and (Test-Path -LiteralPath $safeCodexProfile)) {
+    # TOML basic string 用に \ を \\ にエスケープする (Windows パス区切り対策)。
+    $tomlPath = $hooksJson -replace '\\', '\\'
+    $hookEntries = @(
+        @('pre_tool_use:0:0',      '7cd5817d3031a107271994456a15b400232360984668dd261559283b75bb9780'),
+        @('pre_tool_use:1:0',      'f55891da00eaa094a3c770c7227882a7bba69482fd93fd2e1ca08391e60ad7aa'),
+        @('pre_tool_use:2:0',      'a7ecf1e0d05fd8ef0d4dc06b5891d4b0b4bc4f6f6711b895a4b11c737d3392cc'),
+        @('post_tool_use:0:0',     'f2a4a55a367c421547ff81ced29b5406a7556a1e71759003d6e6eccdecfb7827'),
+        @('user_prompt_submit:0:0','a254ae6612f7de19f6342536d0cc57699d2e345e6f0ad01bc899811caf951407')
+    )
+    $stateLines = @('', '[hooks.state]')
+    foreach ($e in $hookEntries) {
+        $stateLines += ('[hooks.state."{0}:{1}"]' -f $tomlPath, $e[0])
+        $stateLines += ('trusted_hash = "sha256:{0}"' -f $e[1])
+    }
+    Add-Content -LiteralPath $safeCodexProfile -Value ($stateLines -join "`r`n")
+}
+
 if (-not (Test-Path -LiteralPath $env:AI_SAFE_POLICY)) {
     throw "AI Safety package is not installed in workspace: $Workspace"
 }

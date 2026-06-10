@@ -37,6 +37,35 @@ if [ -f "$WORKSPACE_SAFE_PROFILE" ]; then
   cp "$WORKSPACE_SAFE_PROFILE" "$SAFE_PROFILE"
 fi
 
+# Hook trust 自動付与 (codex 0.135+ 対応・最重要):
+# codex 0.135 以降は「信頼していないフックを黙ってスキップする」。受講者が /hooks を手動で
+# 操作して信頼するまで guard-bash / guard-write / guard-prompt 等が一切発火せず、見守り
+# モニターにも何も出ない。受講者に手動信頼をさせないため、launcher が起動のたびに同梱フックの
+# 信頼ハッシュを safe.config.toml の [hooks.state] に注入し、最初から Active にする。
+# - trusted_hash はフックのコマンド内容由来で workspace の絶対パスに依存しない
+#   (mac 実機 + 別パス workspace で同一ハッシュを確認済み)。
+# - キーの先頭はその workspace の hooks.json 絶対パス。codex の --cd と同じ正規化なので一致する。
+# - IMPORTANT: hooks.mac.json を変更したらこのハッシュ表も再採取して更新すること
+#   (採取手順: launcher で TUI 起動 → /hooks → t → $CODEX_HOME/safe.config.toml の [hooks.state])。
+HOOKS_JSON="$workspace/.codex/hooks.json"
+if [ -f "$HOOKS_JSON" ] && [ -f "$SAFE_PROFILE" ]; then
+  {
+    echo ""
+    echo "[hooks.state]"
+    for entry in \
+      "pre_tool_use:0:0=8e3477c0afc198cec87895c92defafa4d27efa05d0913c330a82caeaa8899028" \
+      "pre_tool_use:1:0=19d86086583458f50be0b06abaad9ee41e541045bde6d3d3421286562d133524" \
+      "pre_tool_use:2:0=d51912f2f5ae63364cc4717cb83d02b140b8e5d2344d7d5281be7dbbb96e73ff" \
+      "post_tool_use:0:0=ee17e0c0d17e29e611c0ece3f5ee68b2a15d734b4a16ac08d0486a3e10c3b735" \
+      "user_prompt_submit:0:0=b5eaf03ab2de6207c7bbef7d2f96b5174caf8878eede9d009508850cb8381c7c" \
+    ; do
+      key="${entry%%=*}"; hash="${entry#*=}"
+      printf '[hooks.state."%s:%s"]\n' "$HOOKS_JSON" "$key"
+      printf 'trusted_hash = "sha256:%s"\n' "$hash"
+    done
+  } >> "$SAFE_PROFILE"
+fi
+
 [ -f "$AI_SAFE_POLICY" ] || { echo "AI Safety package is not installed in workspace: $workspace" >&2; exit 2; }
 if [ "${AI_SAFE_DRY_RUN:-}" != "1" ]; then
   [ -f "$SAFE_CONFIG" ] || { echo "Codex safety config was not found: $SAFE_CONFIG" >&2; exit 2; }
