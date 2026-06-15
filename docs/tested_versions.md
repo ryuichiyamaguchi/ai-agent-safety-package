@@ -92,11 +92,11 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 
 | ファイル | SHA-256 | 備考 |
 |---------|---------|------|
-| policy/safety-policy.json | 42b0abdcb62b8677686e3051b702ca2c9fd2707d0426c40ba16df28b1ebb82ba | v1.5.0 で packageVersion を 1.5.0 に bump |
+| policy/safety-policy.json | b2c17a5f75a40a6698ba3f69eb76cfe55b037772cc1eda1b0deea1dcab742a7f | approval-model-v1: interpreter one-liner deny 追加 + フラグ境界を [\s'"=] に修正（クォート直結/--eval= 抜け道封鎖） |
 | configs/codex/hooks.mac.json | 6f03deee71871c40dd81d098867a4860284700f98135fbb05730936738a729ca | v1.0.x から変更なし |
 | configs/codex/hooks.windows.json | 4e55cf8fbffbe44f1023455c902934f00d4a81d2637ba54c495cfaded18ca97c | v1.7.2 で Codex 二重包み対策に -File 形式へ変更 |
-| configs/claude/settings.mac.json | 8dbfee7f872fa15d0695526035bc358f6a699065d10985f80c1fe3d15f05d629 | v1.5.0 で env の壊れた AI_SAFE_LOG_DIR 行を削除 |
-| configs/claude/settings.windows.json | ed5eb26a81f3fd803cc5b793d3ed30af22feee60c95457cf350a3cca56628d9e | v1.5.0 で env の壊れた AI_SAFE_LOG_DIR 行を削除 |
+| configs/claude/settings.mac.json | aa8a1dc659019e3caaa72e04c60bc02e93b26ebdc88c554fe5b2754d18df2c46 | approval-model-v1: defaultMode default + gray ask 明示列挙 |
+| configs/claude/settings.windows.json | a7b7a2a7ae866ca9355040f195ae54c4fc226b01606e803288484749e427b96a | approval-model-v1: defaultMode default + gray ask 明示列挙 |
 | configs/gemini/settings.mac.json | b9f45bac5583930c6b44a07a2351c6bd21722503de82983e63cd5f38db2a6213 | v1.0.x から変更なし |
 | configs/gemini/settings.windows.json | f061d04699ce366887ae829d0f6fd78ac8d597c9bbaac80bb985332f32d1f012 | v1.0.x から変更なし |
 | configs/codex/config.mac.toml | 34ac08a64cfe8444351b6d09ec280891763db3e47117b79b062429d2b75a6b13 | Safe Auto Mode: 0.135 で fatal の `[profiles.safe]` を除去し `[permissions.safeprobe]` 追加 |
