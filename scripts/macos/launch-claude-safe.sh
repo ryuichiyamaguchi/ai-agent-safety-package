@@ -6,6 +6,20 @@ set -euo pipefail
 # 同等の効果（PreToolUse hook による fail-closed 判定 + 危険コマンド deny）を出している。
 # 追加の保険として --permission-mode default を渡し、Claude Code 側のデフォルト
 # 承認モードを明示する。古い CLI でフラグ非対応の場合はフォールバックする。
+# --assisted opt-in: 2 鍵グレーゾーン自動承認を有効化（既定 OFF）。フラグを引数列から
+# 取り除いてから従来の位置引数（workspace / prompt）を解釈する。事前に環境変数
+# AI_SAFE_ASSISTED_APPROVAL=1 が立っている場合もそのまま尊重して引き継ぐ。
+_args=()
+for _a in "$@"; do
+  if [ "$_a" = "--assisted" ]; then
+    export AI_SAFE_ASSISTED_APPROVAL=1
+  else
+    _args+=("$_a")
+  fi
+done
+# bash 3.2 + set -u では空配列展開が unbound になるため要素数で分岐する。
+if [ "${#_args[@]}" -gt 0 ]; then set -- "${_args[@]}"; else set --; fi
+
 workspace="${1:-$(pwd)}"
 prompt="${2:-}"
 workspace="$(cd "$workspace" && pwd)"

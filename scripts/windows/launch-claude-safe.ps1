@@ -1,7 +1,13 @@
 ﻿param(
     [string]$Workspace = (Get-Location).Path,
-    [string]$Prompt = ""
+    [string]$Prompt = "",
+    # --assisted 相当: 2 鍵グレーゾーン自動承認を有効化（既定 OFF）。mac の launch-claude-safe.sh と対称。
+    [switch]$Assisted
 )
+
+# 事前に AI_SAFE_ASSISTED_APPROVAL=1 が立っていればそのまま尊重し、-Assisted 指定時は立てる。
+# どちらでもない場合は OFF（環境変数を変更しない＝今日と同じ挙動）。
+if ($Assisted) { $env:AI_SAFE_ASSISTED_APPROVAL = "1" }
 
 # M13: Claude Code の approval 制御は CLI フラグでは渡せない（Codex の
 # --ask-for-approval untrusted に相当する仕組みは settings.json 側にある）。
