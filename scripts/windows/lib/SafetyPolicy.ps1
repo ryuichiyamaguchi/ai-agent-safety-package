@@ -131,6 +131,22 @@ function Find-SecretMatch([string]$Text, [object]$Policy) {
     return $null
 }
 
+# 出力(AI/ツール応答)専用の機密検査。outputSecretRegex（secretRegex から
+# 『Generic sensitive assignment』を除いた本物のキー書式のみ）で走査する。
+# 汎用代入パターンで技術出力全体が誤ブロックされる over-blocking を回避するため。
+# outputSecretRegex キーが無い旧ポリシーでは secretRegex（無ければ secretPatterns）
+# にフォールバックして後方互換と安全側を保つ。入力側 Find-SecretMatch は不変。
+function Find-OutputSecretMatch([string]$Text, [object]$Policy) {
+    $list = Get-JsonValue $Policy @("outputSecretRegex", "secretRegex", "secretPatterns")
+    if ($null -eq $list) { return $null }
+    foreach ($item in $list) {
+        if ($Text -match $item.pattern) {
+            return [PSCustomObject]@{ Name = $item.name; Pattern = $item.pattern }
+        }
+    }
+    return $null
+}
+
 function Find-RegexMatch([string]$Text, [object[]]$RegexList, [string]$NamePrefix) {
     foreach ($pattern in $RegexList) {
         if ($Text -match $pattern) {

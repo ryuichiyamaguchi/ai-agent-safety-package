@@ -18,6 +18,7 @@ RAW_INPUT=""
 
 # Policy-derived variables (populated by load_policy_or_fail)
 SECRET_PATTERNS=""
+OUTPUT_SECRET_PATTERNS=""
 DANGEROUS_PATTERNS=""
 PROTECTED_PATH_PATTERNS=""
 BLOCKED_DOMAINS=""
@@ -171,11 +172,21 @@ load_policy_or_fail() {
   fi
 
   # 7. Parse policy via plutil
-  local secret_patterns dangerous_patterns protected_patterns blocked_domains allowed_domains
+  local secret_patterns output_secret_patterns dangerous_patterns protected_patterns blocked_domains allowed_domains
 
   if ! secret_patterns="$(_extract_pattern_list "secretRegex" "$policy")"; then
     printf 'AI Safety Guard FATAL: failed to parse secretRegex from policy\n' >&2
     exit 2
+  fi
+  # outputSecretRegex は出力走査専用（Generic sensitive assignment を除いた版）。
+  # 旧ポリシー（キー無し）では secretRegex 全体にフォールバックし後方互換を保つ。
+  if "$_PLUTIL" -extract outputSecretRegex raw -o - "$policy" >/dev/null 2>&1; then
+    if ! output_secret_patterns="$(_extract_pattern_list "outputSecretRegex" "$policy")"; then
+      printf 'AI Safety Guard FATAL: failed to parse outputSecretRegex from policy\n' >&2
+      exit 2
+    fi
+  else
+    output_secret_patterns="$secret_patterns"
   fi
   if ! dangerous_patterns="$(_extract_string_list "dangerousCommandRegex" "$policy")"; then
     printf 'AI Safety Guard FATAL: failed to parse dangerousCommandRegex from policy\n' >&2
@@ -205,6 +216,7 @@ load_policy_or_fail() {
     {
       # Use printf %q to safely quote multiline strings for re-sourcing
       printf 'SECRET_PATTERNS=%q\n' "$secret_patterns"
+      printf 'OUTPUT_SECRET_PATTERNS=%q\n' "$output_secret_patterns"
       printf 'DANGEROUS_PATTERNS=%q\n' "$dangerous_patterns"
       printf 'PROTECTED_PATH_PATTERNS=%q\n' "$protected_patterns"
       printf 'BLOCKED_DOMAINS=%q\n' "$blocked_domains"
@@ -216,6 +228,7 @@ load_policy_or_fail() {
 
   # 9. Assign to global variables
   SECRET_PATTERNS="$secret_patterns"
+  OUTPUT_SECRET_PATTERNS="$output_secret_patterns"
   DANGEROUS_PATTERNS="$dangerous_patterns"
   PROTECTED_PATH_PATTERNS="$protected_patterns"
   BLOCKED_DOMAINS="$blocked_domains"
@@ -353,6 +366,19 @@ _grep_corpus() {
 has_sensitive_text() {
   local combined
   combined="$(_join_patterns "$SECRET_PATTERNS")"
+  [ -z "$combined" ] && return 1
+  _grep_corpus "$combined"
+}
+
+# 出力(AI/ツール応答)専用の機密検査。OUTPUT_SECRET_PATTERNS（outputSecretRegex
+# 由来 = Generic sensitive assignment を除いた本物のキー書式のみ）で走査する。
+# 入力側 has_sensitive_text は不変。OUTPUT_SECRET_PATTERNS が空のとき（旧キャッシュ等）
+# は SECRET_PATTERNS にフォールバックして安全側に倒す。
+has_sensitive_output_text() {
+  local patterns combined
+  patterns="$OUTPUT_SECRET_PATTERNS"
+  [ -z "$patterns" ] && patterns="$SECRET_PATTERNS"
+  combined="$(_join_patterns "$patterns")"
   [ -z "$combined" ] && return 1
   _grep_corpus "$combined"
 }

@@ -60,6 +60,17 @@
     { "name": "Private key block", "pattern": "-----BEGIN (RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----" },
     { "name": "Generic sensitive assignment", "pattern": "(?i)(api[_-]?key|secret|token|password|passwd|pwd)\\s*[:=]\\s*['\\\"]?[A-Za-z0-9_\\.\\-\\/+=]{12,}" }
   ],
+  "_comment_outputSecretRegex": "AI の出力(Stop/PostToolUse=guard-post-output)を走査する専用パターン集。secretRegex から『Generic sensitive assignment』だけを除いたコピー。理由: 汎用の `api_key: \"...\"` 代入パターンは config 例・解説文など正規の技術出力に大量に一致し、API キー等を説明するたびに回答全体がブロックされ実務で使い物にならなくなる(over-blocking)。本物のキー書式(OpenAI/Anthropic/Google/AWS/GitHub/Slack/JWT/秘密鍵ブロック)だけを出力側でも止める。入力側(guard-bash/guard-write の has_sensitive_text/Find-SecretMatch)は引き続き secretRegex 全体を使い、deny floor は不変。",
+  "outputSecretRegex": [
+    { "name": "OpenAI API key", "pattern": "sk-(proj-)?[A-Za-z0-9_\\-]{20,}" },
+    { "name": "Anthropic API key", "pattern": "sk-ant-[A-Za-z0-9_\\-]{20,}" },
+    { "name": "Google API key", "pattern": "AIza[0-9A-Za-z_\\-]{25,}" },
+    { "name": "AWS access key", "pattern": "\\b(AKIA|ASIA)[0-9A-Z]{16}\\b" },
+    { "name": "GitHub token", "pattern": "\\bgh[pousr]_[A-Za-z0-9_]{36,255}\\b" },
+    { "name": "Slack token", "pattern": "\\bxox[baprs]-[A-Za-z0-9\\-]{10,}\\b" },
+    { "name": "JWT", "pattern": "\\beyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\b" },
+    { "name": "Private key block", "pattern": "-----BEGIN (RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----" }
+  ],
   "_comment_dangerousCommand": "curl/wget/Invoke-WebRequest/nc 等は引数なしでも一律 deny する。man curl のような閲覧目的でも止まるが、これは仕様（launcher 配下では学習者がポリシーを迂回できないようにあえて広めに deny する）。閲覧したい場合は launcher 外（通常のターミナル）で実行すること。POST/通信実行系だけに絞らないのは、curl example.com のような GET でも外部 exfil の足がかりになるため。最後のエントリは python -c / node -e / ruby -e / perl -e / php -r 等のインタプリタ・ワンライナーがネットワーク呼び出し（socket/urllib/fetch/Net::HTTP/file_get_contents 等）を含む場合を deny する＝curl/wget を塞いでも残る『生送信の抜け道』を閉じるため（ネットワーク語を含まない通常の -c/-e は通す）。詳細は docs/90_守れる-守れない.md の dangerousCommandRegex 解説を参照。",
   "dangerousCommandRegex": [
     "(?i)\\b(cat|type|Get-Content|gc|more|less)\\b.*(^|\\s|[\\\\/])[.]env([.].*)?(\\s|$)",

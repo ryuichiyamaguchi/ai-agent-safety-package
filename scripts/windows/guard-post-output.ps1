@@ -10,7 +10,10 @@ try {
     # シェルコマンドがモニターに残らなくなる。検査(下の block/allow)は維持。
     $text = ConvertTo-SafeText $inputObj
 
-    $secret = Find-SecretMatch $text $policy
+    # 出力側は outputSecretRegex（本物のキー書式のみ。Generic sensitive assignment は除外）で
+    # 検査する。汎用代入パターンで技術出力全体が誤ブロックされる over-blocking を回避する。
+    # 入力側(guard-bash/guard-write の Find-SecretMatch)は secretRegex 全体のまま不変。
+    $secret = Find-OutputSecretMatch $text $policy
     if ($secret) {
         Block-Action $inputObj "post-output" ("sensitive pattern in tool or AI output: " + $secret.Name) $text $policy
     }
