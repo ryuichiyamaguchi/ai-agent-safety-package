@@ -95,8 +95,8 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 | policy/safety-policy.json | b2c17a5f75a40a6698ba3f69eb76cfe55b037772cc1eda1b0deea1dcab742a7f | approval-model-v1: interpreter one-liner deny 追加 + フラグ境界を [\s'"=] に修正（クォート直結/--eval= 抜け道封鎖） |
 | configs/codex/hooks.mac.json | 6f03deee71871c40dd81d098867a4860284700f98135fbb05730936738a729ca | v1.0.x から変更なし |
 | configs/codex/hooks.windows.json | 4e55cf8fbffbe44f1023455c902934f00d4a81d2637ba54c495cfaded18ca97c | v1.7.2 で Codex 二重包み対策に -File 形式へ変更 |
-| configs/claude/settings.mac.json | aa8a1dc659019e3caaa72e04c60bc02e93b26ebdc88c554fe5b2754d18df2c46 | approval-model-v1: defaultMode default + gray ask 明示列挙 |
-| configs/claude/settings.windows.json | a7b7a2a7ae866ca9355040f195ae54c4fc226b01606e803288484749e427b96a | approval-model-v1: defaultMode default + gray ask 明示列挙 |
+| configs/claude/settings.mac.json | 342da957f1354ab2f9f7c7135942e4bad6e3c938e4b867384fbe73156d98a74f | monitor-tool-coverage: catch-all observe (matcher "*") + shell matcher Bash\|PowerShell + Write group に NotebookEdit + PermissionRequest observe |
+| configs/claude/settings.windows.json | 2ff3e224bc719565de16cfd22aad99741e02ccdf41330334107542395796a080 | monitor-tool-coverage: catch-all observe (matcher "*") + shell matcher Bash\|PowerShell + NotebookEdit guard-write + PermissionRequest observe |
 | configs/gemini/settings.mac.json | b9f45bac5583930c6b44a07a2351c6bd21722503de82983e63cd5f38db2a6213 | v1.0.x から変更なし |
 | configs/gemini/settings.windows.json | f061d04699ce366887ae829d0f6fd78ac8d597c9bbaac80bb985332f32d1f012 | v1.0.x から変更なし |
 | configs/codex/config.mac.toml | 34ac08a64cfe8444351b6d09ec280891763db3e47117b79b062429d2b75a6b13 | Safe Auto Mode: 0.135 で fatal の `[profiles.safe]` を除去し `[permissions.safeprobe]` 追加 |

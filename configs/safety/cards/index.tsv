@@ -25,3 +25,4 @@ write	.	low	default-write
 webfetch	.	low	default-webfetch
 prompt	.	low	default-prompt
 post-output	.	low	default-post-output
+observe	.	low	default-observe

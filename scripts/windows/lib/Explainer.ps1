@@ -36,6 +36,46 @@ function ConvertTo-DotNetRegex([string]$Pattern) {
     return $p
 }
 
+# observe モード用: tool_name に応じた「安全で短い」入力要約を返す。
+# ファイル本文・検索結果本文・タスクプロンプト全文は一切含めない（パス/パターン/クエリのみ）。
+function Get-ObserveSummary {
+    param([object]$HookInput, [string]$Tool)
+    $toolInput = Get-ToolInput $HookInput
+    $s = ""
+    switch ($Tool) {
+        { $_ -in @("Read", "NotebookRead", "FileRead") } {
+            $s = [string](Get-JsonValue $toolInput @("file_path", "path", "notebook_path"))
+        }
+        "Glob" {
+            $s = [string](Get-JsonValue $toolInput @("pattern"))
+            $gp = [string](Get-JsonValue $toolInput @("path"))
+            if (-not [string]::IsNullOrWhiteSpace($gp)) { $s = "$s (場所: $gp)" }
+        }
+        { $_ -in @("Grep", "Search") } {
+            $s = [string](Get-JsonValue $toolInput @("pattern"))
+            $gp = [string](Get-JsonValue $toolInput @("path"))
+            if (-not [string]::IsNullOrWhiteSpace($gp)) { $s = "$s (場所: $gp)" }
+        }
+        "WebSearch" {
+            $s = [string](Get-JsonValue $toolInput @("query"))
+        }
+        "LS" {
+            $s = [string](Get-JsonValue $toolInput @("path"))
+        }
+        { $_ -in @("Agent", "Task", "TaskCreate", "NotebookEdit") } {
+            # タスクプロンプト全文は機密を含み得るため出さない。種別だけ。
+            $s = "subagent/task 作成"
+        }
+        default {
+            # 未知の tool: 既知の安全フィールドだけを順に試す。本文系(content等)は出さない。
+            $s = [string](Get-JsonValue $toolInput @("file_path", "path", "pattern", "query", "url"))
+        }
+    }
+    if ($null -eq $s) { $s = "" }
+    if ($s.Length -gt 300) { $s = $s.Substring(0, 300) + "…" }
+    return $s
+}
+
 function Get-ExplainTarget {
     param([object]$HookInput, [string]$Mode)
     switch ($Mode) {
@@ -48,6 +88,11 @@ function Get-ExplainTarget {
                 return $uri.Host.ToLowerInvariant()
             }
             return $url
+        }
+        "observe" {
+            # observe は tool 横断の汎用フォールバックカード(default-observe)を引くため
+            # target は tool_name にする(index.tsv の observe 行はワイルドカード . で必ずヒット)。
+            return Get-ToolName $HookInput
         }
         "prompt" { return Get-PromptText $HookInput }
         "post-output" { return ConvertTo-SafeText $HookInput }
@@ -583,6 +628,12 @@ function Get-ActionText {
                 $text = [string](Get-WebUrl $HookInput)
                 $label = "Web アクセス"
             }
+            "observe" {
+                $tool = [string](Get-ToolName $HookInput)
+                if ([string]::IsNullOrWhiteSpace($tool)) { $tool = "不明なツール" }
+                $text = Get-ObserveSummary -HookInput $HookInput -Tool $tool
+                $label = "$tool を使用"
+            }
             { $_ -eq "prompt" -or $_ -eq "post-output" } {
                 $raw = [string](Get-PromptText $HookInput)
                 $text = if ($raw.Length -gt 300) { $raw.Substring(0, 300) } else { $raw }
@@ -864,6 +915,11 @@ function Write-NowCard {
     if ([string]::IsNullOrWhiteSpace($risk)) { $risk = $RiskDefault }
     if ([string]::IsNullOrWhiteSpace($title)) { $title = "(title not set)" }
     if ([string]::IsNullOrWhiteSpace($icon)) { $icon = "[*]" }
+    # observe モードでは tool_name をタイトルに前置し、汎用カードでもどの道具かが一目で分かるようにする。
+    if ($Mode -eq "observe" -and $null -ne $HookInput) {
+        $ot = [string](Get-ToolName $HookInput)
+        if (-not [string]::IsNullOrWhiteSpace($ot)) { $title = "AI が $ot を使おうとしています" }
+    }
 
     $body = Get-CardBody $bodyPath
     $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"

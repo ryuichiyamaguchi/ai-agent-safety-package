@@ -108,7 +108,23 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-Command",
+              "try { if ($env:CLAUDE_PROJECT_DIR) { $p = Join-Path $env:CLAUDE_PROJECT_DIR '.ai-safety\\hooks\\windows\\guard-observe.ps1'; if (Test-Path -LiteralPath $p) { & $p } } } catch { }; exit 0"
+            ]
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
@@ -172,6 +188,22 @@
         ]
       },
       {
+        "matcher": "NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-Command",
+              "try { if (!$env:CLAUDE_PROJECT_DIR) { throw 'CLAUDE_PROJECT_DIR missing' }; $p = Join-Path $env:CLAUDE_PROJECT_DIR '.ai-safety\\hooks\\windows\\guard-write.ps1'; if (!(Test-Path -LiteralPath $p)) { throw ('AI Safety hook missing: ' + $p) }; & $p; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 2 }"
+            ]
+          }
+        ]
+      },
+      {
         "matcher": "WebFetch",
         "hooks": [
           {
@@ -183,6 +215,24 @@
               "Bypass",
               "-Command",
               "try { if (!$env:CLAUDE_PROJECT_DIR) { throw 'CLAUDE_PROJECT_DIR missing' }; $p = Join-Path $env:CLAUDE_PROJECT_DIR '.ai-safety\\hooks\\windows\\guard-webfetch.ps1'; if (!(Test-Path -LiteralPath $p)) { throw ('AI Safety hook missing: ' + $p) }; & $p; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 2 }"
+            ]
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-Command",
+              "try { if ($env:CLAUDE_PROJECT_DIR) { $p = Join-Path $env:CLAUDE_PROJECT_DIR '.ai-safety\\hooks\\windows\\guard-observe.ps1'; if (Test-Path -LiteralPath $p) { & $p } } } catch { }; exit 0"
             ]
           }
         ]

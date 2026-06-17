@@ -62,6 +62,62 @@ _json_unescape() {
   ' 2>/dev/null
 }
 
+# RAW_INPUT から tool_name を抽出する（observe モード用）。
+# Claude hook JSON の tool_name / toolName / name の順で探す。
+extract_tool_name() {
+  local t
+  t="$(extract_json_string "tool_name")"
+  [ -n "$t" ] && { printf '%s' "$t"; return; }
+  t="$(extract_json_string "toolName")"
+  [ -n "$t" ] && { printf '%s' "$t"; return; }
+  extract_json_string "name"
+}
+
+# observe モード用: tool_name に応じた「安全で短い」入力要約を返す。
+# ファイル本文・検索結果本文・タスクプロンプト全文は一切含めない（パス/パターン/クエリのみ）。
+# どの tool でも最終的に 300 字でクリップする（_limit_chars は呼び出し側）。
+observe_input_summary() {
+  local tool="$1" s
+  case "$tool" in
+    Read|NotebookRead|FileRead)
+      s="$(extract_json_string "file_path")"
+      [ -z "$s" ] && s="$(extract_json_string "path")"
+      [ -z "$s" ] && s="$(extract_json_string "notebook_path")"
+      ;;
+    Glob)
+      s="$(extract_json_string "pattern")"
+      local gp
+      gp="$(extract_json_string "path")"
+      [ -n "$gp" ] && s="${s} (場所: ${gp})"
+      ;;
+    Grep|Search)
+      s="$(extract_json_string "pattern")"
+      local grp
+      grp="$(extract_json_string "path")"
+      [ -n "$grp" ] && s="${s} (場所: ${grp})"
+      ;;
+    WebSearch)
+      s="$(extract_json_string "query")"
+      ;;
+    LS)
+      s="$(extract_json_string "path")"
+      ;;
+    Agent|Task|TaskCreate|NotebookEdit)
+      # タスクプロンプト全文は機密を含み得るため出さない。種別だけ。
+      s="subagent/task 作成"
+      ;;
+    *)
+      # 未知の tool: 既知の安全フィールドだけを順に試す。本文系(content等)は出さない。
+      s="$(extract_json_string "file_path")"
+      [ -z "$s" ] && s="$(extract_json_string "path")"
+      [ -z "$s" ] && s="$(extract_json_string "pattern")"
+      [ -z "$s" ] && s="$(extract_json_string "query")"
+      [ -z "$s" ] && s="$(extract_json_string "url")"
+      ;;
+  esac
+  printf '%s' "$s"
+}
+
 # 解説対象として抽出する文字列（MODE 依存）。
 extract_target() {
   case "$MODE" in
@@ -75,6 +131,11 @@ extract_target() {
       local url
       url="$(extract_url)"
       printf '%s' "$url" | sed -E 's#^https?://([^/:?#]+).*#\1#' | tr '[:upper:]' '[:lower:]'
+      ;;
+    observe)
+      # observe は tool 横断の汎用フォールバックカード(default-observe)を引くため
+      # target は tool_name にする(index.tsv の observe 行はワイルドカード . で必ずヒット)。
+      extract_tool_name
       ;;
     prompt|post-output)
       printf '%s' "$RAW_INPUT"
@@ -140,6 +201,15 @@ extract_action_text() {
     webfetch)
       text="$(printf '%s' "$RAW_INPUT" | sed -nE 's/.*"url"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -n 1)"
       label="Web アクセス"
+      ;;
+    observe)
+      # 汎用 observe: tool_name + 安全な短い入力要約（パス/パターン/クエリ等のみ・300字）。
+      local _ot _osum
+      _ot="$(extract_tool_name)"
+      [ -z "$_ot" ] && _ot="不明なツール"
+      _osum="$(observe_input_summary "$_ot" | _limit_chars 300)"
+      text="$_osum"
+      label="${_ot} を使用"
       ;;
     prompt|post-output)
       # プロンプトは先頭 300 字（F-M: head -c はバイト切り）
@@ -1166,6 +1236,12 @@ write_now_card() {
   [ -z "$body_risk" ] && body_risk="$risk_default"
   [ -z "$title" ] && title="（タイトル未設定）"
   [ -z "$icon" ] && icon="💡"
+  # observe モードでは tool_name をタイトルに前置し、汎用カードでもどの道具かが一目で分かるようにする。
+  if [ "$MODE" = "observe" ]; then
+    local _ot
+    _ot="$(extract_tool_name)"
+    [ -n "$_ot" ] && title="AI が ${_ot} を使おうとしています"
+  fi
   ts="$(date '+%Y-%m-%d %H:%M:%S')"
 
   dir="$(log_dir)"
