@@ -1,13 +1,13 @@
 #!/bin/bash
 # 6_AIコーチのキーを登録.command
-# 見守りモニターの「AIコーチ」が使う、無料の Gemini API キーを登録します。
+# 見守りモニターで安全イベントやAI回答を相談するときに使う、無料の Gemini API キーを登録します。
 # キーは ~/.ai-safety/gemini-api-key.txt に保存します（環境変数は汚しません）。
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="$(cd "$HERE/.." && pwd)"
 cd "$WORKSPACE" 2>/dev/null || true
 echo ""
-echo " AIコーチ用の無料 Gemini API キーを登録します。"
+echo " 安全イベント・AI回答相談用の無料 Gemini API キーを登録します。"
 echo ""
 echo " キーの取り方:"
 echo "   1. ブラウザで  https://aistudio.google.com/apikey  を開く"
@@ -25,6 +25,6 @@ mkdir -p "$HOME/.ai-safety"
 printf '%s' "$KEY" > "$HOME/.ai-safety/gemini-api-key.txt"
 chmod 600 "$HOME/.ai-safety/gemini-api-key.txt"
 echo ""
-echo " 登録できました。見守りモニターを開き直すと、AIコーチが使えます。"
+echo " 登録できました。見守りモニターを開き直すと、安全イベントや取得済みAI回答をAIに相談できます。"
 echo ""
 read -n 1 -s -r -p "キーを押すと閉じます..."

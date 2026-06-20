@@ -62,6 +62,12 @@ try {
     $r = Invoke-Guard $guardPost ('{"hook_event_name":"Stop","content":"' + $genericVal.Replace('"','\"') + '"}')
     if ($r.Code -eq 0) { Ok "T1: generic api_key placeholder in output -> ALLOW (exit 0)" }
     else { Ng "T1: generic placeholder still blocked (code=$($r.Code)) — over-block NOT fixed" }
+    $snap = Join-Path $logDir "latest-answer.json"
+    if ((Test-Path -LiteralPath $snap) -and ((Get-Content -LiteralPath $snap -Raw -Encoding UTF8) -match 'REDACTED:Generic sensitive assignment')) {
+        Ok "T1b: allowed Stop output writes redacted latest-answer.json"
+    } else {
+        Ng "T1b: allowed Stop output did not write redacted latest-answer.json"
+    }
 
     # --- T2: private key block in AI output → still BLOCK ---
     $r = Invoke-Guard $guardPost ('{"hook_event_name":"Stop","content":"' + $beginPk + '\nMIIxxxx"}')

@@ -18,6 +18,17 @@ try {
         Block-Action $inputObj "post-output" ("sensitive pattern in tool or AI output: " + $secret.Name) $text $policy
     }
 
+    # 回答モニター用のスナップショット保存。PostToolUse のツール出力は helper 側で除外し、
+    # Stop / AfterModel / AfterAgent など、回答本文を取れるイベントだけ latest-answer.json に残す。
+    # 保存失敗・node 不在は安全判定に影響させない。
+    try {
+        $node = Get-Command node -ErrorAction SilentlyContinue
+        $helper = Join-Path $PSScriptRoot "..\common\answer-snapshot.js"
+        if ($node -and (Test-Path -LiteralPath $helper)) {
+            $text | & $node.Source $helper *> $null
+        }
+    } catch { }
+
     Allow-Action $inputObj "post-output" "output passed policy" $text $policy
 } catch {
     Fail-Closed "post-output" $_.Exception.Message

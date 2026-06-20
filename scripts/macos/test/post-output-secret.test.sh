@@ -38,13 +38,20 @@ BEGIN_PK="-----BEGIN OPENSSH PRIVATE KEY-----"
 # （本物のキー書式は残す方針）。over-block バグの本質は「Generic sensitive assignment
 # にだけ一致する正規の技術文」が落ちる点なので、real-format に当たらない placeholder を使う。
 GENERIC_VAL='api_key: "your-placeholder-value-here"'
+GENERIC_JSON_VAL="$(printf '%s' "$GENERIC_VAL" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 # Input-side: a plain password assignment with a long value.
 PW_VAL="password=longvalue123456"
 
 # --- T1: generic assignment in AI output → ALLOW (regression for the over-block bug) ---
-run "$POST" "{\"hook_event_name\":\"Stop\",\"content\":\"${GENERIC_VAL}\"}"
+run "$POST" "{\"hook_event_name\":\"Stop\",\"content\":\"${GENERIC_JSON_VAL}\"}"
 [ "$RC" -eq 0 ] && ok "T1: generic api_key placeholder in output -> ALLOW (exit 0)" \
                 || ng "T1: generic api_key placeholder in output still blocked (rc=$RC) — over-block NOT fixed"
+SNAP="$AI_SAFE_LOG_DIR/latest-answer.json"
+if [ -f "$SNAP" ] && grep -q 'REDACTED:Generic sensitive assignment' "$SNAP" 2>/dev/null; then
+  ok "T1b: allowed Stop output writes redacted latest-answer.json"
+else
+  ng "T1b: allowed Stop output did not write redacted latest-answer.json"
+fi
 
 # --- T2: private key block in AI output → still BLOCK ---
 run "$POST" "{\"hook_event_name\":\"Stop\",\"content\":\"${BEGIN_PK}\\nMIIxxxx\"}"
