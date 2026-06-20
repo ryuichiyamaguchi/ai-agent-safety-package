@@ -25,7 +25,13 @@ try {
         $node = Get-Command node -ErrorAction SilentlyContinue
         $helper = Join-Path $PSScriptRoot "..\common\answer-snapshot.js"
         if ($node -and (Test-Path -LiteralPath $helper)) {
-            $text | & $node.Source $helper *> $null
+            $prevOutputEncoding = $OutputEncoding
+            try {
+                $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+                $text | & $node.Source $helper *> $null
+            } finally {
+                $OutputEncoding = $prevOutputEncoding
+            }
         }
     } catch { }
 

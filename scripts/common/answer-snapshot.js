@@ -14,6 +14,7 @@ const MAX_INPUT = 262144;
 const MAX_TEXT = 12000;
 const LOG_DIR = process.env.AI_SAFE_LOG_DIR || path.join(os.homedir(), '.ai-safety', 'logs');
 const OUT = path.join(LOG_DIR, 'latest-answer.json');
+const D_CLAUDE_MARKER_FRESH_MS = 12 * 60 * 60 * 1000;
 
 function readStdin() {
   try {
@@ -50,6 +51,18 @@ function shouldCapture(o) {
   if (/posttool|aftertool|pretool|beforetool|permissionrequest|userprompt/.test(ev)) return false;
   if (/stop|aftermodel|afteragent/.test(ev)) return true;
   return !!extractDirectText(o);
+}
+
+function isDClaudeSession() {
+  if (process.env.DS_CLAUDE_MODE === '1') return true;
+  try {
+    const marker = path.join(LOG_DIR, 'coach-engine');
+    const stat = fs.statSync(marker);
+    if (Date.now() - stat.mtimeMs > D_CLAUDE_MARKER_FRESH_MS) return false;
+    return fs.readFileSync(marker, 'utf8').trim() === 'd-claude';
+  } catch {
+    return false;
+  }
 }
 
 function textFromContent(v) {
@@ -175,6 +188,7 @@ function main() {
   const raw = readStdin();
   const input = parseJson(raw) || {};
   if (!shouldCapture(input)) return;
+  if (isDClaudeSession()) return;
 
   const transcriptPath = valueAt(input, ['transcript_path', 'transcriptPath']);
   const direct = extractDirectText(input);

@@ -66,6 +66,12 @@ function main() {
     assert.equal(transcriptSnapshot.transcript, true);
     assert.match(transcriptSnapshot.text, /新しい回答です/);
     assert.doesNotMatch(transcriptSnapshot.text, /古い回答/);
+
+    fs.rmSync(path.join(logDir, 'latest-answer.json'), { force: true });
+    fs.writeFileSync(path.join(logDir, 'coach-engine'), 'd-claude', 'utf8');
+    const dClaude = run({ hook_event_name: 'AfterModel', content: 'd-claude 回答' }, logDir);
+    assert.equal(dClaude.status, 0);
+    assert.equal(fs.existsSync(path.join(logDir, 'latest-answer.json')), false, 'd-claude sessions should not write AI answer snapshots');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
