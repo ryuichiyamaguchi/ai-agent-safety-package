@@ -119,10 +119,15 @@ if ($env:AI_SAFE_DRY_RUN -ne '1' -and -not (Test-Path -LiteralPath $safeCodexAut
 }
 
 # Safe Auto Mode: --auto かつ doctor の隔離チェックが green のときだけ承認を下げる。
+# Windows 方針(ユーザー承認 2026-06-22): Windows codex 0.135 の sandbox はネットワーク隔離を
+# 提供しない(Test-NetworkEgress が構造的に必ず FAIL し、かつネット接続プローブで起動前に数十秒
+# フリーズ=「オートが起動しない」の真因)。そこで Windows のオートは doctor の 'codex-fileonly'
+# (ファイル隔離 Test-WriteOutside のみ)で判定し、ネット送信の隔離は承認任せとする割り切り。
+# mac(launch-codex-safe.sh)は seatbelt がネット隔離するので従来どおり ①② で判定(変更しない)。
 # フェイルクローズ設計:
 #   (a) doctor パスが存在しない → Test-Path で弾く → untrusted
 #   (b) doctor 呼び出しで例外発生 → try/catch で捕捉 → untrusted
-#   (c) doctor がハング → Start-Job + Wait-Job -Timeout 60 で上限 60 秒 → untrusted
+#   (c) doctor がハング → Start-Job + Wait-Job -Timeout 30 で上限 30 秒 → untrusted
 #   (d) doctor が非0終了 → $LASTEXITCODE != 0 → untrusted
 # green(on-failure)は「doctor が確かに走って exit 0 を返したときだけ」。
 $approval = 'untrusted'
@@ -134,7 +139,10 @@ if ($AutoFlag -eq '--auto') {
         [Console]::Error.WriteLine("⚠ オートを有効にできません: doctor が見つかりません ($doctorPath)")
         [Console]::Error.WriteLine("  → 安全のため都度承認モードで起動します。直すには doctor を配置してください。")
     } else {
-        # doctor を Start-Job で起動しタイムアウト上限 60 秒で呼ぶ。
+        # フリーズに見えないよう「確認中」を明示する(codex sandbox を起動して実証するため数秒かかる)。
+        [Console]::Error.WriteLine("🔍 OS 隔離(ファイル金庫)を確認しています…数秒お待ちください。")
+        # doctor を Start-Job で起動しタイムアウト上限 30 秒で呼ぶ。
+        # codex-fileonly はファイル隔離のみなので 'codex'(①②)より軽く速い。
         # (b)(c) 例外・ハング どちらもフェイルクローズ。
         try {
             $isCmdFile = $doctorPath -match '\.(cmd|bat)$'
@@ -142,11 +150,11 @@ if ($AutoFlag -eq '--auto') {
                 Start-Job -ScriptBlock { & cmd.exe /c $using:doctorPath *> $null; $LASTEXITCODE }
             } else {
                 Start-Job -ScriptBlock {
-                    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $using:doctorPath -IsolationCheck codex *> $null
+                    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $using:doctorPath -IsolationCheck codex-fileonly *> $null
                     $LASTEXITCODE
                 }
             }
-            $completed = Wait-Job -Job $job -Timeout 60
+            $completed = Wait-Job -Job $job -Timeout 30
             if ($null -eq $completed) {
                 # タイムアウト (c) → フェイルクローズ
                 Stop-Job -Job $job; Remove-Job -Job $job -Force

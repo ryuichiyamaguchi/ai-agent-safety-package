@@ -33,6 +33,17 @@ if ($IsolationCheck) {
                     if ($rc -ne 0) { $rcTotal = 1 }
                 }
             }
+            'codex-fileonly' {
+                # Windows の Safe Auto Mode 専用判定。Windows codex 0.135 の sandbox は
+                # ネットワーク隔離を提供しない(AppContainer/制限ジョブで network.enabled=false が
+                # 効かない)ため、Test-NetworkEgress は構造的に必ず FAIL し、かつ codex sandbox の
+                # ネット接続プローブで起動前に数十秒フリーズする。そこで Windows のオートは
+                # ファイル隔離(Test-WriteOutside)のみで自動承認を判定する。ネットワーク送信
+                # (情報持ち出し)の隔離は codex 側で保証されない割り切り(ユーザー承認 2026-06-22)。
+                # mac(launch-codex-safe.sh)は seatbelt がネット隔離するので従来どおり 'codex'(①②)。
+                $rc = [int](Test-WriteOutside 'codex')
+                if ($rc -ne 0) { $rcTotal = 1 }
+            }
             'agy' {
                 # agy は宣言チェック④(実証ではない。spec §4 ④ / option B)。
                 $rc = [int](Test-AgyDeclaration 'agy')
