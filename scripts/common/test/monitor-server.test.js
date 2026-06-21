@@ -72,6 +72,25 @@ function latestAnswerJson() {
 }
 
 async function main() {
+  // --- 純関数: コーチに渡すコンテキスト（d-claude でも本文を送る / 本物キーだけ伏字） ---
+  // require.main ガードにより require では listen しない＝ポートを掴まず純関数だけ使える。
+  const srv = require(serverPath);
+  {
+    const dclaude = { cmd: 'Get-CimInstance Win32_OperatingSystem', label: 'PowerShell', redact: true };
+    const blk = srv.contextBlock(dclaude);
+    assert.match(blk, /Get-CimInstance Win32_OperatingSystem/, 'd-claude でもコマンド本文をコーチに送る');
+    assert.doesNotMatch(blk, /一般的な注意点として答えてください/, 'd-claude の一般論固定指示は撤廃されている');
+    assert.doesNotMatch(blk, /コマンド本文は外部に送らず伏せています/, 'd-claude の本文伏せ文言は撤廃されている');
+
+    const withKey = { cmd: 'export ANTHROPIC_API_KEY=sk-ant-' + 'A'.repeat(24), label: 'Bash', redact: true };
+    const blkKey = srv.contextBlock(withKey);
+    assert.doesNotMatch(blkKey, /sk-ant-AAAA/, '本物の API キーは伏字される');
+    assert.match(blkKey, /\[REDACTED:/, '伏字マーカーが入る');
+
+    const placeholder = { cmd: 'api_key: your-placeholder-value-here', label: 'Bash', redact: true };
+    assert.match(srv.contextBlock(placeholder), /your-placeholder-value-here/, '本物でない設定例は伏字せず全部渡す（全部まるっと）');
+  }
+
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'monitor-server-test-'));
   const env = {
     ...process.env,

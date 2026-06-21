@@ -37,6 +37,59 @@ const REFRESH_MS = Number(process.env.AI_SAFE_MONITOR_INTERVAL || 1) * 1000;
 // トークン付き URL やログを他ユーザーに読まれないよう、本プロセスが作るファイルは所有者のみ。
 try { process.umask(0o077); } catch { /* 一部環境で未サポート */ }
 
+// ---- 秘密キーの伏字（コーチに本文を送る前に、本物のキー書式だけ伏せる） ----------------
+// 方針: コマンド本文・パスはコーチ(Gemini)に「全部まるっと」渡して具体的に答えさせる。
+// ただし本物の API キー書式（policy.outputSecretRegex の本物キー 8 件）だけは伏字して、
+// 鍵が外部(Gemini)に漏れるのだけは防ぐ。Generic な「api_key: 設定例」は対象外なので、
+// uptime のような普通のコマンドや設定例の文字列は伏字されず、そのままコーチに渡る。
+function coachPolicyPath() {
+  const cands = [];
+  if (process.env.AI_SAFE_POLICY) cands.push(process.env.AI_SAFE_POLICY);
+  if (process.env.AI_SAFE_ROOT) cands.push(path.join(process.env.AI_SAFE_ROOT, 'policy', 'safety-policy.json'));
+  cands.push(path.join(process.cwd(), '.ai-safety', 'policy', 'safety-policy.json'));
+  cands.push(path.join(os.homedir(), '.ai-safety', 'policy', 'safety-policy.json'));
+  cands.push(path.join(__dirname, '..', '..', 'policy', 'safety-policy.json'));
+  cands.push(path.join(__dirname, '..', '..', '..', 'policy', 'safety-policy.json'));
+  for (const p of cands) { try { if (p && fs.existsSync(p)) return p; } catch { /* ignore */ } }
+  return '';
+}
+function coachSecretRe(pattern) {
+  let flags = 'g';
+  let pat = String(pattern || '');
+  if (pat.startsWith('(?i)')) { flags += 'i'; pat = pat.slice(4); }
+  pat = pat
+    .replace(/\[\[:space:\]\]/g, '\\s')
+    .replace(/\[\[:digit:\]\]/g, '\\d')
+    .replace(/\[\[:alpha:\]\]/g, '[A-Za-z]')
+    .replace(/\[\[:alnum:\]\]/g, '[A-Za-z0-9]');
+  try { return new RegExp(pat, flags); } catch { return null; }
+}
+let _coachSecretPatterns = null;
+function coachSecretPatterns() {
+  if (_coachSecretPatterns) return _coachSecretPatterns;
+  let list = [];
+  const p = coachPolicyPath();
+  if (p) {
+    try {
+      const policy = JSON.parse(fs.readFileSync(p, 'utf8'));
+      // 本物のキー書式のみ（Generic sensitive assignment を含まない outputSecretRegex）。
+      list = Array.isArray(policy.outputSecretRegex) ? policy.outputSecretRegex
+           : (Array.isArray(policy.secretRegex) ? policy.secretRegex : []);
+    } catch { /* policy 不在でも伏字なしで動く（後段の deny floor は別途不変） */ }
+  }
+  _coachSecretPatterns = list
+    .map((it) => ({ name: (it && it.name) || 'secret', re: coachSecretRe(it && it.pattern) }))
+    .filter((x) => x.re);
+  return _coachSecretPatterns;
+}
+function maskSecrets(text) {
+  let out = String(text || '');
+  for (const it of coachSecretPatterns()) {
+    out = out.replace(it.re, '[REDACTED:' + it.name + ']');
+  }
+  return out;
+}
+
 // ---- AI バックエンド（Gemini API を直接呼ぶ。受講者が各自の無料 API キーを用意） ----
 // 設計: コーチは「コマンドの説明・助言」だけを返す読み取り専用の相談役。claude/codex の
 // ようなエージェント CLI ではなく Gemini の generateContent を HTTPS で直接叩く＝AI は
@@ -186,20 +239,12 @@ function clip(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n) +
 const INJECTION_GUARD = gemini.INJECTION_GUARD;
 
 function contextBlock(st) {
-  // d-claude のときはコマンド本文・具体パスを Google(Gemini) に送らない。操作の種類と
-  // 注意カテゴリ（分類結果）だけを渡す＝送信先が増える分のデータ最小化（docs/90 明示）。
-  if (st.redact) {
-    return [
-      '<COMMAND>', '（このセッションは d-claude のため、コマンド本文は外部に送らず伏せています）', '</COMMAND>',
-      '<CONTEXT>',
-      '操作の種類: ' + (st.label || '不明'),
-      (st.dangers && st.dangers.length ? '自動検出された注意: ' + clip(st.dangers.join(' / '), 500) : ''),
-      '※コマンド本文と具体的なパスは伏せられています。一般的な注意点として答えてください。',
-      '</CONTEXT>',
-    ].filter(Boolean).join('\n');
-  }
+  // 「全部まるっと送る」方針: d-claude でもコマンド本文をコーチ(Gemini)に渡して具体的に
+  // 答えさせる。本物の API キー書式だけ maskSecrets で伏字し、鍵の外部漏れだけ防ぐ
+  // （uptime のような普通のコマンドや api_key: の設定例は伏字されず、そのまま渡る）。
+  // d-claude のときは UI バナー(#dredact)で「本文も Google に送られる」ことを常時明示する。
   return [
-    '<COMMAND>', clip(st.cmd, 2000), '</COMMAND>',
+    '<COMMAND>', maskSecrets(clip(st.cmd, 2000)), '</COMMAND>',
     '<CONTEXT>',
     '操作の種類: ' + (st.label || '不明'),
     (st.whatdo ? '自動解析の結果: ' + clip(st.whatdo, 500) : ''),
@@ -362,14 +407,20 @@ process.on('SIGINT', () => { cleanup(); process.exit(0); });
 process.on('SIGTERM', () => { cleanup(); process.exit(0); });
 process.on('exit', cleanup);
 
-server.listen(0, HOST, () => {
-  const port = server.address().port;
-  const url = 'http://' + HOST + ':' + port + '/?t=' + TOKEN;
-  // ランチャーがこの行(または URL_FILE)を読んで URL をブラウザで開く。
-  console.log('AI_SAFE_MONITOR_URL=' + url);
-  // dir 0700 / URL ファイル 0600（トークン漏れ防止）。
-  try { fs.mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 }); fs.writeFileSync(URL_FILE, url, { mode: 0o600 }); } catch { /* ignore */ }
-});
+// require されたとき（ユニットテスト）は listen しない＝ポートを掴まず純関数だけ使える。
+if (require.main === module) {
+  server.listen(0, HOST, () => {
+    const port = server.address().port;
+    const url = 'http://' + HOST + ':' + port + '/?t=' + TOKEN;
+    // ランチャーがこの行(または URL_FILE)を読んで URL をブラウザで開く。
+    console.log('AI_SAFE_MONITOR_URL=' + url);
+    // dir 0700 / URL ファイル 0600（トークン漏れ防止）。
+    try { fs.mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 }); fs.writeFileSync(URL_FILE, url, { mode: 0o600 }); } catch { /* ignore */ }
+  });
+}
+
+// テスト用に純関数を公開（require.main === module の起動経路には影響しない）。
+module.exports = { contextBlock, answerContextBlock, maskSecrets, hasCoachContext, coachRedact };
 
 // ---- コーチ UI（1ファイル完結。AI 出力は textContent で表示=XSS安全） -----
 function renderPage() {
@@ -430,7 +481,7 @@ button:disabled{opacity:.5;cursor:default}
   <h2 id="coach-title">🧑‍🏫 安全イベントが出た時だけ相談する</h2>
   <div id="target-note" class="disclaim">検索や会話の中身は表示されない場合があります。この画面は、危険なコマンド実行・ファイル書き込み・外部アクセスなどの安全イベントを確認するためのものです。</div>
   <div id="hi" class="hibanner" style="display:none">⚠️ 自動判定は「高リスク」です。AI が何と言っても、基本は「許可しない」のが安全です。</div>
-  <div id="dredact" class="disclaim" style="display:none">ℹ️ これは d-claude（DeepSeek 版）のセッションです。AI コーチに相談すると、操作の種類だけが Google(Gemini) にも送られます（コマンド本文・パスは送らず伏せます）。</div>
+  <div id="dredact" class="disclaim" style="display:none">ℹ️ これは d-claude（DeepSeek 版）のセッションです。AI コーチに相談すると、表示中のコマンド本文も Google(Gemini) に送られます（API キーなどの秘密の形だけ自動で伏字）。機微情報を含むコマンドは相談しないでください。</div>
   <div class="btns">
     <button id="b-explain">このコマンドをやさしく説明して</button>
     <button id="b-ok">これ、許可して大丈夫？</button>
