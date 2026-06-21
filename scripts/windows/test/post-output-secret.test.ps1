@@ -1,4 +1,4 @@
-# post-output-secret.test.ps1 — output over-block fix の回帰テスト (Windows)。
+﻿# post-output-secret.test.ps1 — output over-block fix の回帰テスト (Windows)。
 # 検証:
 #   - guard-post-output は Find-OutputSecretMatch（outputSecretRegex = Generic sensitive
 #     assignment 除外）で走査する。real-format に当たらない汎用代入 placeholder は ALLOW(0)。

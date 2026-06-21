@@ -1,4 +1,4 @@
-param()
+﻿param()
 
 # guard-observe.ps1 — catch-all 可視化フック（案A': catch-all observe + per-tool deny）。
 # mac の guard-observe.sh と対称。

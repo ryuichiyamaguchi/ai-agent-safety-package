@@ -1,4 +1,4 @@
-# observe-coverage.test.ps1 — catch-all observe フック (案A') の網羅テスト (Windows)。
+﻿# observe-coverage.test.ps1 — catch-all observe フック (案A') の網羅テスト (Windows)。
 # 検証: WebSearch/Read/Glob/Grep → カードが書かれ tool 名 + 入力要約が見える。
 #       Bash/PowerShell → カードを書かない（専用ガードが所有）。
 #       observe は permissionDecision を絶対に出さず、ゴミ入力でも exit 0（fail-open）。
