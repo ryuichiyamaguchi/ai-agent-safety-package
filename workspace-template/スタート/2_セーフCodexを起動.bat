@@ -1,15 +1,15 @@
 @echo off
-chcp 65001 >nul
+chcp 932 >nul
 setlocal
-REM ã‚»ãƒ¼ãƒ• Codex èµ·å‹•ï¼ˆè–„ã„ãƒ©ãƒƒãƒ‘ãƒ¼ï¼‰ã€‚æ—¢å­˜ launch-codex-safe.ps1 ã‚’å‘¼ã¶ã ã‘ã€‚
+REM ƒZ[ƒt Codex ‹N“®i”–‚¢ƒ‰ƒbƒp[jBŠù‘¶ launch-codex-safe.ps1 ‚ðŒÄ‚Ô‚¾‚¯B
 set "HERE=%~dp0"
 for %%I in ("%HERE%..") do set "WORKSPACE=%%~fI"
 set "TARGET=%WORKSPACE%\.ai-safety\hooks\windows\launch-codex-safe.ps1"
 if not exist "%TARGET%" (
-  echo èµ·å‹•ã‚¹ã‚¯ãƒªãƒ—ãƒˆãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“: %TARGET%
-  echo å…ˆã«ã€Œ1_å®‰å…¨ãƒ‘ãƒƒã‚±ãƒ¼ã‚¸ã‚’æº–å‚™ã€ã‚’å®Ÿè¡Œã—ã¦ãã ã•ã„ã€‚
+  echo ‹N“®ƒXƒNƒŠƒvƒg‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñ: %TARGET%
+  echo æ‚Éu1_ˆÀ‘SƒpƒbƒP[ƒW‚ð€”õv‚ðŽÀs‚µ‚Ä‚­‚¾‚³‚¢B
   pause
   exit /b 1
 )
 powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%"
-if errorlevel 1 ( echo å•é¡ŒãŒèµ·ãã¾ã—ãŸã€‚ & pause )
+if errorlevel 1 ( echo –â‘è‚ª‹N‚«‚Ü‚µ‚½B & pause )

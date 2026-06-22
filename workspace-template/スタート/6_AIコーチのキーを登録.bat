@@ -1,25 +1,25 @@
 @echo off
-chcp 65001 >nul
+chcp 932 >nul
 setlocal
 set "HERE=%~dp0"
 for %%I in ("%HERE%..") do set "WORKSPACE=%%~fI"
 :: ============================================================
-:: 6_AIコーチのキーを登録.bat
-:: 見守りモニターで安全イベントやAI回答を相談するときに使う、無料の Gemini API キーを登録します。
-:: キーはこの PC のあなたのフォルダ内のファイルに保存します(環境変数は汚しません)。
+:: 6_AI�R�[�`�̃L�[��o�^.bat
+:: ����胂�j�^�[�ň��S�C�x���g��AI�񓚂𑊒k����Ƃ��Ɏg���A������ Gemini API �L�[��o�^���܂��B
+:: �L�[�͂��� PC �̂��Ȃ��̃t�H���_���̃t�@�C���ɕۑ����܂�(���ϐ��͉����܂���)�B
 :: ============================================================
 echo.
-echo  安全イベント・AI回答相談用の無料 Gemini API キーを登録します。
+echo  ���S�C�x���g�EAI�񓚑��k�p�̖��� Gemini API �L�[��o�^���܂��B
 echo.
-echo  キーの取り方:
-echo    1. ブラウザで  https://aistudio.google.com/apikey  を開く
-echo    2. Google でログインして「Create API key(APIキーを作成)」
-echo    3. 表示されたキーをコピー
+echo  �L�[�̎���:
+echo    1. �u���E�U��  https://aistudio.google.com/apikey  ���J��
+echo    2. Google �Ń��O�C�����āuCreate API key(API�L�[���쐬)�v
+echo    3. �\�����ꂽ�L�[���R�s�[
 echo.
-set /p KEY=APIキーを貼り付けて Enter: 
+set /p KEY=API�L�[��\��t���� Enter: 
 if "%KEY%"=="" (
   echo.
-  echo 何も入力されませんでした。中止します。
+  echo �������͂���܂���ł����B���~���܂��B
   pause
   exit /b 1
 )
@@ -27,12 +27,12 @@ set "GEMINI_KEY=%KEY%"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$d=Join-Path $env:USERPROFILE '.ai-safety'; [void](New-Item -ItemType Directory -Force $d); Set-Content -NoNewline -Encoding ascii -Path (Join-Path $d 'gemini-api-key.txt') -Value $env:GEMINI_KEY"
 if errorlevel 1 (
   echo.
-  echo 保存に失敗しました。もう一度お試しください。
+  echo �ۑ��Ɏ��s���܂����B������x���������������B
   pause
   exit /b 1
 )
 echo.
-echo  登録できました。
-echo  見守りモニターを開き直すと、安全イベントや取得済みAI回答をAIに相談できます。
+echo  �o�^�ł��܂����B
+echo  ����胂�j�^�[���J�������ƁA���S�C�x���g��擾�ς�AI�񓚂�AI�ɑ��k�ł��܂��B
 echo.
 pause

@@ -1,19 +1,19 @@
 @echo off
-chcp 65001 >nul
+chcp 932 >nul
 setlocal
-REM セーフ Codex オート起動（薄いラッパー）。launch-codex-safe.ps1 を --auto 付きで呼ぶだけ。
-REM doctor の隔離チェック(金庫)が green のときだけ承認プロンプトが省かれる。
-REM 確認できない場合は launcher が理由を表示して通常の都度承認モードで起動する(フェイルクローズ)。
+REM �Z�[�t Codex �I�[�g�N���i�������b�p�[�j�Blaunch-codex-safe.ps1 �� --auto �t���ŌĂԂ����B
+REM doctor �̊u���`�F�b�N(����)�� green �̂Ƃ��������F�v�����v�g���Ȃ����B
+REM �m�F�ł��Ȃ��ꍇ�� launcher �����R��\�����Ēʏ�̓s�x���F���[�h�ŋN������(�t�F�C���N���[�Y)�B
 set "HERE=%~dp0"
 for %%I in ("%HERE%..") do set "WORKSPACE=%%~fI"
 set "TARGET=%WORKSPACE%\.ai-safety\hooks\windows\launch-codex-safe.ps1"
 if not exist "%TARGET%" (
-  echo 起動スクリプトが見つかりません: %TARGET%
-  echo 先に「1_安全パッケージを準備」を実行してください。
+  echo �N���X�N���v�g��������܂���: %TARGET%
+  echo ��Ɂu1_���S�p�b�P�[�W�������v�����s���Ă��������B
   pause
   exit /b 1
 )
-echo オートモード: 安全確認（金庫）が取れたときだけ、承認の手間を省いて起動します。
-echo 確認できない場合は、自動で通常の都度承認モードになります。
+echo �I�[�g���[�h: ���S�m�F�i���Ɂj����ꂽ�Ƃ������A���F�̎�Ԃ��Ȃ��ċN�����܂��B
+echo �m�F�ł��Ȃ��ꍇ�́A�����Œʏ�̓s�x���F���[�h�ɂȂ�܂��B
 powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -AutoFlag "--auto"
-if errorlevel 1 ( echo 問題が起きました。 & pause )
+if errorlevel 1 ( echo ��肪�N���܂����B & pause )
