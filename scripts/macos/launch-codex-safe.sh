@@ -92,8 +92,10 @@ if [ "${AI_SAFE_DRY_RUN:-}" != "1" ]; then
   fi
 fi
 
-# Safe Auto Mode: --auto かつ doctor の隔離チェックが green のときだけ承認を下げる。
-# フェイルクローズ: doctor が非0(HOLD/FAIL)なら理由を表示して従来の untrusted に留まる。
+# Safe Auto Mode: --auto なら承認を on-failure に下げて自走させる。
+# 危険コマンドは PreToolUse hook(guard-bash) が approval 非依存で exit2 deny するため、
+# OS 隔離(egress)の実証可否に関わらず自走してよい(診断 2026-06-26 §4 で実証)。
+# 隔離チェックは実行して結果を「開示」するのみ(従来の fail-close=untrusted 据え置きは廃止)。
 approval="untrusted"
 if [ "$auto" -eq 1 ]; then
   doctor="${AI_SAFE_DOCTOR:-}"
@@ -114,12 +116,12 @@ if [ "$auto" -eq 1 ]; then
   else
     isolation_ok() { "$doctor" --isolation-check codex >/dev/null 2>&1; }
   fi
+  # --auto は隔離結果に関わらず on-failure(自走)。危険は hook(guard-bash) が止める。
+  approval="on-failure"
   if isolation_ok; then
-    approval="on-failure"
+    echo "🔒 OS隔離(金庫)を確認: ワークスペース外への書込とネット送信の遮断が有効です。" >&2
   else
-    echo "⚠ オートを有効にできません: OS 隔離(金庫)を確認できませんでした。" >&2
-    echo "  → 安全のため都度承認モードで起動します。直すには doctor を実行してください。" >&2
-    approval="untrusted"
+    echo "⚠ ネット遮断はOSで未実証です(自走は継続)。危険なコマンドは安全フックがブロックします。" >&2
   fi
 fi
 

@@ -118,32 +118,19 @@ if ($env:AI_SAFE_DRY_RUN -ne '1' -and -not (Test-Path -LiteralPath $safeCodexAut
     }
 }
 
-# Safe Auto Mode: --auto かつ doctor の隔離チェックが green のときだけ承認を下げる。
-# Windows 方針(ユーザー承認 2026-06-22): Windows codex 0.135 の sandbox はネットワーク隔離を
-# 提供しない(Test-NetworkEgress が構造的に必ず FAIL し、かつネット接続プローブで起動前に数十秒
-# フリーズ=「オートが起動しない」の真因)。そこで Windows のオートは doctor の 'codex-fileonly'
-# (ファイル隔離 Test-WriteOutside のみ)で判定し、ネット送信の隔離は承認任せとする割り切り。
-# mac(launch-codex-safe.sh)は seatbelt がネット隔離するので従来どおり ①② で判定(変更しない)。
-# フェイルクローズ設計:
-#   (a) doctor パスが存在しない → Test-Path で弾く → untrusted
-#   (b) doctor 呼び出しで例外発生 → try/catch で捕捉 → untrusted
-#   (c) doctor がハング → Start-Job + Wait-Job -Timeout 30 で上限 30 秒 → untrusted
-#   (d) doctor が非0終了 → $LASTEXITCODE != 0 → untrusted
-# green(on-failure)は「doctor が確かに走って exit 0 を返したときだけ」。
+# Safe Auto Mode: --auto なら承認を on-failure に下げて自走させる。
+# 危険コマンドは PreToolUse hook(guard-bash) が approval 非依存で exit2 deny するため、
+# OS 隔離(egress)の実証可否に関わらず自走してよい(診断 2026-06-26 §4 で実証)。
+# Windows codex 0.135 の sandbox はネット隔離を提供しない(Test-NetworkEgress が構造的に FAIL)
+# ため従来は永久 untrusted=「ターン1/3」だった。これを廃し、隔離チェックは結果を「開示」のみ行う。
 $approval = 'untrusted'
 if ($AutoFlag -eq '--auto') {
+    # --auto は隔離結果に関わらず on-failure(自走)。危険は hook(guard-bash) が止める。
+    $approval = 'on-failure'
     $doctorPath = if ($env:AI_SAFE_DOCTOR) { $env:AI_SAFE_DOCTOR } else { Join-Path $PSScriptRoot 'doctor.ps1' }
     $isolationOk = $false
-    if (-not (Test-Path -LiteralPath $doctorPath -ErrorAction SilentlyContinue)) {
-        # (a) doctor ファイル不在 → フェイルクローズ
-        [Console]::Error.WriteLine("⚠ オートを有効にできません: doctor が見つかりません ($doctorPath)")
-        [Console]::Error.WriteLine("  → 安全のため都度承認モードで起動します。直すには doctor を配置してください。")
-    } else {
-        # フリーズに見えないよう「確認中」を明示する(codex sandbox を起動して実証するため数秒かかる)。
+    if (Test-Path -LiteralPath $doctorPath -ErrorAction SilentlyContinue) {
         [Console]::Error.WriteLine("🔍 OS 隔離(ファイル金庫)を確認しています…数秒お待ちください。")
-        # doctor を Start-Job で起動しタイムアウト上限 30 秒で呼ぶ。
-        # codex-fileonly はファイル隔離のみなので 'codex'(①②)より軽く速い。
-        # (b)(c) 例外・ハング どちらもフェイルクローズ。
         try {
             $isCmdFile = $doctorPath -match '\.(cmd|bat)$'
             $job = if ($isCmdFile) {
@@ -156,31 +143,20 @@ if ($AutoFlag -eq '--auto') {
             }
             $completed = Wait-Job -Job $job -Timeout 30
             if ($null -eq $completed) {
-                # タイムアウト (c) → フェイルクローズ
                 Stop-Job -Job $job; Remove-Job -Job $job -Force
-                [Console]::Error.WriteLine("⚠ オートを有効にできません: doctor が 60 秒以内に応答しませんでした。")
-                [Console]::Error.WriteLine("  → 安全のため都度承認モードで起動します。直すには doctor を実行してください。")
             } else {
                 $jobRc = Receive-Job -Job $job
                 Remove-Job -Job $job -Force
-                # M-3: Receive-Job は配列を返すことがあるため末尾要素を整数として取得する。
-                # フェイルクローズ方向: 末尾が 0 のときだけ green に解放する。
-                if (@($jobRc)[-1] -eq 0) {
-                    $isolationOk = $true
-                } else {
-                    # (d) 非0終了 → フェイルクローズ
-                    [Console]::Error.WriteLine("⚠ オートを有効にできません: OS 隔離(金庫)を確認できませんでした。")
-                    [Console]::Error.WriteLine("  → 安全のため都度承認モードで起動します。直すには doctor を実行してください。")
-                }
+                if (@($jobRc)[-1] -eq 0) { $isolationOk = $true }
             }
         } catch {
-            # (b) 例外 → フェイルクローズ
-            [Console]::Error.WriteLine("⚠ オートを有効にできません: doctor 呼び出しでエラーが発生しました: $($_.Exception.Message)")
-            [Console]::Error.WriteLine("  → 安全のため都度承認モードで起動します。直すには doctor を実行してください。")
+            $isolationOk = $false
         }
     }
     if ($isolationOk) {
-        $approval = 'on-failure'
+        [Console]::Error.WriteLine("🔒 OS隔離(金庫)を確認: ワークスペース外への書込を遮断しています。")
+    } else {
+        [Console]::Error.WriteLine("⚠ ネット遮断はOSで未実証です(自走は継続)。危険なコマンドは安全フックがブロックします。")
     }
 }
 
