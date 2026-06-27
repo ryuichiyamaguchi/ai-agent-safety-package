@@ -35,6 +35,10 @@ agy の設定は `~/.gemini/antigravity-cli/settings.json` という **ユーザ
 - **v1.3.1 で受講者環境にて実機再検証** する予定
 - キーが無視された場合も、launcher 強制の `--sandbox` と agy 1.0.1 の `proceed-in-sandbox` モードが防御として機能する
 
+## 見守りモニター（コーチ解説）は agy 対象外
+
+本パッケージの見守りモニターのコーチ解説・追問は `claude` / `codex` 専用です。agy は hook の注入点を持たない別系統のため、モニターに安全イベントもコーチ解説も表示されません。agy は本 README の `--sandbox` ＋推奨設定で守る設計（hook ベースの claude/codex とは別防御系統）です。
+
 ## 関連ドキュメント
 
 - `docs/04_Cursor_でCodexとGeminiを起動.md` — Day3 ハンズオン（agy 並立対応）

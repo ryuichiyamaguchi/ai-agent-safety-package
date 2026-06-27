@@ -595,7 +595,7 @@
             <li><span class="fname">4_セーフAntiGravityを起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … AntiGravity を安全モードで動かす</li>
           </ol>
 
-          <p class="muted">慣れてきたら：<span class="fname">（上級）3_セーフCodexをオートで起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … 安全確認（金庫）が取れたときだけ、承認の手間を省いて Codex を動かします。確認できないときは自動でいつもの都度承認モードになります。</p>
+          <p class="muted">慣れてきたら：<span class="fname">（上級）3_セーフCodexをオートで起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … 承認の手間を省いて Codex を動かします。金庫（OS隔離）が確認できたときはその旨を表示し、確認できないときも自走は続けます（危険なコマンドは安全ガードが止めます）。</p>
 
           <div class="meta">
             <div class="row why"><span class="k">なぜ</span><span>「安全モード」で起動することで、危険な操作にガードがかかった状態でAIを使えます。</span></div>
@@ -631,6 +631,8 @@
             <div class="row why"><span class="k">なぜ</span><span>危険なコマンド実行・ファイル書き込み・ブロック理由を、横の画面で確認できると安心だからです。</span></div>
             <div class="row"><span class="k">何が起きる</span><span><b>ブラウザ</b>が開き、安全イベントとAI回答の画面が表示されます。最初は「待機中」です。危険操作や確認が必要な操作が出ると、自動で内容が切り替わります。AI回答は、取得できる環境でだけ表示されます。</span></div>
           </div>
+
+          <p class="muted" style="font-size:13px;">※ 見守りモニターのコーチ解説は <b>Codex / Claude</b> 用です。<b>AntiGravity</b> は別のしくみ（OS隔離）で守るため、モニターには表示されません。</p>
 
           <details class="help">
             <summary><span class="chev" aria-hidden="true">▸</span> うまくいかない時（クリックで開く）</summary>
