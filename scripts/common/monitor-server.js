@@ -152,7 +152,7 @@ function readState() {
     label: pickOne(html, /<div class="action-label">([\s\S]*?)<\/div>/),
     whatdo: pickOne(html, /<p class="whatdo-body">([\s\S]*?)<\/p>/),
     dangers: pickAll(html, /<p class="whatdo-danger">([\s\S]*?)<\/p>/g),
-    events: readEvents(8),
+    events: readEvents(40),
     hasCard: html.indexOf('class="action-cmd"') !== -1,
     redact: coachRedact(),
     answer: readAnswer(),
@@ -225,7 +225,7 @@ function readEvents(n) {
     const f = path.join(LOG_DIR, 'events-' + localDate() + '.jsonl');
     const lines = fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean);
     return lines.slice(-n).reverse().map((l) => {
-      try { const o = JSON.parse(l); return { ts: o.ts, mode: o.mode, decision: o.decision, reason: o.reason }; }
+      try { const o = JSON.parse(l); return { ts: o.ts, mode: o.mode, decision: o.decision, reason: o.reason, observed: o.observed }; }
       catch { return null; }
     }).filter(Boolean);
   } catch { return []; }
@@ -459,9 +459,18 @@ button:disabled{opacity:.5;cursor:default}
 .answer{margin-top:12px;white-space:pre-wrap;background:#0d0f13;border-radius:8px;padding:12px;min-height:1.5em;border:1px solid #222}
 .disclaim{font-size:12px;color:#e0b341;margin-top:10px}
 .hibanner{background:#3a1715;border:1px solid #e5534b;color:#ffb3ad;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-weight:700}
-.events{margin-top:16px;font-size:12px;opacity:.8}
-.events table{border-collapse:collapse;width:100%}
-.events td{border-top:1px solid #222;padding:4px 6px}
+.events{margin:0 0 16px}
+.events h2{font-size:16px;margin:0 0 8px;color:#9ad}
+.events .sub{font-size:12px;opacity:.6;margin:0 0 8px}
+.events table{border-collapse:collapse;width:100%;font-size:13px}
+.events th{text-align:left;color:#9ad;border-bottom:1px solid #333;padding:6px;font-size:12px;opacity:.85}
+.events td{border-top:1px solid #222;padding:6px;vertical-align:top}
+.events tr.block td,.events tr.high td{background:#2a1718}
+.events tr.allow td{background:#13201a}
+.events .ev-time{white-space:nowrap;opacity:.6;font-size:11px}
+.events .ev-dec{white-space:nowrap;font-weight:700}
+.events .ev-cmd{font-family:monospace,'Courier New';color:#f0c080;word-break:break-all;overflow-wrap:anywhere}
+.events .ev-reason{opacity:.7;font-size:12px}
 .muted{opacity:.6}
 </style></head>
 <body><div class="wrap">
@@ -475,6 +484,12 @@ button:disabled{opacity:.5;cursor:default}
 </div>
 <div id="answer-panel" class="panel" hidden>
   <div id="answer-card" class="card wait"><div class="ctitle">AI回答は未取得です</div><div class="cmeta">回答本文を hook から取得できた時だけ、ここに表示されます。</div></div>
+</div>
+
+<div class="events">
+  <h2>🔔 直近の安全イベント</h2>
+  <p class="sub">新しい順・消えません。連続しても全部ここに残ります（最大40件）。危険＝赤／許可＝緑。</p>
+  <table><thead><tr><th>時刻</th><th>判定</th><th>種別</th><th>内容・理由</th></tr></thead><tbody id="events-body"></tbody></table>
 </div>
 
 <div class="coach">
@@ -494,7 +509,6 @@ button:disabled{opacity:.5;cursor:default}
   <div class="disclaim">⚠️ Gemini の回答は「参考」です。安全イベントや AI回答の本文を外部の Gemini に送って相談します。あやしい時は実行・採用しないのが安全です。</div>
 </div>
 
-<div class="events"><div class="muted">直近の出来事</div><table id="events"></table></div>
 </div>
 <script>
 const T = new URLSearchParams(location.search).get('t');
@@ -505,6 +519,17 @@ let activeTarget = 'event';
 let currentState = null;
 
 function riskClass(meta){ if(/risk=high/.test(meta))return'high'; if(/risk=medium/.test(meta))return'medium'; return ''; }
+
+function summarizeObserved(observed){
+  if(!observed) return {tool:'', detail:''};
+  try{
+    const o=JSON.parse(observed);
+    const tool=o.tool_name||o.hook_event_name||'';
+    const ti=o.tool_input||{};
+    const detail=ti.command||ti.url||ti.file_path||ti.path||o.prompt||ti.prompt||'';
+    return {tool:String(tool), detail:String(detail)};
+  }catch(e){ return {tool:'', detail:String(observed).slice(0,300)}; }
+}
 
 function setTarget(target){
   activeTarget = target === 'answer' ? 'answer' : 'event';
@@ -608,8 +633,23 @@ async function poll(){
     if(changed){ lastCmd=s.cmd; lastAnswerText=answerText; updateCoachControls(s, true); }
     else { updateCoachControls(s, false); }
     // events
-    const tb=$('events'); tb.innerHTML='';
-    (s.events||[]).forEach(e=>{ const tr=document.createElement('tr'); const icon=e.decision==='block'?'⛔':(e.decision==='allow'?'✅':'•'); [ (e.ts||'').replace('T',' ').replace('Z',''), icon+' '+(e.decision||''), e.mode||'', e.reason||'' ].forEach(v=>{const td=document.createElement('td');td.textContent=v;tr.append(td);}); tb.append(tr); });
+    const tb=$('events-body'); tb.innerHTML='';
+    (s.events||[]).forEach(e=>{
+      const tr=document.createElement('tr');
+      const dec=e.decision||'';
+      const high=/risk=high/.test((e.reason||'')+' '+(e.mode||''));
+      tr.className = dec==='block'?'block':(high?'high':(dec==='allow'?'allow':''));
+      const icon=dec==='block'?'⛔':(dec==='allow'?'✅':'•');
+      const sm=summarizeObserved(e.observed);
+      const tdTime=document.createElement('td'); tdTime.className='ev-time'; tdTime.textContent=(e.ts||'').replace('T',' ').replace('Z',''); tr.append(tdTime);
+      const tdDec=document.createElement('td'); tdDec.className='ev-dec'; tdDec.textContent=icon+' '+dec; tr.append(tdDec);
+      const tdTool=document.createElement('td'); tdTool.textContent=sm.tool||e.mode||''; tr.append(tdTool);
+      const tdBody=document.createElement('td');
+      const cmd=document.createElement('div'); cmd.className='ev-cmd'; cmd.textContent=sm.detail||'(内容なし)'; tdBody.append(cmd);
+      if(e.reason){ const rs=document.createElement('div'); rs.className='ev-reason'; rs.textContent=e.reason; tdBody.append(rs); }
+      tr.append(tdBody);
+      tb.append(tr);
+    });
   }catch(e){}
 }
 
