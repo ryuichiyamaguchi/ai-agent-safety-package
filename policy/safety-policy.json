@@ -86,7 +86,7 @@
     "(?i)\\b(git\\s+push|npm\\s+publish|twine\\s+upload)\\b",
     "(?i)\\b(env|printenv|set)\\b.*(KEY|TOKEN|SECRET|PASSWORD)",
     "(?i)\\b(Get-ChildItem|gci|dir)\\s+Env:",
-    "(?i)\\b(python3?|node|nodejs|ruby|perl|php)\\b.*\\s(-c|-e|-E|-p|--eval|-r)[\\s'\\\"=].*(socket|urllib|urlopen|requests\\.|httplib|http\\.client|httpx|open-uri|Net::HTTP|LWP|file_get_contents|fsockopen|curl_init|create_connection|getaddrinfo|XMLHttpRequest|fetch\\(|https?://)"
+    "(?i)\\b(python3?|node|nodejs|ruby|perl|php)\\b.*\\s(-c|-e|-E|-p|--eval|-r)[\\s \t'\\\"=].*(socket|urllib|urlopen|requests\\.|httplib|http\\.client|httpx|open-uri|Net::HTTP|LWP|file_get_contents|fsockopen|curl_init|create_connection|getaddrinfo|XMLHttpRequest|fetch\\(|https?://)"
   ],
   "generatedCodeDenyRegex": [
     "(?i)open\\s*\\(\\s*['\\\"][^'\\\"]*[.]env",

