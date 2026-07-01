@@ -269,38 +269,16 @@ if ($Platform -eq 'win') {
 if ($InstallGlobalClaudeSettings) {
     $globalSrc = Join-Path $packageRoot "configs\claude\settings.windows.json"
     $globalTarget = Join-Path $HOME ".claude\settings.json"
-    # M16: 既存の global Claude 設定は他プロジェクトでも使われている可能性が高い。
-    # バックアップは取るが、上書き前に必ず diff を見せて y/n 確認する。
-    if (Test-Path -LiteralPath $globalTarget) {
-        $srcHash = (Get-FileHash -LiteralPath $globalSrc -Algorithm SHA256).Hash
-        $dstHash = (Get-FileHash -LiteralPath $globalTarget -Algorithm SHA256).Hash
-        if ($srcHash -eq $dstHash) {
-            Write-Host "Global Claude settings.json already matches package version; skipping."
-        } else {
-            Write-Host ("Existing global Claude settings found: " + $globalTarget)
-            Write-Host "----- diff (current -> package) -----"
-            $diff = Compare-Object `
-                -ReferenceObject (Get-Content -LiteralPath $globalTarget) `
-                -DifferenceObject (Get-Content -LiteralPath $globalSrc)
-            if ($diff) { $diff | Format-Table -AutoSize | Out-Host }
-            Write-Host "-------------------------------------"
-            $canPrompt = [Environment]::UserInteractive -and $Host.UI -and $Host.UI.RawUI
-            if ($canPrompt) {
-                $yn = Read-Host "Overwrite global ~/.claude/settings.json? [y/N]"
-                if ($yn -match '^[yY]$') {
-                    Copy-WithBackup $globalSrc $globalTarget
-                } else {
-                    Write-Host "Skipped global Claude settings install."
-                }
-            } else {
-                Write-Warning "Non-interactive shell: skipped global Claude settings install (set AI_SAFETY_STRICT=1 to force overwrite)."
-                if ($env:AI_SAFETY_STRICT -eq '1') {
-                    Copy-WithBackup $globalSrc $globalTarget
-                }
-            }
-        }
+    $denyJs = Join-Path $packageRoot "scripts\common\apply-global-deny.js"
+    # A案 (2026-07): settings を丸ごとコピーせず、permissions.deny だけを union マージする。
+    # 丸ごとコピーは hook が ${CLAUDE_PROJECT_DIR}\.ai-safety を探し、そのフォルダが無い場所で
+    # 全 Bash が exit2 ブロックになる落とし穴があったため廃止。既存の hooks/env/allow/ask は不変。
+    if (Get-Command node -ErrorAction SilentlyContinue) {
+        Write-Host "Merging package deny rules into global ~/.claude/settings.json (既存の hooks/env は不変)..."
+        node $denyJs $globalSrc $globalTarget
+        if ($LASTEXITCODE -ne 0) { Write-Warning "global deny merge failed (skipped)." }
     } else {
-        Copy-WithBackup $globalSrc $globalTarget
+        Write-Warning "node not found; skipped global Claude deny merge (Node.js が必要です)."
     }
 }
 

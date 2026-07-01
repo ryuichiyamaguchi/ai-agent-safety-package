@@ -210,32 +210,15 @@ fi
 if [ "$install_global_claude" = "--global-claude" ]; then
   global_target="$HOME/.claude/settings.json"
   global_src="$package_root/configs/claude/settings.mac.json"
-  # M16: 既存の global Claude 設定は他プロジェクトでも使われている可能性が高い。
-  # バックアップは取るが、上書き前に必ず diff を見せて y/n 確認する。
-  if [ -f "$global_target" ]; then
-    if cmp -s "$global_target" "$global_src"; then
-      echo "Global Claude settings.json already matches package version; skipping."
-    else
-      echo "Existing global Claude settings found: $global_target"
-      echo "----- diff (current -> package) -----"
-      diff -u "$global_target" "$global_src" || true
-      echo "-------------------------------------"
-      if [ -t 0 ]; then
-        printf "Overwrite global ~/.claude/settings.json? [y/N] "
-        read -r yn
-        case "$yn" in
-          y|Y) copy_with_backup "$global_src" "$global_target" ;;
-          *)   echo "Skipped global Claude settings install." ;;
-        esac
-      else
-        echo "Non-interactive shell: skipped global Claude settings install (set AI_SAFETY_STRICT=1 to force overwrite)." >&2
-        if [ "${AI_SAFETY_STRICT:-0}" = "1" ]; then
-          copy_with_backup "$global_src" "$global_target"
-        fi
-      fi
-    fi
+  deny_js="$package_root/scripts/common/apply-global-deny.js"
+  # A案 (2026-07): settings を丸ごとコピーせず、permissions.deny だけを union マージする。
+  # 丸ごとコピーは hook が ${CLAUDE_PROJECT_DIR}/.ai-safety を探し、そのフォルダが無い場所で
+  # 全 Bash が exit2 ブロックになる落とし穴があったため廃止。既存の hooks/env/allow/ask は不変。
+  if command -v node >/dev/null 2>&1; then
+    echo "Merging package deny rules into global ~/.claude/settings.json (既存の hooks/env は不変)..."
+    node "$deny_js" "$global_src" "$global_target" || echo "global deny merge failed (skipped)." >&2
   else
-    copy_with_backup "$global_src" "$global_target"
+    echo "node not found; skipped global Claude deny merge (Node.js が必要です)." >&2
   fi
 fi
 
