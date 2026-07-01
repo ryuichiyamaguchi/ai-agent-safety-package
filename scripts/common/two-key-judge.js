@@ -29,6 +29,14 @@ const DEFAULT_TIMEOUT_MS = 8000;
 const MAX_COMMAND_CHARS = 2000;
 const MAX_CWD_CHARS = 400;
 
+// v1.12.0: 2 鍵を非対称にする。proposer は軽量モデルで速く、verifier（懐疑役）は上位モデルで
+// 精度を取る。verifier は thinking 系で応答が遅めのためタイムアウトも長めに取る（guard 側の
+// 全体タイムアウトは 30s に拡張済み）。429/404 時のフォールバックは gemini-client.runAI が担う。
+const PROPOSER_MODEL = process.env.AI_SAFE_JUDGE_MODEL_PROPOSER || 'gemini-3.1-flash-lite';
+const VERIFIER_MODEL = process.env.AI_SAFE_JUDGE_MODEL_VERIFIER || 'gemini-3.5-flash';
+const VERIFIER_TIMEOUT_MS = Number(process.env.AI_SAFE_ASSIST_TIMEOUT_VERIFIER) > 0
+  ? Number(process.env.AI_SAFE_ASSIST_TIMEOUT_VERIFIER) : 12000;
+
 function clip(s, n) { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n) + '…' : s; }
 
 // ---- 段2: 決定的「明確に安全」高速許可（AI を呼ばず即 allow）---------------------
@@ -46,6 +54,19 @@ const SAFE_COMMANDS = new Set([
 ]);
 // git は破壊的サブコマンド(push/reset/clean/checkout 等)を除き、安全な定型のみ許可。
 const SAFE_GIT_SUBCMDS = new Set(['status', 'diff', 'log', 'branch', 'show', 'add', 'commit', 'stash']);
+// ---- 段1.5: 決定的「必ず人間確認」リスト（AI を呼ばず ask）-----------------------
+// v1.12.0 教室プロファイルで git push を決定的 deny（dangerousCommandRegex）から外した代わりに、
+// ここで「自動承認だけは絶対にさせない」を保証する。公開系・権限昇格は教室でも人間の確認必須。
+const ALWAYS_ASK = [
+  { re: /\bgit\s+push\b/i, reason: 'リモートへの公開操作（git push）は必ず人間が確認します' },
+  { re: /\bsudo\b/i, reason: '管理者権限（sudo）での実行は必ず人間が確認します' },
+];
+function deterministicAsk(command) {
+  const cmd = String(command == null ? '' : command);
+  for (const e of ALWAYS_ASK) { if (e.re.test(cmd)) return e.reason; }
+  return null;
+}
+
 // シェルのメタ文字（連結/パイプ/リダイレクト/置換/背景実行/改行）。1 個でも含めば段2対象外。
 const SHELL_META = /[;&|<>`$(){}\n]/;
 function deterministicSafe(command) {
@@ -66,6 +87,9 @@ function dataBlock(command, cwd) {
     '<CONTEXT>',
     '作業ディレクトリ: ' + (cwd ? clip(cwd, MAX_CWD_CHARS) : '不明'),
     '前提: 決定的に危険なコマンド（rm -rf / 認証情報 / 保護パス等）は既に別の層でブロック済みです。',
+    '環境: 職業訓練校の教室PC（重要な業務データ・個人情報は置かれていない前提）。' +
+      '警戒すべきは「不可逆な破壊」「外部へのデータ持ち出し」「認証情報・システム設定の改変」のみで、' +
+      'それ以外の日常的な開発コマンドは学習体験を優先して approve に倒してください。',
     '</CONTEXT>',
   ].join('\n');
 }
@@ -132,10 +156,11 @@ function parseVerdict(text) {
 }
 
 // 1 鍵分の呼び出し。runAI 失敗(!ok)/タイムアウト/空応答はすべて parseVerdict 手前で ask に倒す。
-async function judgeOneKey(runAIFn, prompt, timeoutMs) {
+// model 省略時は gemini-client 側の既定（COACH_MODEL）が使われる。
+async function judgeOneKey(runAIFn, prompt, timeoutMs, model) {
   let r;
   try {
-    r = await runAIFn(prompt, { timeoutMs });
+    r = await runAIFn(prompt, { timeoutMs, model });
   } catch {
     return { verdict: 'ask', reason: 'AI 呼び出しでエラーが発生（安全側で確認します）' };
   }
@@ -164,6 +189,13 @@ async function decide(input = {}, options = {}) {
     return result('ask', k, k);
   }
 
+  // 段1.5: 公開系・権限昇格は AI を呼ばず決定的に ask（自動承認を絶対にさせない）。
+  const alwaysAskReason = deterministicAsk(command);
+  if (alwaysAskReason) {
+    const k = askKey(alwaysAskReason);
+    return result('ask', k, k);
+  }
+
   // 段2: 決定的に安全なコマンドは AI を呼ばず即 allow（キー不要・確実・高速）。
   // ここで救うことで、ls 等の定型コマンドが懐疑役 AI に過剰却下されるのを防ぐ。
   if (deterministicSafe(command)) {
@@ -178,9 +210,11 @@ async function decide(input = {}, options = {}) {
   }
 
   // 2 鍵を並列で呼ぶ。どちらかが投げても Promise.all を壊さない（judgeOneKey 内で握りつぶす）。
+  // 非対称 2 鍵: proposer=軽量（速度）、verifier=上位モデル（精度・タイムアウト長め）。
+  const verifierTimeoutMs = Math.max(timeoutMs, VERIFIER_TIMEOUT_MS);
   const [key1, key2] = await Promise.all([
-    judgeOneKey(runAIFn, proposerPrompt(command, cwd), timeoutMs),
-    judgeOneKey(runAIFn, verifierPrompt(command, cwd), timeoutMs),
+    judgeOneKey(runAIFn, proposerPrompt(command, cwd), timeoutMs, PROPOSER_MODEL),
+    judgeOneKey(runAIFn, verifierPrompt(command, cwd), verifierTimeoutMs, VERIFIER_MODEL),
   ]);
 
   // 自動承認は「両鍵が approve」のときだけ。それ以外は ask。
@@ -235,5 +269,8 @@ module.exports = {
   proposerPrompt,
   verifierPrompt,
   deterministicSafe,
+  deterministicAsk,
   DEFAULT_TIMEOUT_MS,
+  PROPOSER_MODEL,
+  VERIFIER_MODEL,
 };

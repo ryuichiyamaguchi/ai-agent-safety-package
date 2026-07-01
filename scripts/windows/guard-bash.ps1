@@ -99,7 +99,8 @@ function Invoke-AssistedApproval([object]$HookInput, [string]$Command, [object]$
 
     $stdout = ""
     try {
-        # 全体 20s タイムアウト（各鍵 8s × 並列 + 余裕）。stdin へ payload を流して judge を実行。
+        # 全体 30s タイムアウト（proposer 8s / verifier 12s+フォールバック再試行 が並列 + 余裕）。
+        # stdin へ payload を流して judge を実行。
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $node
         $psi.Arguments = "`"$judge`""
@@ -112,7 +113,7 @@ function Invoke-AssistedApproval([object]$HookInput, [string]$Command, [object]$
         $proc = [System.Diagnostics.Process]::Start($psi)
         $proc.StandardInput.Write($payload)
         $proc.StandardInput.Close()
-        if (-not $proc.WaitForExit(20000)) {
+        if (-not $proc.WaitForExit(30000)) {
             try { $proc.Kill() } catch { }
             Emit-AssistedDecision "ask" "AI 判定がタイムアウトしました（安全側で確認します）"
         }

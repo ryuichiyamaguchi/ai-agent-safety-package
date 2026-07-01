@@ -1,5 +1,9 @@
 sandbox_mode = "workspace-write"
-approval_policy = "untrusted"
+# v1.12.0 教室プロファイル: untrusted → on-request（モデルが承認要と自己判断した時のみ確認）。
+# 併せて auto_review を有効化し、承認要求をデータ流出/認証情報/破壊操作の観点で
+# レビューサブエージェントが二次チェックする（公式: approvals_reviewer = user | auto_review）。
+approval_policy = "on-request"
+approvals_reviewer = "auto_review"
 model_reasoning_effort = "medium"
 
 # A-2: hooks = true に変更。guard 系 hook が確実に発火するよう有効化する。
@@ -8,7 +12,10 @@ model_reasoning_effort = "medium"
 hooks = true
 
 [sandbox_workspace_write]
-network_access = false
+# v1.12.0: 教室 PC には機密が無い前提でネットワークを許可し、エージェンティックループ
+# （リサーチ・パッケージ取得・API 検証）を止めない。流出系の防御は guard hook 側
+# （匿名アップロード先 deny・秘密パターン検出）が引き続き担う。
+network_access = true
 exclude_tmpdir_env_var = true
 exclude_slash_tmp = true
 

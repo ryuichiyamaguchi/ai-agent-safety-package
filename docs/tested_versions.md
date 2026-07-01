@@ -92,16 +92,16 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 
 | ファイル | SHA-256 | 備考 |
 |---------|---------|------|
-| policy/safety-policy.json | f3dec60e32c5759c32318508b1e25fe2a73a98bdb2c95dbbfcf314402f32ff24 | assisted-approval-v1 (Phase1): deny floor の interpreter 生送信 regex にリテラル空白+タブを追加し空白形 exfil を捕捉（BSD grep の \s-in-class 穴埋め）。従来の output over-block fix も含む |
+| policy/safety-policy.json | 876df80fd57024b978e70c23375018a2b5c924c95add4cbbeed869a59d13958b | v1.12.0 教室プロファイル: dangerousCommandRegex を「不可逆破壊/RCE/流出のみ deny」に全面改訂（curl/wget/ssh/env 一律 deny 撤廃・curl\|sh 型 RCE と匿名アップロード先 deny 追加・Remove-Item/del の \b-ハイフン regex バグ修正）+ packageVersion 1.12.0 |
 | configs/codex/hooks.mac.json | 6f03deee71871c40dd81d098867a4860284700f98135fbb05730936738a729ca | v1.0.x から変更なし |
 | configs/codex/hooks.windows.json | 4e55cf8fbffbe44f1023455c902934f00d4a81d2637ba54c495cfaded18ca97c | v1.7.2 で Codex 二重包み対策に -File 形式へ変更 |
-| configs/claude/settings.mac.json | 342da957f1354ab2f9f7c7135942e4bad6e3c938e4b867384fbe73156d98a74f | monitor-tool-coverage: catch-all observe (matcher "*") + shell matcher Bash\|PowerShell + Write group に NotebookEdit + PermissionRequest observe |
-| configs/claude/settings.windows.json | 2ff3e224bc719565de16cfd22aad99741e02ccdf41330334107542395796a080 | monitor-tool-coverage: catch-all observe (matcher "*") + shell matcher Bash\|PowerShell + NotebookEdit guard-write + PermissionRequest observe |
+| configs/claude/settings.mac.json | 76cfddc8b5d81ee0420fbdbd9255ebbca72402b40fd1ef7b211f35c708ed9a70 | v1.12.0 教室プロファイル: defaultMode acceptEdits + allow 大幅拡大（読取/ビルド/install/git 定型/curl/wget）+ ask（git push/reset/checkout/rebase/sudo）。hooks は不変 |
+| configs/claude/settings.windows.json | 64d653fe6507999fba4ca1c65a639347710798c8273fa0ccda95d6929c4b4c8f | v1.12.0 教室プロファイル: 同上（PowerShell 系 allow 込み）。hooks は不変 |
 | configs/gemini/settings.mac.json | b9f45bac5583930c6b44a07a2351c6bd21722503de82983e63cd5f38db2a6213 | v1.0.x から変更なし |
 | configs/gemini/settings.windows.json | f061d04699ce366887ae829d0f6fd78ac8d597c9bbaac80bb985332f32d1f012 | v1.0.x から変更なし |
-| configs/codex/config.mac.toml | 34ac08a64cfe8444351b6d09ec280891763db3e47117b79b062429d2b75a6b13 | Safe Auto Mode: 0.135 で fatal の `[profiles.safe]` を除去し `[permissions.safeprobe]` 追加 |
-| configs/codex/safe.config.toml | 763a59104a8eeb2dbd61bf5a5311c0a709c00a8c466b26eeac76f327fbca36b1 | Safe Auto Mode: 0.135 で `--profile safe` 用に分離したプロファイル層 |
-| configs/codex/config.windows.toml | c6524f2389332d2923d9be7e326561146ee16137a7df5d34833dd2fc59349035 | Safe Auto Mode: 0.135 sandbox 設定を追加 |
+| configs/codex/config.mac.toml | 19503171cbcf7a3e828a523a73a3824ef7d620d9f802de684ff1ca7404eff23d | v1.12.0 教室プロファイル: approval_policy on-request + approvals_reviewer auto_review + network_access true |
+| configs/codex/safe.config.toml | c96b62c2f748edb87a2aeb87b95f9f2ccedb2733c2fa78c5a19d36c5f93b857a | v1.12.0 教室プロファイル: on-request + auto_review + network_access true（config.*.toml と同期） |
+| configs/codex/config.windows.toml | a29d775b798716fa523703831e146eed883e56ba8f8306a4fe2c524c18bc170c | v1.12.0 教室プロファイル: approval_policy on-request + approvals_reviewer auto_review + network_access true |
 | configs/gemini/policies/safety.toml | d63830fc7548c9987a1d84b7ec0212b6527f639a6af808ee29d00427ceb87f3c | v1.0.x から変更なし |
 | workspace-template/aiexclude.template | 9fee69aa1fa5dc7253ebb1419bc1f28b4ca24c8c794f5c6fcc011a1c4a2e444b | v1.0.x から変更なし |
 

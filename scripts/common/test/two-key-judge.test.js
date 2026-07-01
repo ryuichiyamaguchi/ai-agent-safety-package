@@ -3,7 +3,7 @@
 // 実行: node scripts/common/test/two-key-judge.test.js （node:test が PASS/FAIL 集計し失敗時 exit≠0）
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { decide, parseVerdict, deterministicSafe } = require('../two-key-judge.js');
+const { decide, parseVerdict, deterministicSafe, deterministicAsk, PROPOSER_MODEL, VERIFIER_MODEL } = require('../two-key-judge.js');
 
 // 与えた JSON 文字列を順番に返す mock runAI を作る（key1, key2 の 2 回呼ばれる）。
 function mockRunAI(...responses) {
@@ -185,8 +185,39 @@ test('decide: 段2 安全コマンドはキー無しでも allow（決定的）'
   assert.strictEqual(called, false);
 });
 
-test('decide: git push は段2 対象外 → AI 判定（mock ask → ask）', async () => {
-  const runAIFn = mockRunAI(ok('{"verdict":"ask","reason":"remote 送信"}'));
+// ---- 段1.5: 決定的「必ず人間確認」（v1.12.0 教室プロファイル） ----
+test('decide: git push は段1.5 の決定的 ask（AI を呼ばず必ず人間確認）', async () => {
+  let called = false;
+  const runAIFn = async () => { called = true; return ok('{"verdict":"approve","reason":"x"}'); };
   const r = await decide({ command: 'git push origin main', cwd: '/repo' }, { runAIFn, resolveApiKeyFn: keyAlways });
   assert.strictEqual(r.decision, 'ask');
+  assert.strictEqual(called, false, 'AI 承認でも自動 allow にはさせない');
+});
+
+test('decide: sudo は段1.5 の決定的 ask（AI を呼ばない）', async () => {
+  let called = false;
+  const runAIFn = async () => { called = true; return ok('{"verdict":"approve","reason":"x"}'); };
+  const r = await decide({ command: 'sudo make install', cwd: '/repo' }, { runAIFn, resolveApiKeyFn: keyAlways });
+  assert.strictEqual(r.decision, 'ask');
+  assert.strictEqual(called, false);
+});
+
+test('deterministicAsk: 対象コマンドは理由を返し、通常コマンドは null', () => {
+  assert.ok(deterministicAsk('git push origin main'));
+  assert.ok(deterministicAsk('sudo make install'));
+  assert.strictEqual(deterministicAsk('git pull'), null);
+  assert.strictEqual(deterministicAsk('npm run deploy'), null);
+});
+
+// ---- 非対称 2 鍵（proposer=軽量 / verifier=上位モデル） ----
+test('decide: proposer と verifier に別モデルを渡す', async () => {
+  const seen = [];
+  const runAIFn = async (prompt, opts) => {
+    seen.push(opts && opts.model);
+    return ok('{"verdict":"approve","reason":"x"}');
+  };
+  const r = await decide(INPUT, { runAIFn, resolveApiKeyFn: keyAlways });
+  assert.strictEqual(r.decision, 'allow');
+  assert.deepStrictEqual([...seen].sort(), [PROPOSER_MODEL, VERIFIER_MODEL].sort());
+  assert.notStrictEqual(PROPOSER_MODEL, VERIFIER_MODEL, '2 鍵は別モデルであること');
 });

@@ -12,3 +12,6 @@
 
 # セナ（オーケストレーター）の案件メタディレクトリ（設計メモ・engagement）
 .sena/
+
+# Claude Code のセッションメタ（worktree 等）。配布物・リポジトリに混入させない
+.claude/

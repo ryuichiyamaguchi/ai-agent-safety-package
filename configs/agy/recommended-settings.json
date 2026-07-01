@@ -2,6 +2,19 @@
   "_comment_1": "Antigravity CLI 用 推奨セキュリティ設定。launcher 経由起動だけでなく、agy /settings UI で受講者が同じ値に手動で揃えてください。配置パス: ~/.gemini/antigravity-cli/settings.json (macOS/Linux), %USERPROFILE%\\.gemini\\antigravity-cli\\settings.json (Windows)。",
   "_comment_2": "v1.3.0 時点のキーは agy 1.0.0/1.0.1 のバイナリから抽出した推定値。'allow_access_gitignore' / 'allow_edit_gitignore' / 'allow_auto_run_commands' は有効性が未確認 (--print モードでのインタラクティブ承認テストが困難なため、v1.3.1 で実機受講者環境にて再検証予定)。書いて無視されても害はないため、ここで先行して入れる。",
   "_comment_3": "上記キーが効かない場合の防御は launcher 強制の --sandbox フラグ (terminal restriction) と agy 1.0.1 の proceed-in-sandbox tool permission mode に依存。",
+  "_comment_4": "v1.12.0 教室プロファイル: agy は内蔵の安全分類器が『明らかに安全』なコマンドを自動実行する設計のため、autonomy 既定 (request-review) を据え置き、deny リストで破壊的コマンドだけ明示ブロックする。permissions キーの書式はコミュニティ記事由来で agy 実機での有効性未検証（無視されても launcher 強制の --sandbox と guard 相当の防御は別層で残る）。",
+  "permissions": {
+    "deny": [
+      "command(rm -rf)",
+      "command(Remove-Item -Recurse -Force)",
+      "command(format)",
+      "command(diskpart)",
+      "command(mkfs)",
+      "command(sudo)",
+      "command(git push --force)",
+      "command(npm publish)"
+    ]
+  },
   "enableTelemetry": false,
   "trustedWorkspaces": [],
   "allow_access_gitignore": false,

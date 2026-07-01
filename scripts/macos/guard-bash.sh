@@ -71,14 +71,14 @@ assisted_approval() {
     return 0
   fi
 
-  # 全体タイムアウト: 各鍵 8s × 並列なので余裕をみて 20s。timeout コマンドが無くても動くよう
-  # フォールバックする（その場合は node 内のタイムアウトに委ねる）。
+  # 全体タイムアウト: proposer 8s / verifier 12s(+フォールバック再試行) が並列なので余裕をみて 30s。
+  # timeout コマンドが無くてもフォールバックする（その場合は node 内のタイムアウトに委ねる）。
   local input
   input="$(assisted_build_input "$cmd" "$cwd")"
   local timeout_bin
   timeout_bin="$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)"
   if [ -n "$timeout_bin" ]; then
-    stdout="$(printf '%s' "$input" | "$timeout_bin" 20 "$node_bin" "$judge" 2>/dev/null || true)"
+    stdout="$(printf '%s' "$input" | "$timeout_bin" 30 "$node_bin" "$judge" 2>/dev/null || true)"
   else
     stdout="$(printf '%s' "$input" | "$node_bin" "$judge" 2>/dev/null || true)"
   fi

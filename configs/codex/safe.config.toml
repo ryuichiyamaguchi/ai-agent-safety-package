@@ -3,10 +3,12 @@
 # fatal error になるため、プロファイル設定をこの $CODEX_HOME/safe.config.toml に分離する。
 # launch-codex-safe.sh が config.toml と一緒にこのファイルを $CODEX_HOME へ配置する。
 sandbox_mode = "workspace-write"
-approval_policy = "untrusted"
+# v1.12.0 教室プロファイル: untrusted → on-request + auto_review（config.*.toml と同期必須）。
+approval_policy = "on-request"
+approvals_reviewer = "auto_review"
 model_reasoning_effort = "medium"
 
 [sandbox_workspace_write]
-network_access = false
+network_access = true
 exclude_tmpdir_env_var = true
 exclude_slash_tmp = true

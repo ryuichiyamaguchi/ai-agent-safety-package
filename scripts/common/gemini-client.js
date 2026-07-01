@@ -9,7 +9,9 @@
 //   - キー解決は env(GEMINI_API_KEY/GOOGLE_API_KEY) → ~/.ai-safety/gemini-api-key.txt → null の順。
 //     過去 DeepSeek の setx 永続トークンが全 CLI を 401 で壊した教訓に基づき、環境変数を
 //     汚さないファイル方式を推奨経路として残す。
-//   - モデル既定 gemini-3.1-flash-lite（AI_SAFE_COACH_MODEL で上書き可）。
+//   - モデル既定 gemini-3.5-flash（AI_SAFE_COACH_MODEL で上書き可）。v1.12.0 で 3.1-flash-lite
+//     から引き上げ（コーチ/判定の質が本体のため）。無料枠の 429 や モデル未提供の 404 のときは
+//     FALLBACK_MODEL（既定 gemini-3.1-flash-lite）で 1 回だけ自動リトライする。
 //   - 失敗（キー無し/通信エラー/タイムアウト/4xx/空応答）はすべて { ok:false, text:<日本語の説明> }。
 //     呼び出し側が fail-closed で扱えるよう、決して例外を throw しない。
 'use strict';
@@ -19,7 +21,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const COACH_MODEL = process.env.AI_SAFE_COACH_MODEL || 'gemini-3.1-flash-lite';
+const COACH_MODEL = process.env.AI_SAFE_COACH_MODEL || 'gemini-3.5-flash';
+const FALLBACK_MODEL = process.env.AI_SAFE_COACH_MODEL_FALLBACK || 'gemini-3.1-flash-lite';
 const GEMINI_HOST = 'generativelanguage.googleapis.com';
 const KEY_FILE = path.join(os.homedir(), '.ai-safety', 'gemini-api-key.txt');
 const DEFAULT_TIMEOUT_MS = Number(process.env.AI_SAFE_COACH_TIMEOUT || 60000);
@@ -54,8 +57,22 @@ function resolveApiKey() {
 // AI はテキストを返すだけ（実行経路なし）。タイムアウト・出力上限あり。失敗はすべて
 // 利用者向けの文言を text に入れて fail-closed。
 // opts.timeoutMs で個別にタイムアウトを上書きできる（既定は AI_SAFE_COACH_TIMEOUT または 60s）。
+// opts.model でモデルを個別指定できる（既定 COACH_MODEL）。指定モデルが 429（無料枠上限）
+// または 404（モデル未提供）のときは FALLBACK_MODEL で 1 回だけ自動リトライする（多段
+// フォールバック: 3.5-flash → 3.1-flash-lite → それも失敗なら ok:false = 呼び出し側で ask）。
 function runAI(prompt, opts = {}) {
   const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : DEFAULT_TIMEOUT_MS;
+  const model = (opts.model && String(opts.model).trim()) || COACH_MODEL;
+  return _runOnce(prompt, model, timeoutMs).then((r) => {
+    if (!r.ok && (r.text === RATE_MSG || r.text === MODEL_MSG) && model !== FALLBACK_MODEL) {
+      return _runOnce(prompt, FALLBACK_MODEL, timeoutMs);
+    }
+    return r;
+  });
+}
+
+// 単一モデル・単発の generateContent 呼び出し（フォールバックなしの実体）。
+function _runOnce(prompt, model, timeoutMs) {
   return new Promise((resolve) => {
     const key = resolveApiKey();
     if (!key) return resolve({ ok: false, text: NO_KEY_MSG });
@@ -65,7 +82,7 @@ function runAI(prompt, opts = {}) {
     });
     const reqOpts = {
       hostname: GEMINI_HOST,
-      path: '/v1beta/models/' + encodeURIComponent(COACH_MODEL) + ':generateContent',
+      path: '/v1beta/models/' + encodeURIComponent(model) + ':generateContent',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -119,6 +136,7 @@ module.exports = {
   INJECTION_GUARD,
   // 文言・定数も再利用できるよう公開（monitor-server.js が同一値を使う）。
   COACH_MODEL,
+  FALLBACK_MODEL,
   GEMINI_HOST,
   KEY_FILE,
   NO_KEY_MSG,

@@ -96,7 +96,10 @@ fi
 # 危険コマンドは PreToolUse hook(guard-bash) が approval 非依存で exit2 deny するため、
 # OS 隔離(egress)の実証可否に関わらず自走してよい(診断 2026-06-26 §4 で実証)。
 # 隔離チェックは実行して結果を「開示」するのみ(従来の fail-close=untrusted 据え置きは廃止)。
-approval="untrusted"
+# v1.12.0 教室プロファイル: 既定を untrusted → on-request に変更（モデルが承認要と自己判断
+# した時だけ確認）。config/safe.config.toml 側の approvals_reviewer=auto_review が承認要求を
+# 二次レビューする。決定的 deny は guard-bash が approval 非依存で担う。
+approval="on-request"
 if [ "$auto" -eq 1 ]; then
   doctor="${AI_SAFE_DOCTOR:-}"
   if [ -z "$doctor" ]; then

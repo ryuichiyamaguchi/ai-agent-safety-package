@@ -123,7 +123,10 @@ if ($env:AI_SAFE_DRY_RUN -ne '1' -and -not (Test-Path -LiteralPath $safeCodexAut
 # OS 隔離(egress)の実証可否に関わらず自走してよい(診断 2026-06-26 §4 で実証)。
 # Windows codex 0.135 の sandbox はネット隔離を提供しない(Test-NetworkEgress が構造的に FAIL)
 # ため従来は永久 untrusted=「ターン1/3」だった。これを廃し、隔離チェックは結果を「開示」のみ行う。
-$approval = 'untrusted'
+# v1.12.0 教室プロファイル: 既定を untrusted → on-request に変更（モデルが承認要と自己判断
+# した時だけ確認）。config/safe.config.toml 側の approvals_reviewer=auto_review が承認要求を
+# 二次レビューする。決定的 deny は guard-bash が approval 非依存で担う。
+$approval = 'on-request'
 if ($AutoFlag -eq '--auto') {
     # --auto は隔離結果に関わらず on-failure(自走)。危険は hook(guard-bash) が止める。
     $approval = 'on-failure'
