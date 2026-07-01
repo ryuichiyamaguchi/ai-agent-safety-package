@@ -5,8 +5,30 @@ AI_SAFE_MODE="bash"
 read_hook_input
 . "$(dirname "$0")/lib/explainer.sh"
 explain
+# 安全な loopback fetch（自分の localhost 開発サーバへの curl/wget）だけ decisive deny から救う。
+# 外部宛て・複合コマンド・proxy/resolve 等のトリックは一切許可せず、従来どおり deny の底に残す。
+# 判定は厳格ホワイトリスト:「シェルメタ文字ゼロ + 先頭 curl|wget + 宛先が loopback リテラルのみ」。
+# 少しでも形が外れたら return 1 → 下の has_dangerous_command（deny）にフォールスルー（fail-safe）。
+is_safe_loopback_fetch() {
+  local cmd
+  cmd="$(_extract_json_field "command")"
+  [ -n "$cmd" ] || return 1
+  # メタ文字・制御文字・クォート・変数展開・バックスラッシュを 1 個でも含めば対象外。
+  # これらが無ければ ; や $() / バッククォートによるコマンド連結・注入は成立しない。IPv6 の [] は許可。
+  printf '%s' "$cmd" | LC_ALL=C grep -qE '[;&|<>`$(){}"'"'"'\\*?[:cntrl:]]' && return 1
+  # proxy/resolve/connect-to/interface 系（宛先すり替え）フラグは明示的に拒否（多重防御）。
+  printf '%s' "$cmd" | grep -qiE -- '(--resolve|--connect-to|--proxy|--interface|(^|[[:space:]])-x([[:space:]]|$))' && return 1
+  # curl|wget + 単純フラグ列 + (scheme://)? loopbackホスト (:port)? (/path)? を末尾に 1 個だけ。
+  printf '%s' "$cmd" | grep -qiE '^(curl|wget)([[:space:]]+-{1,2}[A-Za-z][A-Za-z0-9=._-]*)*[[:space:]]+(https?://)?(localhost|127(\.[0-9]{1,3}){3}|\[::1\]|::1)(:[0-9]{1,5})?(/[^[:space:]]*)?$' || return 1
+  return 0
+}
+
 has_sensitive_text && block "sensitive pattern in shell command"
 has_protected_path && block "protected path referenced in shell command"
+# loopback（localhost/127.0.0.1/::1）宛ての単純 fetch は許可。外部宛ては下の decisive deny に落とす。
+if is_safe_loopback_fetch; then
+  allow "loopback fetch to localhost permitted"
+fi
 has_dangerous_command && block "dangerous shell command matched"
 
 # ---------------------------------------------------------------------------
@@ -25,22 +47,14 @@ assisted_approval() {
   # opt-in でなければ何もしない（呼び出し側が従来 allow に進む）。
   [ "${AI_SAFE_ASSISTED_APPROVAL:-0}" = "1" ] || return 1
 
-  # d-claude セッションはスキップ（monitor-server.js の coachRedact と同じ検出）。
-  # coach-engine マーカーが存在し、12h より新しく、中身が "d-claude" のとき。
-  local ldir marker
-  ldir="$(log_dir)"
-  marker="$ldir/coach-engine"
-  if [ -f "$marker" ]; then
-    local mtime now age
-    mtime="$(stat -f '%m' "$marker" 2>/dev/null || echo 0)"
-    now="$(date +%s)"
-    age=$(( now - mtime ))
-    if [ "$age" -ge 0 ] && [ "$age" -le 43200 ]; then
-      if [ "$(cat "$marker" 2>/dev/null | tr -d '[:space:]')" = "d-claude" ]; then
-        return 1   # d-claude → assisted approval せず従来 allow へ
-      fi
-    fi
-  fi
+  # d-claude（DeepSeek 駆動）でも Gemini 2 鍵判定を有効にする。判定役は DeepSeek ではなく
+  # 独立した Gemini（two-key-judge.js → gemini-client.js）なので「自分のコマンドを自分で
+  # 審査する」自己審査問題は起きない。かつ、ここに来る時点で秘密情報・保護パス・決定的
+  # 危険コマンドは上流（has_sensitive_text / has_protected_path / has_dangerous_command）で
+  # block 済みなので、judge に渡るのはグレーな定型コマンドのみ（秘密は Google に出ない）。
+  # 以前はここで d-claude を skip して従来 allow に倒していたが、「AI が危険判定して自律的に
+  # 回す」要望によりスキップを廃止。無効化したい場合は起動側で AI_SAFE_ASSISTED_APPROVAL=0
+  # を export する（launch-deepseek-gateway.sh 参照）。
 
   # node が無ければ fail-closed で ask（従来 allow には倒さない＝opt-in 時は安全側）。
   local node_bin

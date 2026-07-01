@@ -75,6 +75,10 @@ try {
   # d-claude 経路の目印。launch-claude-safe.ps1 はこのフラグがあるとき
   # DeepSeek ルーティング env の Remove をスキップする (消すと not logged in になる)。
   $env:DS_CLAUDE_MODE = "1"
+  # d-claude ではグレーコマンドの危険判定を独立した Gemini(2鍵)に任せて自律的に回す（自己審査回避）。
+  # 両鍵 approve のときだけ自動許可、怪しければ人間に確認(fail-closed)。決定的 deny の底は不変。
+  # 無効化したい場合は、このスクリプトを呼ぶ前に $env:AI_SAFE_ASSISTED_APPROVAL='0' を設定しておく。
+  if (-not $env:AI_SAFE_ASSISTED_APPROVAL) { $env:AI_SAFE_ASSISTED_APPROVAL = "1" }
   # モニターへ d-claude 目印を置く（AI コーチが Gemini へコマンド本文を送らないように）。
   try { New-Item -ItemType Directory -Force -Path $coachLogDir | Out-Null; Set-Content -NoNewline -Encoding ascii -LiteralPath $coachMarker -Value 'd-claude' } catch {}
   Write-Host "送信検査 Gateway 稼働中 (127.0.0.1:$port)。DeepSeek へは検査後に転送されます。"

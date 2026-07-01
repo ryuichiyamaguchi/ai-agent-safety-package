@@ -76,8 +76,11 @@ function Invoke-AssistedApproval([object]$HookInput, [string]$Command, [object]$
     $logDir = $env:AI_SAFE_LOG_DIR
     if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
 
-    # d-claude セッションはスキップ（従来 Allow へ）。
-    if (Test-IsDClaudeSession $logDir) { return $false }
+    # d-claude でも Gemini 2 鍵判定を有効にする。判定役は DeepSeek でなく独立した Gemini
+    # （two-key-judge.js → gemini-client.js）なので自己審査にならない。秘密・保護パス・決定的
+    # 危険コマンドは上流で block 済みなので、judge に渡るのはグレーな定型コマンドのみ。
+    # 以前はここで d-claude を skip して従来 Allow に倒していたが、自律運用の要望で廃止。
+    # 無効化したい場合は起動側で AI_SAFE_ASSISTED_APPROVAL=0 にする（launch-deepseek-gateway.ps1 参照）。
 
     # node が無ければ fail-closed で ask（opt-in 時は安全側に倒す）。
     $node = Resolve-NodeBin
@@ -145,6 +148,21 @@ function Invoke-AssistedApproval([object]$HookInput, [string]$Command, [object]$
     return $false  # 到達しない（Emit-AssistedDecision が exit する）が保険
 }
 
+# 安全な loopback fetch（自分の localhost 開発サーバへの curl/wget）だけ decisive deny から救う。
+# 外部宛て・複合コマンド・proxy/resolve 等のトリックは一切許可せず、従来どおり deny の底に残す。
+# 判定は厳格ホワイトリスト:「メタ文字ゼロ + 先頭 curl|wget + 宛先が loopback リテラルのみ」。
+# 少しでも形が外れたら $false → 呼び出し側の decisive deny にフォールスルー（fail-safe）。mac guard-bash.sh と対称。
+function Test-IsSafeLoopbackFetch([string]$Command) {
+    if ([string]::IsNullOrWhiteSpace($Command)) { return $false }
+    # メタ文字・制御文字・クォート・変数展開・バックスラッシュを 1 個でも含めば対象外（; や $() の連結・注入を封じる）。IPv6 の [] は許可。
+    if ($Command -match '[;&|<>`$(){}"''\\*?\x00-\x1F]') { return $false }
+    # proxy/resolve/connect-to/interface 系（宛先すり替え）フラグは明示的に拒否（多重防御）。
+    if ($Command -match '(--resolve|--connect-to|--proxy|--interface|(^|\s)-x(\s|$))') { return $false }
+    # curl|wget + 単純フラグ列 + (scheme://)? loopbackホスト (:port)? (/path)? を末尾に 1 個だけ。
+    if ($Command -match '^(curl|wget)(\s+-{1,2}[A-Za-z][A-Za-z0-9=._-]*)*\s+(https?://)?(localhost|127(\.[0-9]{1,3}){3}|\[::1\]|::1)(:[0-9]{1,5})?(/\S*)?$') { return $true }
+    return $false
+}
+
 try {
     . (Join-Path $PSScriptRoot "lib\SafetyPolicy.ps1")
     . (Join-Path $PSScriptRoot "lib\Explainer.ps1")
@@ -165,6 +183,11 @@ try {
     $protected = Test-ProtectedPathText $cmd $policy
     if ($protected) {
         Block-Action $inputObj "bash" "protected path referenced in shell command" $cmd $policy
+    }
+
+    # loopback（localhost/127.0.0.1/::1）宛ての単純 fetch は許可。外部宛ては下の decisive deny に落とす。
+    if (Test-IsSafeLoopbackFetch $cmd) {
+        Allow-Action $inputObj "bash" "loopback fetch to localhost permitted" $cmd $policy
     }
 
     $danger = Find-RegexMatch $cmd $policy.dangerousCommandRegex "dangerous command"

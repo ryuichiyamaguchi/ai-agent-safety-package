@@ -69,6 +69,11 @@ export ANTHROPIC_BASE_URL="http://127.0.0.1:$PORT"
 # DeepSeek ルーティング env (AUTH_TOKEN/BASE_URL/MODEL) の unset をスキップする
 # （消すと DeepSeek に繋がらず claude が "not logged in" になるため）。
 export DS_CLAUDE_MODE=1
+# d-claude ではグレーコマンドの危険判定を独立した Gemini(2鍵)に任せて自律的に回す。
+# 判定役は DeepSeek でなく Gemini なので「自分のコマンドを自分で審査」にならない。両鍵が
+# approve のときだけ自動許可、少しでも怪しければ人間に確認(fail-closed)。決定的 deny の底は不変。
+# 無効化したい場合は、このスクリプトを呼ぶ前に AI_SAFE_ASSISTED_APPROVAL=0 を export しておく。
+export AI_SAFE_ASSISTED_APPROVAL="${AI_SAFE_ASSISTED_APPROVAL:-1}"
 # モニターへ d-claude 目印を置く（AI コーチが Gemini へコマンド本文を送らないように）。
 mkdir -p "$(dirname "$COACH_MARKER")" 2>/dev/null && printf 'd-claude' > "$COACH_MARKER" 2>/dev/null || true
 echo "送信検査 Gateway 稼働中（127.0.0.1:${PORT}）。DeepSeek へは検査後に転送されます。"

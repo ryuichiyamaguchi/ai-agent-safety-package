@@ -71,6 +71,36 @@ if ($helpText -match "--permission-mode") {
     $argsList = @("--permission-mode", "default") + $argsList
 }
 
+# d-claude (DeepSeek 駆動) のときだけ、正直さ・身元の上書き指示を system prompt に追記する。
+# DeepSeek は Claude Code の「あなたは Claude」プロンプトで Anthropic を装い、できないことを
+# 「できる」・やっていないことを「やった」と過剰申告する傾向がある。--append-system-prompt で
+# 「実際は DeepSeek」「嘘・捏造をしない」を注入して是正する。フラグ非対応の古い CLI では skip。
+# ファイルは UTF-8 で読む (PS5.1 の既定 CP932 誤読で日本語が化けるのを防ぐ)。素の claude-safe には影響しない。
+if ($env:DS_CLAUDE_MODE -eq '1') {
+    $honestyFile = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\deepseek-honesty-prompt.txt"))
+    if ((Test-Path -LiteralPath $honestyFile) -and ($helpText -match "--append-system-prompt")) {
+        $honestyText = [System.IO.File]::ReadAllText($honestyFile, [System.Text.Encoding]::UTF8)
+        $argsList = $argsList + @("--append-system-prompt", $honestyText)
+    }
+
+    # d-claude に web 検索を与える（Gemini grounding の MCP ツール web_search）。標準 WebSearch は
+    # Anthropic サーバー側実装で DeepSeek バックエンドでは動かないため、検索のみの自前 MCP を追加する。
+    # 既存の Gemini キーを使い回すので受講者は新規アカウント不要。d-claude 限定で --mcp-config 追加。
+    # 無効化は $env:AI_SAFE_DCLAUDE_SEARCH='0'。JSON はエスケープ事故回避のため ConvertTo-Json で生成。
+    $searchMcp = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\gemini-search-mcp.js"))
+    if (($env:AI_SAFE_DCLAUDE_SEARCH -ne '0') -and (Test-Path -LiteralPath $searchMcp) -and ($helpText -match "--mcp-config")) {
+        $logDir = $env:AI_SAFE_LOG_DIR
+        if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
+        try {
+            New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+            $mcpCfgPath = Join-Path $logDir "d-claude-mcp.json"
+            $mcpObj = @{ mcpServers = @{ "gemini-search" = @{ command = "node"; args = @($searchMcp) } } }
+            ($mcpObj | ConvertTo-Json -Depth 6 -Compress) | Set-Content -LiteralPath $mcpCfgPath -Encoding UTF8
+            $argsList = $argsList + @("--mcp-config", $mcpCfgPath)
+        } catch { }
+    }
+}
+
 if ($Prompt -and $Prompt.Trim().Length -gt 0) {
     & $Claude @argsList $Prompt
 } else {
