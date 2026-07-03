@@ -80,6 +80,11 @@ if ($env:DS_CLAUDE_MODE -eq '1') {
     $honestyFile = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\deepseek-honesty-prompt.txt"))
     if ((Test-Path -LiteralPath $honestyFile) -and ($helpText -match "--append-system-prompt")) {
         $honestyText = [System.IO.File]::ReadAllText($honestyFile, [System.Text.Encoding]::UTF8)
+        # Windows では claude が npm の .cmd シム (cmd.exe 層) 経由で起動されるため、引数内の
+        # 改行や ASCII 二重引用符でコマンドラインが崩れ、テキスト後半が位置引数
+        # (=初回ユーザープロンプト) になる実機事故が起きる。改行を空白に畳み " を ' に
+        # 置換して 1 行で渡す (mac は execve 直渡しで崩れないため無加工のまま)。
+        $honestyText = (($honestyText -replace '"', "'") -replace "\s*\r?\n\s*", " ").Trim()
         $argsList = $argsList + @("--append-system-prompt", $honestyText)
     }
 
