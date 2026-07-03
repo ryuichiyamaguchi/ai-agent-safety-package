@@ -63,12 +63,28 @@ if [ "${DS_CLAUDE_MODE:-}" = "1" ]; then
   # 既存の Gemini キー(~/.ai-safety/gemini-api-key.txt)を使い回すので受講者は新規アカウント不要。
   # d-claude 限定（DS_CLAUDE_MODE 下）で --mcp-config 追加。無効化は AI_SAFE_DCLAUDE_SEARCH=0。
   # JSON はパスのエスケープ事故を避けるため node で書き出す（d-claude 経路では node 必須）。
+  # d-claude に「簡単な画像生成」も与える（Pollinations の MCP ツール `generate_image`）。
+  # 無料で画像を作れるのは受講者環境では実質 Pollinations のみ（codex 無料枠=usage limit /
+  # Gemini 無料 API=画像モデル limit:0）。API キー不要・無登録。無効化は AI_SAFE_DCLAUDE_IMAGE=0。
+  # 検索 MCP と画像 MCP を 1 つの --mcp-config JSON に束ねて渡す（有効なものだけ載せる）。
   _search_mcp="$(cd "$(dirname "$0")" && pwd)/../common/gemini-search-mcp.js"
-  if [ "${AI_SAFE_DCLAUDE_SEARCH:-1}" = "1" ] && [ -f "$_search_mcp" ] \
+  _image_mcp="$(cd "$(dirname "$0")" && pwd)/../common/pollinations-image-mcp.js"
+  _use_search=0; _use_image=0
+  [ "${AI_SAFE_DCLAUDE_SEARCH:-1}" = "1" ] && [ -f "$_search_mcp" ] && _use_search=1
+  [ "${AI_SAFE_DCLAUDE_IMAGE:-1}" = "1" ] && [ -f "$_image_mcp" ] && _use_image=1
+  if [ $((_use_search + _use_image)) -gt 0 ] \
      && command -v node >/dev/null 2>&1 && claude --help 2>&1 | grep -q -- "--mcp-config"; then
     _mcp_cfg="$AI_SAFE_LOG_DIR/d-claude-mcp.json"
     mkdir -p "$AI_SAFE_LOG_DIR" 2>/dev/null || true
-    if node -e 'const fs=require("fs");fs.writeFileSync(process.argv[1],JSON.stringify({mcpServers:{"gemini-search":{command:"node",args:[process.argv[2]]}}}))' "$_mcp_cfg" "$_search_mcp" 2>/dev/null; then
+    # JSON はパスのエスケープ事故を避けるため node で書き出す（d-claude 経路では node 必須）。
+    # 引数: 出力先, search(js or ""), image(js or "")
+    if node -e '
+      const fs=require("fs");
+      const servers={};
+      if(process.argv[3]) servers["gemini-search"]={command:"node",args:[process.argv[3]]};
+      if(process.argv[4]) servers["pollinations-image"]={command:"node",args:[process.argv[4]]};
+      fs.writeFileSync(process.argv[2],JSON.stringify({mcpServers:servers}));
+    ' "$_mcp_cfg" "$([ $_use_search -eq 1 ] && printf '%s' "$_search_mcp")" "$([ $_use_image -eq 1 ] && printf '%s' "$_image_mcp")" 2>/dev/null; then
       claude_args+=(--mcp-config "$_mcp_cfg")
     fi
   fi

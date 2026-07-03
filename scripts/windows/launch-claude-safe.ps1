@@ -92,14 +92,24 @@ if ($env:DS_CLAUDE_MODE -eq '1') {
     # Anthropic サーバー側実装で DeepSeek バックエンドでは動かないため、検索のみの自前 MCP を追加する。
     # 既存の Gemini キーを使い回すので受講者は新規アカウント不要。d-claude 限定で --mcp-config 追加。
     # 無効化は $env:AI_SAFE_DCLAUDE_SEARCH='0'。JSON はエスケープ事故回避のため ConvertTo-Json で生成。
+    # d-claude に「簡単な画像生成」も与える（Pollinations の MCP ツール generate_image）。
+    # 無料で画像を作れるのは受講者環境では実質 Pollinations のみ（codex 無料枠=usage limit /
+    # Gemini 無料 API=画像モデル limit:0）。API キー不要・無登録。無効化は $env:AI_SAFE_DCLAUDE_IMAGE='0'。
+    # 検索 MCP と画像 MCP を 1 つの --mcp-config JSON に束ねて渡す（有効なものだけ載せる）。
     $searchMcp = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\gemini-search-mcp.js"))
-    if (($env:AI_SAFE_DCLAUDE_SEARCH -ne '0') -and (Test-Path -LiteralPath $searchMcp) -and ($helpText -match "--mcp-config")) {
+    $imageMcp  = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\pollinations-image-mcp.js"))
+    $useSearch = ($env:AI_SAFE_DCLAUDE_SEARCH -ne '0') -and (Test-Path -LiteralPath $searchMcp)
+    $useImage  = ($env:AI_SAFE_DCLAUDE_IMAGE  -ne '0') -and (Test-Path -LiteralPath $imageMcp)
+    if (($useSearch -or $useImage) -and ($helpText -match "--mcp-config")) {
         $logDir = $env:AI_SAFE_LOG_DIR
         if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
         try {
             New-Item -ItemType Directory -Force -Path $logDir | Out-Null
             $mcpCfgPath = Join-Path $logDir "d-claude-mcp.json"
-            $mcpObj = @{ mcpServers = @{ "gemini-search" = @{ command = "node"; args = @($searchMcp) } } }
+            $servers = @{}
+            if ($useSearch) { $servers["gemini-search"]      = @{ command = "node"; args = @($searchMcp) } }
+            if ($useImage)  { $servers["pollinations-image"] = @{ command = "node"; args = @($imageMcp) } }
+            $mcpObj = @{ mcpServers = $servers }
             ($mcpObj | ConvertTo-Json -Depth 6 -Compress) | Set-Content -LiteralPath $mcpCfgPath -Encoding UTF8
             $argsList = $argsList + @("--mcp-config", $mcpCfgPath)
         } catch { }
