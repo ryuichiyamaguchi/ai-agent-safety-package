@@ -92,7 +92,7 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 
 | ファイル | SHA-256 | 備考 |
 |---------|---------|------|
-| policy/safety-policy.json | 876df80fd57024b978e70c23375018a2b5c924c95add4cbbeed869a59d13958b | v1.12.0 教室プロファイル: dangerousCommandRegex を「不可逆破壊/RCE/流出のみ deny」に全面改訂（curl/wget/ssh/env 一律 deny 撤廃・curl\|sh 型 RCE と匿名アップロード先 deny 追加・Remove-Item/del の \b-ハイフン regex バグ修正）+ packageVersion 1.12.0 |
+| policy/safety-policy.json | 8acb93c5f59c1479b4f932f45b1170646b0b063487061fec235a67fea4b1baf1 | v1.12.0 教室プロファイル: dangerousCommandRegex を「不可逆破壊/RCE/流出のみ deny」に全面改訂（curl/wget/ssh/env 一律 deny 撤廃・curl\|sh 型 RCE と匿名アップロード先 deny 追加・Remove-Item/del の \b-ハイフン regex バグ修正）+ packageVersion 1.12.0。**2026-07-03 hotfix: 再帰削除 rm -r（force 無し）/ Remove-Item -Recurse（-Force 無し）がすり抜けていた実機事故を修正し force 有無問わず決定的 deny に** |
 | configs/codex/hooks.mac.json | 6f03deee71871c40dd81d098867a4860284700f98135fbb05730936738a729ca | v1.0.x から変更なし |
 | configs/codex/hooks.windows.json | 4e55cf8fbffbe44f1023455c902934f00d4a81d2637ba54c495cfaded18ca97c | v1.7.2 で Codex 二重包み対策に -File 形式へ変更 |
 | configs/claude/settings.mac.json | 76cfddc8b5d81ee0420fbdbd9255ebbca72402b40fd1ef7b211f35c708ed9a70 | v1.12.0 教室プロファイル: defaultMode acceptEdits + allow 大幅拡大（読取/ビルド/install/git 定型/curl/wget）+ ask（git push/reset/checkout/rebase/sudo）。hooks は不変 |

@@ -71,13 +71,14 @@
     { "name": "JWT", "pattern": "\\beyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\b" },
     { "name": "Private key block", "pattern": "-----BEGIN (RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----" }
   ],
-  "_comment_dangerousCommand": "v1.12.0 教室プロファイル: 方針を『広めに deny』から『不可逆破壊・リモートコード実行・秘密流出だけを決定的 deny し、それ以外は各 CLI のネイティブ承認 / 2 鍵 AI 判定に委ねる』に転換（教室 PC には重要データが無い前提で、エージェンティックループの体験を優先する）。curl/wget/ssh/env 等の一律 deny は撤廃。残すのは (a) .env 等の秘密読み取り (b) rm -rf / format / diskpart / mkfs / dd of=/dev/ 等の不可逆破壊 (c) fork bomb (d) curl|sh・iex(irm …)・$(curl …) 型のリモートコード実行（プロンプトインジェクションの主経路） (e) 匿名アップロードサイトへのシェル経由送信 (f) nc/ncat/netcat（教室で正当用途が無い生ソケット送受信）。git push は deny から外して各 CLI の ask 層（settings.json / 2 鍵判定の決定的 ask）へ移管。npm publish 等の公開系は deny のまま。",
+  "_comment_dangerousCommand": "v1.12.0 教室プロファイル: 方針を『広めに deny』から『不可逆破壊・リモートコード実行・秘密流出だけを決定的 deny し、それ以外は各 CLI のネイティブ承認 / 2 鍵 AI 判定に委ねる』に転換（教室 PC には重要データが無い前提で、エージェンティックループの体験を優先する）。curl/wget/ssh/env 等の一律 deny は撤廃。残すのは (a) .env 等の秘密読み取り (b) 再帰削除(rm -r/-rf/--recursive・Remove-Item -Recurse 等、force の有無を問わない) / format / diskpart / mkfs / dd of=/dev/ 等の不可逆破壊 (c) fork bomb (d) curl|sh・iex(irm …)・$(curl …) 型のリモートコード実行（プロンプトインジェクションの主経路） (e) 匿名アップロードサイトへのシェル経由送信 (f) nc/ncat/netcat（教室で正当用途が無い生ソケット送受信）。git push は deny から外して各 CLI の ask 層（settings.json / 2 鍵判定の決定的 ask）へ移管。npm publish 等の公開系は deny のまま。",
   "dangerousCommandRegex": [
     "(?i)\\b(cat|type|Get-Content|gc|more|less)\\b.*(^|\\s|[\\\\/])[.]env([.].*)?(\\s|$)",
     "(?i)\\bpython(3)?\\b.*open\\s*\\(\\s*['\\\"][^'\\\"]*[.]env",
     "(?i)\\b(node|ruby|perl|php)\\b.*[.]env",
-    "(?i)\\brm\\s+(-[A-Za-z]*r[A-Za-z]*f|-rf|-fr)\\b",
-    "(?i)\\bRemove-Item\\b.*-Recurse\\b.*-Force\\b",
+    "(?i)\\brm\\s+(-[A-Za-z]*r[A-Za-z]*|--recursive|-[A-Za-z]+\\s+-[A-Za-z]*r[A-Za-z]*)\\b",
+    "(?i)\\bRemove-Item\\b.*(-Recurse\\b|\\s-r\\b)",
+    "(?i)\\b(ri|rmdir)\\b.*(-Recurse\\b|\\s-r\\b)",
     "(?i)\\b(del|erase|rd|rmdir)\\b.*\\s/(s|q)\\b",
     "(?i)\\b(format|diskpart|cipher\\s+/w)\\b",
     "(?i)(\\bmkfs([.][a-z0-9]+)?\\b|\\bdd\\b.*\\bof=/dev/|\\bshred\\b)",

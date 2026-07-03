@@ -81,6 +81,9 @@ run_case "3 scripted protected read" "guard-bash.sh" "block" "{\"hook_event_name
 run_case "4 write outside workspace" "guard-write.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$workspace\",\"tool_input\":{\"file_path\":\"../outside.txt\",\"content\":\"hello\"}}"
 remove_cmd="r""m -r""f /tmp/ai-safe-test"
 run_case "5 recursive forced delete" "guard-bash.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"cwd\":\"$workspace\",\"tool_input\":{\"command\":\"$remove_cmd\"}}"
+# 5b force 無しの再帰削除 rm -r も決定的にブロック（2026-07-03 の実機事故=rm -r がすり抜けた回帰）。
+remove_r="r""m -r /tmp/ai-safe-test-dir"
+run_case "5b recursive delete without -f" "guard-bash.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"cwd\":\"$workspace\",\"tool_input\":{\"command\":\"$remove_r\"}}"
 script_content="print(open('$target_name').read())"
 run_case "6 generated script protected read" "guard-write.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$workspace\",\"tool_input\":{\"file_path\":\"script.py\",\"content\":\"$script_content\"}}"
 run_case "7 WebFetch unauthorized domain" "guard-webfetch.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"WebFetch\",\"cwd\":\"$workspace\",\"tool_input\":{\"url\":\"https://example.com\",\"prompt\":\"summarize\"}}"

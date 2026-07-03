@@ -153,6 +153,9 @@ Expect-Block "4 write outside workspace" "guard-write.ps1" (New-HookJson "Write"
 
 $removeCmd = "r" + "m -r" + "f /tmp/ai-safe-test"
 Expect-Block "5 recursive forced delete" "guard-bash.ps1" (New-HookJson "Bash" @{ command = $removeCmd })
+# 5b force 無しの再帰削除 rm -r も決定的にブロック（2026-07-03 の実機事故=rm -r がすり抜けた回帰）。
+$removeR = "r" + "m -r /tmp/ai-safe-test-dir"
+Expect-Block "5b recursive delete without -f" "guard-bash.ps1" (New-HookJson "Bash" @{ command = $removeR })
 
 $scriptContent = "from pathlib import Path`nprint(open('" + $targetName + "').read())`n"
 Expect-Block "6 generated script reads protected file" "guard-write.ps1" (New-HookJson "Write" @{ file_path = "script.py"; content = $scriptContent })
