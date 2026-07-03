@@ -115,6 +115,36 @@ function runAI(prompt) {
   return gemini.runAI(prompt, { timeoutMs: AI_TIMEOUT_MS });
 }
 
+// ---- 無料 Gemini キーの登録（受講者がモニター画面から一度だけ貼り付けて保存） ----------
+// 設計: コーチ（本体）はキー未登録だと沈黙するため、必要な瞬間にブラウザ画面から登録できる導線を用意する。
+//   保存先は gemini-client.js と同じ ~/.ai-safety/gemini-api-key.txt（SSOT）。既存の「6_AIコーチのキーを登録」
+//   スクリプトと同じ操作を、モニターの 127.0.0.1・トークン付きエンドポイント越しに行うだけ（新たな権限は増やさない）。
+// 安全: 保存先はこの固定パスのみ・キー書式（英数 _ -、20〜200 文字）だけ受理・0600 保存・キー本文はログに出さない。
+const KEY_FILE = gemini.KEY_FILE;
+const KEY_DIR = path.dirname(KEY_FILE);
+// AI Studio のキーは AIza… の英数字（_ - を含む）。空白・改行・引用符・URL が混ざった貼り付けを弾く。
+const KEY_RE = /^[A-Za-z0-9_-]{20,200}$/;
+
+function saveApiKey(raw) {
+  const key = String(raw == null ? '' : raw).trim();
+  if (!key) return { ok: false, text: 'キーが空です。AI Studio でコピーしたキーを貼り付けてから押してください。' };
+  if (!KEY_RE.test(key)) {
+    return {
+      ok: false,
+      text: 'キーの形が正しくないようです。AI Studio の「Create API key」で出る英数字（AIza… で始まる文字列）だけを貼り付けてください。空白・改行・引用符・URL は含めないでください。',
+    };
+  }
+  try {
+    // dir 0700 / file 0600（他ユーザーにキーを読ませない）。umask 0o077 と併せて確実に絞る。
+    fs.mkdirSync(KEY_DIR, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(KEY_FILE, key, { mode: 0o600 });
+    try { fs.chmodSync(KEY_FILE, 0o600); } catch { /* 既存ファイルの権限も念のため絞る（ベストエフォート） */ }
+    return { ok: true, text: '登録できました。AIコーチがすぐ使えます。' };
+  } catch {
+    return { ok: false, text: 'キーの保存に失敗しました。「6_AIコーチのキーを登録」をダブルクリックして登録してみてください。' };
+  }
+}
+
 // ---- now.html から決定的解説を取り出す（explainer は一切変更しない） -------
 function htmlUnescape(s) {
   return String(s)
@@ -127,9 +157,11 @@ function pickAll(html, re) { return [...html.matchAll(re)].map((m) => htmlUnesca
 
 // d-claude（DeepSeek 駆動 claude）セッションかを判定する。
 // d-claude は会話本文が DeepSeek（中国管轄）に流れる経路で、ここで AI コーチに相談すると
-// コマンド本文が DeepSeek に加えて Google(Gemini) にも届く＝送信先が増える。そのため
-// d-claude のときは Gemini へ「コマンド本文」を送らず、分類結果（操作の種類・注意カテゴリ）
-// だけを送る（redact）＋ UI で利用者に明示する。
+// コマンド本文が DeepSeek に加えて Google(Gemini) にも届く＝送信先が増える。
+// 現挙動: それでもコマンド本文は「全部まるっと」Gemini に送って具体的に答えさせる
+// （本物の API キー書式だけ maskSecrets/contextBlock で伏字＝鍵の外部漏れだけ防ぐ）。
+// 増える送信先については UI バナー(#dredact)で利用者に常時明示し、機微を含むコマンドは
+// 相談しないよう促す。coachRedact はこのバナー表示のオン/オフ判定に使う（本文の送信可否は変えない）。
 // signal: d-claude の起動スクリプト(launch-deepseek-gateway.*)が LOG_DIR に "coach-engine"
 // ファイル（中身 "d-claude"）を置き、終了時に消す。別プロセスのモニターが安全に読めるよう
 // ファイル方式にし、消し忘れ（クラッシュ）対策に更新時刻が新しいときだけ有効とする。
@@ -159,6 +191,8 @@ function readState() {
     answer: readAnswer(),
   };
   state.coachable = hasCoachContext(state);
+  // コーチ（本体）が使えるかは無料キー登録が前提。UI が未登録時に登録パネルを出せるよう真偽だけ渡す（キー本文は出さない）。
+  state.keyPresent = !!resolveApiKey();
   return state;
 }
 
@@ -203,7 +237,10 @@ function hasCoachContext(st) {
   if (!st || !st.hasCard || !String(st.cmd || '').trim()) return false;
   const tool = toolFromMeta(st.meta);
   if (!tool) return false;
-  return tool !== 'prompt' && tool !== 'post-output';
+  // prompt（利用者プロンプト）は本文が st.cmd にあるので相談可にする＝受講者が
+  //   「この質問はなぜ止まった？」をコーチに聞ける導線を残す（空文脈は上の cmd 判定で弾く）。
+  // post-output（AI 応答後カード）は「AI回答」タブ側で相談する専用経路があるため、ここでは対象外のまま。
+  return tool !== 'post-output';
 }
 
 const NO_COACH_CONTEXT_MSG =
@@ -211,8 +248,8 @@ const NO_COACH_CONTEXT_MSG =
   '危険なコマンド実行・ファイル書き込み・外部アクセスなどの安全イベントが出た時だけ、ここで具体的に相談できます。';
 
 const NO_ANSWER_CONTEXT_MSG =
-  'AI 回答本文をまだ取得できていません。この機能は Stop / AfterModel / AfterAgent など、' +
-  '回答本文または transcript_path が hook に届く環境で使えます。Codex など一部環境では取得できない場合があります。';
+  'このAIツールでは、回答本文をモニターに渡せない場合があります。そのときは回答をここで相談できませんが、' +
+  '危険な操作の確認などの安全イベントは、このモニターでこれまでどおり確認できます。あなたの操作ミスではありません。';
 
 function localDate() {
   // ガード(audit_log)は `date +%F`＝ローカル日付でファイル名を作るので、それに合わせる。
@@ -394,6 +431,17 @@ const server = http.createServer(async (req, res) => {
     const r = await runAI(prompt);
     return sendJson(res, 200, r.ok ? { ok: true, text: r.text } : { ok: false, text: r.text || AI_UNAVAILABLE });
   }
+  // 無料キーの登録（受講者がモニター画面から一度だけ貼り付け）。トークンは冒頭で検証済み・127.0.0.1 のみ。
+  if (req.method === 'POST' && url.pathname === '/save-key') {
+    let payload = {};
+    try { payload = JSON.parse(await readBody(req) || '{}'); }
+    catch (e) {
+      if (e && e.code === 'TOO_LARGE') return sendJson(res, 413, { error: 'too large' });
+      return sendJson(res, 400, { error: 'bad json' });
+    }
+    // 失敗も 200 + {ok:false} で返す（既存の /explain・/ask と同じく、クライアントは j.ok / j.text だけ見る）。
+    return sendJson(res, 200, saveApiKey(payload.key));
+  }
   return sendJson(res, 404, { error: 'not found' });
 });
 
@@ -421,7 +469,7 @@ if (require.main === module) {
 }
 
 // テスト用に純関数を公開（require.main === module の起動経路には影響しない）。
-module.exports = { contextBlock, answerContextBlock, maskSecrets, hasCoachContext, coachRedact };
+module.exports = { contextBlock, answerContextBlock, maskSecrets, hasCoachContext, coachRedact, saveApiKey };
 
 // ---- コーチ UI（1ファイル完結。AI 出力は textContent で表示=XSS安全） -----
 function renderPage() {
@@ -473,6 +521,20 @@ button:disabled{opacity:.5;cursor:default}
 .events .ev-cmd{font-family:monospace,'Courier New';color:#f0c080;word-break:break-all;overflow-wrap:anywhere}
 .events .ev-reason{opacity:.7;font-size:12px}
 .muted{opacity:.6}
+.keysetup{border:2px solid #e0b341;background:#241f12;border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.keysetup .ks-title{font-size:15px;font-weight:700;color:#ffd979;margin:0 0 8px}
+.ks-steps{margin:0 0 10px;padding-left:1.3em;font-size:13px;line-height:1.9}
+.ks-steps a.ks-open{color:#79c0ff;font-weight:700}
+.ks-row{display:flex;gap:8px;margin-bottom:6px}
+.ks-row input{flex:1;font-family:inherit;font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid #6a5a2a;background:#0d0f13;color:#e6e6e6}
+.ks-row button{white-space:nowrap;background:#2f6a2a;border-color:#4c8f37;color:#fff;font-weight:700}
+.ks-row button:hover{background:#3a8034}
+.ks-msg{font-size:12px;margin:0 0 4px}
+.ks-msg.ok{color:#7ee787;opacity:1}
+.ks-msg.danger{color:#ffb3ad;opacity:1}
+.ks-fallback{font-size:12px}
+.linkbtn{background:none;border:none;color:#9ad;text-decoration:underline;padding:6px 0;font-size:13px;cursor:pointer}
+.linkbtn:hover{background:none;color:#bfe0ff}
 </style></head>
 <body><div class="wrap">
 <h1 class="hdr">🛡️ 安全イベント / AI回答モニター</h1>
@@ -495,6 +557,20 @@ button:disabled{opacity:.5;cursor:default}
 
 <div class="coach">
   <h2 id="coach-title">🧑‍🏫 安全イベントが出た時だけ相談する</h2>
+  <div id="keysetup" class="keysetup" hidden>
+    <div class="ks-title">🔑 AIコーチを使うには「無料キー」の登録が必要です（初回だけ・約1分）</div>
+    <ol class="ks-steps">
+      <li><a class="ks-open" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">① Google AI Studio を開く（ここをクリック）</a> → Google でログイン</li>
+      <li>「Create API key（APIキーを作成）」を押して、出てきた <b>AIza… で始まる文字列</b>をコピー</li>
+      <li>コピーしたキーを下の欄に貼り付けて「登録して有効化」を押す</li>
+    </ol>
+    <div class="ks-row">
+      <input id="keyinput" type="text" inputmode="latin" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="ここに AIza… のキーを貼り付け" />
+      <button id="b-savekey" type="button">登録して有効化</button>
+    </div>
+    <div id="ks-msg" class="ks-msg muted">キーはこのパソコンの中だけに保存されます（外部には送りません・権限600）。</div>
+    <div class="ks-fallback muted">うまくいかない時は <b>「6_AIコーチのキーを登録」</b> をダブルクリックしても登録できます。</div>
+  </div>
   <div id="target-note" class="disclaim">検索や会話の中身は表示されない場合があります。この画面は、危険なコマンド実行・ファイル書き込み・外部アクセスなどの安全イベントを確認するためのものです。</div>
   <div id="hi" class="hibanner" style="display:none">⚠️ 自動判定は「高リスク」です。AI が何と言っても、基本は「許可しない」のが安全です。</div>
   <div id="dredact" class="disclaim" style="display:none">ℹ️ これは d-claude（DeepSeek 版）のセッションです。AI コーチに相談すると、表示中のコマンド本文も Google(Gemini) に送られます（API キーなどの秘密の形だけ自動で伏字）。機微情報を含むコマンドは相談しないでください。</div>
@@ -508,6 +584,7 @@ button:disabled{opacity:.5;cursor:default}
   </div>
   <div id="answer" class="answer muted">安全イベントが出た時だけ、AI（Gemini）に相談できます。</div>
   <div class="disclaim">⚠️ Gemini の回答は「参考」です。安全イベントや AI回答の本文を外部の Gemini に送って相談します。あやしい時は実行・採用しないのが安全です。</div>
+  <button id="b-keytoggle" type="button" class="linkbtn" hidden>🔑 キーを登録／変更する</button>
 </div>
 
 </div>
@@ -518,6 +595,7 @@ let lastCmd = null;
 let lastAnswerText = null;
 let activeTarget = 'event';
 let currentState = null;
+let keyPanelOpen = false; // 登録済みでもユーザーが「変更する」を押したら開く
 
 function riskClass(meta){ if(/risk=high/.test(meta))return'high'; if(/risk=medium/.test(meta))return'medium'; return ''; }
 
@@ -527,8 +605,11 @@ function summarizeObserved(observed){
     const o=JSON.parse(observed);
     const tool=o.tool_name||o.hook_event_name||'';
     const ti=o.tool_input||{};
-    const detail=ti.command||ti.url||ti.file_path||ti.path||o.prompt||ti.prompt||'';
-    return {tool:String(tool), detail:String(detail)};
+    // 受講者の中心操作（検索・Grep）が履歴に具体的に映るよう query(WebSearch)/pattern(Grep) も拾う。
+    const detail=ti.command||ti.url||ti.file_path||ti.path||ti.query||ti.pattern||o.prompt||ti.prompt||'';
+    // Agent/Task 等の長いプロンプト全文を履歴に出さない（catch 側と同じ 300 字上限でクリップ）。
+    const d=String(detail);
+    return {tool:String(tool), detail: d.length>300 ? d.slice(0,300)+'…' : d};
   }catch(e){ return {tool:'', detail:String(observed).slice(0,300)}; }
 }
 
@@ -571,6 +652,36 @@ function updateCoachControls(s, resetAnswer){
     ans.className='answer muted';
     ans.textContent = ok ? 'ボタンを押すと、AI（Gemini）が日本語で答えます。' : targetEmptyMessage();
   }
+}
+
+// キー未登録なら目立つ登録パネルを出す。登録済みなら畳んで「登録／変更する」リンクだけ残す
+// （キーが無効だった時に貼り直せるように）。表示テキストは全て textContent か静的DOM＝XSS安全。
+function updateKeySetup(s){
+  const has = !!(s && s.keyPresent);
+  const show = !has || keyPanelOpen;
+  $('keysetup').hidden = !show;
+  $('b-keytoggle').hidden = !has;
+  $('b-keytoggle').textContent = keyPanelOpen ? '🔑 とじる' : '🔑 キーを登録／変更する';
+}
+
+async function saveKey(){
+  const v = $('keyinput').value.trim();
+  const msg = $('ks-msg');
+  if(!v){ msg.className='ks-msg danger'; msg.textContent='キーが空です。貼り付けてから押してください。'; return; }
+  $('b-savekey').disabled=true; msg.className='ks-msg'; msg.textContent='登録しています…';
+  try{
+    const r = await fetch('/save-key?t='+encodeURIComponent(T), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key:v})});
+    const j = await r.json();
+    if(j.ok){
+      $('keyinput').value='';
+      keyPanelOpen=false;
+      msg.className='ks-msg ok'; msg.textContent=j.text||'登録できました。';
+      await poll(); // keyPresent を取り直してパネルを畳む
+    } else {
+      msg.className='ks-msg danger'; msg.textContent=j.text||'登録に失敗しました。';
+    }
+  }catch(e){ msg.className='ks-msg danger'; msg.textContent='登録に失敗しました。ネットワークや権限を確認してください。'; }
+  finally{ $('b-savekey').disabled=false; }
 }
 
 function renderEventCard(s){
@@ -623,6 +734,7 @@ async function poll(){
     if(!r.ok) return;
     const s = await r.json();
     currentState = s;
+    updateKeySetup(s);
     renderEventCard(s);
     renderAnswerCard(s);
     // 高リスク時は固定警告（AI が何と言おうと許可しない目安）を出す
@@ -673,6 +785,9 @@ async function callAI(pathname, body){
 
 $('tab-event').onclick = ()=>setTarget('event');
 $('tab-answer').onclick = ()=>setTarget('answer');
+$('b-savekey').onclick = saveKey;
+$('keyinput').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); saveKey(); }});
+$('b-keytoggle').onclick = ()=>{ keyPanelOpen = !keyPanelOpen; updateKeySetup(currentState); if(keyPanelOpen) $('keyinput').focus(); };
 $('b-explain').onclick = ()=>callAI('/explain',{});
 $('b-ok').onclick = ()=>callAI('/ask',{question: activeTarget === 'answer' ? 'このAI回答を信じて、そのまま進めても大丈夫ですか？危ない点や事実確認が必要な点があれば教えてください。' : 'このコマンドを許可しても大丈夫ですか？初心者にもわかるように、安全なら理由、危険なら何が起きるかを教えてください。'});
 $('b-ask').onclick = ()=>{ const q=$('q').value.trim(); if(q) callAI('/ask',{question:q}); };

@@ -66,9 +66,9 @@ if [ -f "$HOOKS_JSON" ] && [ -f "$SAFE_PROFILE" ]; then
   } >> "$SAFE_PROFILE"
 fi
 
-[ -f "$AI_SAFE_POLICY" ] || { echo "AI Safety package is not installed in workspace: $workspace" >&2; exit 2; }
+[ -f "$AI_SAFE_POLICY" ] || { echo "AI安全パッケージがこのフォルダにまだ導入されていません。" >&2; echo "対象フォルダ: $workspace" >&2; echo "先に「導入(インストール)」を実行してから、もう一度この起動ボタンを押してください。" >&2; exit 2; }
 if [ "${AI_SAFE_DRY_RUN:-}" != "1" ]; then
-  [ -f "$SAFE_CONFIG" ] || { echo "Codex safety config was not found: $SAFE_CONFIG" >&2; exit 2; }
+  [ -f "$SAFE_CONFIG" ] || { echo "Codex の安全設定ファイルがまだ準備できていません。" >&2; echo "先に「導入(インストール)」を実行してから、もう一度この起動ボタンを押してください。" >&2; echo "（確認した場所: ${SAFE_CONFIG}）" >&2; exit 2; }
 fi
 
 # A-1: workspace 内 .codex/auth.json に物理ファイルが残っていれば削除する (旧バージョン残骸)。
@@ -84,7 +84,9 @@ SRC_AUTH="$HOME/.codex/auth.json"
 SAFE_AUTH="$SAFE_CODEX_HOME/auth.json"
 if [ "${AI_SAFE_DRY_RUN:-}" != "1" ]; then
   if [ ! -f "$SRC_AUTH" ]; then
-    echo "Codex auth not found at $SRC_AUTH. Please run 'codex login' first." >&2
+    echo "Codex にまだログインしていません。" >&2
+    echo "ターミナルで『codex login』を実行してログインしてから、もう一度この起動ボタンを押してください。" >&2
+    echo "（確認した場所: ${SRC_AUTH}）" >&2
     exit 2
   fi
   if [ ! -e "$SAFE_AUTH" ]; then
@@ -137,6 +139,14 @@ fi
 if [ "${AI_SAFE_DRY_RUN:-}" = "1" ]; then
   printf '%s ' "${cmd[@]}"; [ -n "$prompt" ] && printf '%q' "$prompt"; printf '\n'
   exit 0
+fi
+
+# codex バイナリ検出（PATH 不在時は日本語で案内し、bash の "command not found" を防ぐ）。
+if ! command -v codex >/dev/null 2>&1; then
+  echo "codex コマンドが見つかりません。" >&2
+  echo "先に codex をインストールしてください（例: npm install -g @openai/codex）。" >&2
+  echo "インストール済みなのに出る場合は、ターミナルを開き直すか PATH を確認してください。" >&2
+  exit 1
 fi
 
 if [ -n "$prompt" ]; then

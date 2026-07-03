@@ -43,9 +43,16 @@ try {
     try { Invoke-Explain -HookInput $inputObj -Mode "observe" -Policy $policy } catch { }
 
     # 監査 trace（best-effort）。decision="observe" は deny でも allow でもない可視化マーカー。
+    # ObservedText には hook 入力(tool_name + tool_input)を JSON で入れる。monitor-server の
+    # summarizeObserved が JSON.parse して query(WebSearch)/pattern(Grep)/path/command/url を
+    # 履歴に表示する。mac guard-observe.sh が observed に redact_text "$RAW_INPUT"（生 hook JSON）
+    # を入れているのと同等（パリティ）。秘密は Write-AuditLog 内の ConvertTo-RedactedText で伏字。
+    # 例外でも fail-open（tool 名だけの短い文字列に退避）。
     try {
         if ($null -ne $policy) {
-            Write-AuditLog $inputObj "observe" "observe" ("tool=" + $tool) "" $policy
+            $observed = ""
+            try { $observed = ConvertTo-SafeText $inputObj } catch { $observed = ("tool=" + $tool) }
+            Write-AuditLog $inputObj "observe" "observe" ("tool=" + $tool) $observed $policy
         }
     } catch { }
 

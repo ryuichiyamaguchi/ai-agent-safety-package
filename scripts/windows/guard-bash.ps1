@@ -6,21 +6,6 @@
 # 判定ロジックは scripts\common\two-key-judge.js（共有 Node モジュール）に集約。
 # ---------------------------------------------------------------------------
 
-# d-claude セッション検出（monitor-server.js の coachRedact / mac guard と同じ）。
-# coach-engine マーカーが存在し fresh<12h で中身 "d-claude" のとき $true。
-function Test-IsDClaudeSession([string]$LogDir) {
-    try {
-        $marker = Join-Path $LogDir "coach-engine"
-        if (-not (Test-Path -LiteralPath $marker)) { return $false }
-        $info = Get-Item -LiteralPath $marker -ErrorAction SilentlyContinue
-        if (-not $info) { return $false }
-        $ageMs = ((Get-Date) - $info.LastWriteTime).TotalMilliseconds
-        if ($ageMs -lt 0 -or $ageMs -gt (12 * 60 * 60 * 1000)) { return $false }
-        $content = (Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue)
-        return (($content -ne $null) -and ($content.Trim() -eq "d-claude"))
-    } catch { return $false }
-}
-
 # Claude PreToolUse permissionDecision JSON を stdout に出して exit 0。
 # JSON は exit 0 のときだけ処理される（exit 2 では無視される＝決定的 deny 経路とは別）。
 function Emit-AssistedDecision([string]$Decision, [string]$Reason) {
@@ -71,16 +56,28 @@ function Add-AssistedNowLine([string]$LogDir, [string]$Title, [string]$Detail) {
 # assisted approval 本体。判定を下したら（allow/ask いずれも）Emit-AssistedDecision で exit する。
 # OFF / スキップ条件のときだけ呼び出し側の従来 Allow にフォールスルーする（$false を返す）。
 function Invoke-AssistedApproval([object]$HookInput, [string]$Command, [object]$Policy) {
-    if ($env:AI_SAFE_ASSISTED_APPROVAL -ne "1") { return $false }  # opt-in でなければ素通り
-
     $logDir = $env:AI_SAFE_LOG_DIR
     if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
+
+    if ($env:AI_SAFE_ASSISTED_APPROVAL -ne "1") {
+        # judge が回らない（env≠1）。d-claude 経路（本来 judge ON のはず）では「黙って無効化」を
+        # 検知できるよう OFF を必ず監査＋now に残す。素の claude-safe/codex-safe（DS_CLAUDE_MODE≠1）
+        # では OFF が正常なのでログは残さない（従来どおり素通り）。判定ロジックは変えない（表示のみ）。
+        if ($env:DS_CLAUDE_MODE -eq "1") {
+            Write-AuditLog $HookInput "bash" "assist-off" "assisted OFF (env≠1): 2鍵judge無効のまま従来allowへフォールスルー" $Command $Policy
+            Add-AssistedNowLine $logDir "⚠️ AI2鍵judge OFF" "env≠1 のため判定せず従来allow（d-claude では要確認）"
+        }
+        return $false  # opt-in でなければ素通り
+    }
+
+    # judge を実施（発火）することを監査に明示。以降 assist-key1/2 と最終 allow/ask も記録される。
+    Write-AuditLog $HookInput "bash" "assist-on" "2鍵judgeで判定します（AI_SAFE_ASSISTED_APPROVAL=1）" $Command $Policy
 
     # d-claude でも Gemini 2 鍵判定を有効にする。判定役は DeepSeek でなく独立した Gemini
     # （two-key-judge.js → gemini-client.js）なので自己審査にならない。秘密・保護パス・決定的
     # 危険コマンドは上流で block 済みなので、judge に渡るのはグレーな定型コマンドのみ。
     # 以前はここで d-claude を skip して従来 Allow に倒していたが、自律運用の要望で廃止。
-    # 無効化したい場合は起動側で AI_SAFE_ASSISTED_APPROVAL=0 にする（launch-deepseek-gateway.ps1 参照）。
+    # d-claude で無効化したい場合は起動側で AI_SAFE_ASSISTED_APPROVAL_OPTOUT=1 を指定する（launch-deepseek-gateway.ps1 参照）。
 
     # node が無ければ fail-closed で ask（opt-in 時は安全側に倒す）。
     $node = Resolve-NodeBin

@@ -59,6 +59,18 @@ function observeNowHtml() {
   ].join('\n');
 }
 
+function blankBodyNowHtml() {
+  // 本文が空白だけのカード（tool は prompt/post-output 以外だが cmd が空）。
+  return [
+    '<!doctype html><html><body>',
+    '<div class="ctitle">操作</div>',
+    '<div class="cmeta">2026-06-18 10:00:30 ・ tool=Read ・ risk=low ・ card=default-observe</div>',
+    '<div class="action-label">Read</div>',
+    '<pre class="action-cmd">   </pre>',
+    '</body></html>',
+  ].join('\n');
+}
+
 function latestAnswerJson() {
   return JSON.stringify({
     version: 1,
@@ -113,13 +125,19 @@ async function main() {
     assert.match(page, /AI回答/, 'page should include the AI answer tab');
     assert.match(page, /検索や会話の中身は表示されない場合があります/, 'page should disclose monitor coverage limits');
 
+    // プロンプトカード（本文あり）はコーチ相談可＝受講者が「この質問はなぜ止まった？」を聞ける。
     fs.writeFileSync(path.join(tmp, 'now.html'), promptOnlyNowHtml(), 'utf8');
     const promptState = await fetch(new URL('/state' + url.search, url.origin)).then((res) => res.json());
-    assert.equal(promptState.coachable, false, 'prompt-only cards are not coachable');
-    const reply = await requestJson(url, '/ask', { question: 'これを許可していい？' });
-    assert.equal(reply.ok, true);
-    assert.match(reply.text, /この画面では判断材料がありません/, 'prompt-only cards should not call Gemini');
-    assert.doesNotMatch(reply.text, /Gemini API キーが未設定/, 'prompt-only cards must not require Gemini');
+    assert.equal(promptState.coachable, true, 'prompt cards with a body are coachable');
+    const reply = await requestJson(url, '/ask', { question: 'この質問はなぜ止まった？' });
+    // coachable なので Gemini へ到達する（本テスト環境は鍵未設定なので鍵チェックに達する）。
+    assert.match(reply.text, /Gemini API キーが未設定/, 'coachable prompt cards should reach the Gemini key check');
+    assert.doesNotMatch(reply.text, /この画面では判断材料がありません/, 'coachable prompt cards must not fall back to no-context');
+
+    // 空文脈（本文が空白だけのカード）は coachable にしない（誤爆防止）。
+    fs.writeFileSync(path.join(tmp, 'now.html'), blankBodyNowHtml(), 'utf8');
+    const blankState = await fetch(new URL('/state' + url.search, url.origin)).then((res) => res.json());
+    assert.equal(blankState.coachable, false, 'blank-body cards are not coachable');
 
     fs.writeFileSync(path.join(tmp, 'now.html'), observeNowHtml(), 'utf8');
     const observeState = await fetch(new URL('/state' + url.search, url.origin)).then((res) => res.json());

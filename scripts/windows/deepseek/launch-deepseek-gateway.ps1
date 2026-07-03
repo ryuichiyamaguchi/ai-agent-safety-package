@@ -77,8 +77,14 @@ try {
   $env:DS_CLAUDE_MODE = "1"
   # d-claude ではグレーコマンドの危険判定を独立した Gemini(2鍵)に任せて自律的に回す（自己審査回避）。
   # 両鍵 approve のときだけ自動許可、怪しければ人間に確認(fail-closed)。決定的 deny の底は不変。
-  # 無効化したい場合は、このスクリプトを呼ぶ前に $env:AI_SAFE_ASSISTED_APPROVAL='0' を設定しておく。
-  if (-not $env:AI_SAFE_ASSISTED_APPROVAL) { $env:AI_SAFE_ASSISTED_APPROVAL = "1" }
+  # judge は無条件で ON。PowerShell では [bool]"0"=True のため以前の弱いガード `if (-not $env:...)`
+  # は残存 setx の "0" を上書きできず judge が黙って OFF になり得た（opt-out 撤廃）。
+  # 無効化は残存値では起きない別 env を明示指定したときだけ（既定は必ず judge ON）。
+  if ($env:AI_SAFE_ASSISTED_APPROVAL_OPTOUT -eq "1") {
+    $env:AI_SAFE_ASSISTED_APPROVAL = "0"
+  } else {
+    $env:AI_SAFE_ASSISTED_APPROVAL = "1"
+  }
   # モニターへ d-claude 目印を置く（AI コーチが Gemini へコマンド本文を送らないように）。
   try { New-Item -ItemType Directory -Force -Path $coachLogDir | Out-Null; Set-Content -NoNewline -Encoding ascii -LiteralPath $coachMarker -Value 'd-claude' } catch {}
   Write-Host "送信検査 Gateway 稼働中 (127.0.0.1:$port)。DeepSeek へは検査後に転送されます。"

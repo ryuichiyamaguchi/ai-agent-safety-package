@@ -72,8 +72,13 @@ export DS_CLAUDE_MODE=1
 # d-claude ではグレーコマンドの危険判定を独立した Gemini(2鍵)に任せて自律的に回す。
 # 判定役は DeepSeek でなく Gemini なので「自分のコマンドを自分で審査」にならない。両鍵が
 # approve のときだけ自動許可、少しでも怪しければ人間に確認(fail-closed)。決定的 deny の底は不変。
-# 無効化したい場合は、このスクリプトを呼ぶ前に AI_SAFE_ASSISTED_APPROVAL=0 を export しておく。
-export AI_SAFE_ASSISTED_APPROVAL="${AI_SAFE_ASSISTED_APPROVAL:-1}"
+# judge は無条件で ON。以前の ${VAR:-1} は残存 "0"（旧 export/setx）を上書きできず judge が黙って
+# OFF になり得たため撤廃（Windows の .ps1 と対称）。無効化は残存値では起きない別 env を明示指定したときだけ。
+if [ "${AI_SAFE_ASSISTED_APPROVAL_OPTOUT:-0}" = "1" ]; then
+  export AI_SAFE_ASSISTED_APPROVAL="0"
+else
+  export AI_SAFE_ASSISTED_APPROVAL="1"
+fi
 # モニターへ d-claude 目印を置く（AI コーチが Gemini へコマンド本文を送らないように）。
 mkdir -p "$(dirname "$COACH_MARKER")" 2>/dev/null && printf 'd-claude' > "$COACH_MARKER" 2>/dev/null || true
 echo "送信検査 Gateway 稼働中（127.0.0.1:${PORT}）。DeepSeek へは検査後に転送されます。"

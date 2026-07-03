@@ -86,20 +86,48 @@ function resolveAgyBin() {
   return 'agy'; // 見つからなければ PATH 解決に任せる
 }
 
+// Windows の .cmd/.bat を shell:true 無しで安全に起動するためのエスケープ。shell:true は引数を
+// 無エスケープで連結するため & や | でコマンドインジェクションになる（DEP0190 / CVE-2024-27980）。
+// 2 層エスケープ（argv 解析用の \ と " 処理 → cmd.exe メタ文字を ^ で無害化。.cmd/.bat は %* 経由で
+// 二重解釈されるので二重エスケープ）で、& や | を含む日本語プロンプトも 1 引数として agy に渡る。
+// cross-spawn と同一手法。
+const WIN_META_RE = /([()[\]%!^"`<>&|;, *?])/g;
+function winEscapeCommand(cmd) {
+  return String(cmd).replace(WIN_META_RE, '^$1');
+}
+function winEscapeArgument(arg, doubleEscape) {
+  arg = String(arg);
+  arg = arg.replace(/(\\*)"/g, '$1$1\\"'); // " の前の \ 列を倍化して " をエスケープ
+  arg = arg.replace(/(\\*)$/, '$1$1');      // 末尾の \ 列を倍化
+  arg = '"' + arg + '"';                     // 全体を " で囲む
+  arg = arg.replace(WIN_META_RE, '^$1');     // cmd.exe メタ文字を ^ で無害化
+  if (doubleEscape) arg = arg.replace(WIN_META_RE, '^$1');
+  return arg;
+}
+
 // agy -p を子プロセスで実行。プロンプトは引数で渡す（stdin 非対応を実測済み）。
 // 返り値: { ok, code, stderr }
 function runAgy(agyPrompt) {
   return new Promise((resolve) => {
     const bin = resolveAgyBin();
-    // .cmd/.bat は shell 経由でないと起動できない場合がある（Windows）。exe/ネイティブは shell 不要。
-    const useShell = IS_WIN && /\.(cmd|bat)$/i.test(bin);
+    // .cmd/.bat は CreateProcess で直接起動できず cmd.exe が要るが、shell:true は使わない（上記の
+    // インジェクション対策）。エスケープ済みコマンド行を cmd.exe に渡し windowsVerbatimArguments で
+    // 二重処理を防ぐ。exe/ネイティブ（mac 含む）は shell なしで直接起動（libuv が引数を安全に quoting）。
+    const isBatch = IS_WIN && /\.(cmd|bat)$/i.test(bin);
+    let file, spawnArgs, spawnOpts;
+    if (isBatch) {
+      const line = [winEscapeCommand(bin), winEscapeArgument('-p', true), winEscapeArgument(agyPrompt, true)].join(' ');
+      file = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
+      spawnArgs = ['/d', '/s', '/c', '"' + line + '"'];
+      spawnOpts = { shell: false, windowsVerbatimArguments: true, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] };
+    } else {
+      file = bin;
+      spawnArgs = ['-p', agyPrompt];
+      spawnOpts = { shell: false, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] };
+    }
     let child;
     try {
-      child = spawn(bin, ['-p', agyPrompt], {
-        shell: useShell,
-        windowsHide: true,
-        stdio: ['ignore', 'ignore', 'pipe'],
-      });
+      child = spawn(file, spawnArgs, spawnOpts);
     } catch (e) {
       return resolve({ ok: false, code: -1, stderr: 'agy を起動できませんでした: ' + e.message });
     }
@@ -243,4 +271,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { generate, resolveAgyBin, findImagesSince, safeName, handle, TOOL };
+module.exports = { generate, runAgy, resolveAgyBin, winEscapeCommand, winEscapeArgument, findImagesSince, safeName, handle, TOOL };

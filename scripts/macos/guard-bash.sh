@@ -45,7 +45,19 @@ has_dangerous_command && block "dangerous shell command matched"
 # ---------------------------------------------------------------------------
 assisted_approval() {
   # opt-in でなければ何もしない（呼び出し側が従来 allow に進む）。
-  [ "${AI_SAFE_ASSISTED_APPROVAL:-0}" = "1" ] || return 1
+  if [ "${AI_SAFE_ASSISTED_APPROVAL:-0}" != "1" ]; then
+    # judge が回らない（env≠1）。d-claude 経路（本来 judge ON のはず）では「黙って無効化」を検知できるよう
+    # OFF を必ず監査＋now に残す。素の claude-safe/codex-safe（DS_CLAUDE_MODE≠1）では OFF が正常なので残さない。
+    # 判定ロジックは変えない（表示のみ・従来 allow にフォールスルー）。
+    if [ "${DS_CLAUDE_MODE:-0}" = "1" ]; then
+      audit_log "assist-off" "assisted OFF (env≠1): 2鍵judge無効のまま従来allowへフォールスルー"
+      assisted_now_append "⚠️ AI2鍵judge OFF" "env≠1 のため判定せず従来allow（d-claude では要確認）"
+    fi
+    return 1
+  fi
+
+  # judge を実施（発火）することを監査に明示。以降 assist-key1/2 と最終 allow/ask も記録される。
+  audit_log "assist-on" "2鍵judgeで判定します（AI_SAFE_ASSISTED_APPROVAL=1）"
 
   # d-claude（DeepSeek 駆動）でも Gemini 2 鍵判定を有効にする。判定役は DeepSeek ではなく
   # 独立した Gemini（two-key-judge.js → gemini-client.js）なので「自分のコマンドを自分で
@@ -53,8 +65,8 @@ assisted_approval() {
   # 危険コマンドは上流（has_sensitive_text / has_protected_path / has_dangerous_command）で
   # block 済みなので、judge に渡るのはグレーな定型コマンドのみ（秘密は Google に出ない）。
   # 以前はここで d-claude を skip して従来 allow に倒していたが、「AI が危険判定して自律的に
-  # 回す」要望によりスキップを廃止。無効化したい場合は起動側で AI_SAFE_ASSISTED_APPROVAL=0
-  # を export する（launch-deepseek-gateway.sh 参照）。
+  # 回す」要望によりスキップを廃止。d-claude で無効化したい場合は起動側で
+  # AI_SAFE_ASSISTED_APPROVAL_OPTOUT=1 を指定する（launch-deepseek-gateway.sh 参照）。
 
   # node が無ければ fail-closed で ask（従来 allow には倒さない＝opt-in 時は安全側）。
   local node_bin

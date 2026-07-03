@@ -38,8 +38,16 @@ if [ "${DS_CLAUDE_MODE:-}" != "1" ]; then
   unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_CUSTOM_MODEL_OPTION
 fi
 
-[ -f "$settings" ] || { echo "Claude safety settings were not found: $settings" >&2; exit 2; }
-[ -f "$AI_SAFE_POLICY" ] || { echo "AI Safety package is not installed in workspace: $workspace" >&2; exit 2; }
+[ -f "$settings" ] || { echo "Claude の安全設定ファイルが見つかりませんでした。" >&2; echo "先に「導入(インストール)」を実行してから、もう一度この起動ボタンを押してください。" >&2; echo "（確認した場所: ${settings}）" >&2; exit 2; }
+[ -f "$AI_SAFE_POLICY" ] || { echo "AI安全パッケージがこのフォルダにまだ導入されていません。" >&2; echo "対象フォルダ: $workspace" >&2; echo "先に「導入(インストール)」を実行してから、もう一度この起動ボタンを押してください。" >&2; exit 2; }
+
+# claude バイナリ検出（PATH 不在時は日本語で案内し、bash の "command not found" を防ぐ）。
+if ! command -v claude >/dev/null 2>&1; then
+  echo "claude コマンドが見つかりません。" >&2
+  echo "先に Claude Code をインストールしてください（例: npm install -g @anthropic-ai/claude-code）。" >&2
+  echo "インストール済みなのに出る場合は、ターミナルを開き直すか PATH を確認してください。" >&2
+  exit 1
+fi
 
 # --permission-mode の対応有無を help で判定（非対応の Claude Code でも壊れないように）
 claude_args=(--settings "$settings" --setting-sources user,project,local)

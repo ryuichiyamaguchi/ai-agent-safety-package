@@ -70,10 +70,16 @@ if ((Test-Path -LiteralPath $hooksJson) -and (Test-Path -LiteralPath $safeCodexP
 }
 
 if (-not (Test-Path -LiteralPath $env:AI_SAFE_POLICY)) {
-    throw "AI Safety package is not installed in workspace: $Workspace"
+    Write-Host "AI安全パッケージがこのフォルダにまだ導入されていません。"
+    Write-Host "対象フォルダ: $Workspace"
+    Write-Host "先に「導入(インストール)」を実行してから、もう一度この起動ボタンを押してください。"
+    exit 1
 }
 if ($env:AI_SAFE_DRY_RUN -ne '1' -and -not (Test-Path -LiteralPath $safeCodexConfig)) {
-    throw "Codex safety config was not found: $safeCodexConfig"
+    Write-Host "Codex の安全設定ファイルがまだ準備できていません。"
+    Write-Host "先に「導入(インストール)」を実行してから、もう一度この起動ボタンを押してください。"
+    Write-Host "（確認した場所: $safeCodexConfig）"
+    exit 1
 }
 
 # auth.json は $HOME\.codex\auth.json をそのまま参照させる。
@@ -84,7 +90,10 @@ $srcAuth = Join-Path $HOME ".codex\auth.json"
 $safeCodexAuth = Join-Path $safeCodexHome "auth.json"
 
 if ($env:AI_SAFE_DRY_RUN -ne '1' -and -not (Test-Path -LiteralPath $srcAuth)) {
-    throw "Codex auth not found at $srcAuth. Please run 'codex login' first."
+    Write-Host "Codex にまだログインしていません。"
+    Write-Host "ターミナルで『codex login』を実行してログインしてから、もう一度この起動ボタンを押してください。"
+    Write-Host "（確認した場所: $srcAuth）"
+    exit 1
 }
 
 # A-1: workspace 内 .codex/auth.json に物理コピーが残っている場合は削除する (旧バージョン残骸)。

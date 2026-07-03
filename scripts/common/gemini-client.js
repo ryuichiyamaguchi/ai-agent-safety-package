@@ -29,9 +29,9 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.AI_SAFE_COACH_TIMEOUT || 60000);
 const MAX_RESPONSE_BYTES = 1 << 20; // 1MiB 上限（応答肥大化対策）
 
 const NO_KEY_MSG =
-  'Gemini API キーが未設定です。無料キーの取り方: Google AI Studio (https://aistudio.google.com/apikey) で' +
-  'キーを作成し、ファイル「' + KEY_FILE + '」に貼り付けて保存してください' +
-  '（または環境変数 GEMINI_API_KEY に設定）。設定したらモニターを開き直すと使えます。';
+  'Gemini API キーが未設定です。AIコーチを使うには、無料キーの登録が必要です（初回だけ）。' +
+  'モニター画面の「🔑 キーを登録／変更する」から、Google AI Studio (https://aistudio.google.com/apikey) で' +
+  '作ったキーを貼り付けて登録してください（「6_AIコーチのキーを登録」でも可。ファイル「' + KEY_FILE + '」／環境変数 GEMINI_API_KEY でも可）。登録後はすぐ使えます。';
 const BAD_KEY_MSG = 'Gemini API キーが無効でした（認証エラー）。AI Studio でキーを取り直して登録し直してください。';
 const RATE_MSG = 'いま無料枠の上限に達しているようです（少し待つと戻ります）。下の「自動の解説」も参考にしてください。';
 const MODEL_MSG = 'AI モデルが見つかりませんでした（モデル名の指定を確認してください）。';
