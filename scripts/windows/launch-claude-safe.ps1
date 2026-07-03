@@ -96,11 +96,16 @@ if ($env:DS_CLAUDE_MODE -eq '1') {
     # 無料で画像を作れるのは受講者環境では実質 Pollinations のみ（codex 無料枠=usage limit /
     # Gemini 無料 API=画像モデル limit:0）。API キー不要・無登録。無効化は $env:AI_SAFE_DCLAUDE_IMAGE='0'。
     # 検索 MCP と画像 MCP を 1 つの --mcp-config JSON に束ねて渡す（有効なものだけ載せる）。
+    # 画像は 2 系統: generate_image=Pollinations（無認証・文字なし向け・速い）/
+    # generate_image_agy=agy（Google アカウント無料・日本語文字入り/高品質・1枚20秒前後）。
+    # 切替: $env:AI_SAFE_DCLAUDE_IMAGE='0' / $env:AI_SAFE_DCLAUDE_AGY_IMAGE='0'。
     $searchMcp = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\gemini-search-mcp.js"))
     $imageMcp  = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\pollinations-image-mcp.js"))
+    $agyMcp    = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\agy-image-mcp.js"))
     $useSearch = ($env:AI_SAFE_DCLAUDE_SEARCH -ne '0') -and (Test-Path -LiteralPath $searchMcp)
     $useImage  = ($env:AI_SAFE_DCLAUDE_IMAGE  -ne '0') -and (Test-Path -LiteralPath $imageMcp)
-    if (($useSearch -or $useImage) -and ($helpText -match "--mcp-config")) {
+    $useAgy    = ($env:AI_SAFE_DCLAUDE_AGY_IMAGE -ne '0') -and (Test-Path -LiteralPath $agyMcp)
+    if (($useSearch -or $useImage -or $useAgy) -and ($helpText -match "--mcp-config")) {
         $logDir = $env:AI_SAFE_LOG_DIR
         if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
         try {
@@ -109,6 +114,7 @@ if ($env:DS_CLAUDE_MODE -eq '1') {
             $servers = @{}
             if ($useSearch) { $servers["gemini-search"]      = @{ command = "node"; args = @($searchMcp) } }
             if ($useImage)  { $servers["pollinations-image"] = @{ command = "node"; args = @($imageMcp) } }
+            if ($useAgy)    { $servers["agy-image"]          = @{ command = "node"; args = @($agyMcp) } }
             $mcpObj = @{ mcpServers = $servers }
             ($mcpObj | ConvertTo-Json -Depth 6 -Compress) | Set-Content -LiteralPath $mcpCfgPath -Encoding UTF8
             $argsList = $argsList + @("--mcp-config", $mcpCfgPath)
