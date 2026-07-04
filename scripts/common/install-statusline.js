@@ -46,12 +46,13 @@ function write(p, obj) {
 
 function statusLineFor(scriptAbs, osName) {
   if (osName === 'windows') {
-    const cmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '
-      + '"try { $p = \'' + scriptAbs.replace(/'/g, "''") + "'; "
-      + 'if ((Test-Path -LiteralPath $p) -and (Get-Command node -ErrorAction SilentlyContinue)) { node $p } } catch { }"';
+    // シンプルに node に絶対パスを渡すだけ。powershell ラッパーや $p/{}/| を使わないので、
+    // Claude Code がどのシェル経由で実行しても入れ子クォートで壊れない。node が PATH に
+    // 無ければ何も出ない（statusLine は失敗しても空表示になるだけで安全）。
+    const cmd = 'node "' + scriptAbs + '"';
     return { type: 'command', command: cmd, padding: 0, refreshInterval: 10 };
   }
-  // macos / unix
+  // macos / unix: login shell(-l) で PATH を読み込んでから node を探す。
   const cmd = "/bin/bash -lc 'p=\"" + scriptAbs.replace(/"/g, '\\"') + '"; '
     + '[ -f "$p" ] && command -v node >/dev/null 2>&1 && node "$p"\'';
   return { type: 'command', command: cmd, padding: 0, refreshInterval: 5 };
