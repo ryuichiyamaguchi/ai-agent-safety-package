@@ -1,4 +1,4 @@
-# install-statusline.ps1 — 軽量ステータスライン(statusline.mjs)を Claude 全体設定
+﻿# install-statusline.ps1 — 軽量ステータスライン(statusline.mjs)を Claude 全体設定
 # (%USERPROFILE%\.claude\settings.json) に登録する。claude / d-claude 両方に効く。
 # 配置: <workspace>\.ai-safety\hooks\windows\install-statusline.ps1
 param([string]$Mode = "install")
