@@ -102,10 +102,14 @@ if ($env:DS_CLAUDE_MODE -eq '1') {
     $searchMcp = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\gemini-search-mcp.js"))
     $imageMcp  = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\pollinations-image-mcp.js"))
     $agyMcp    = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\agy-image-mcp.js"))
+    # vision MCP=画像→テキスト（DeepSeek は画像を見られないので Gemini に見せて文字/説明を得る）。
+    # 検索と同じ無料 Gemini キーを使う。無効化は $env:AI_SAFE_DCLAUDE_VISION='0'。
+    $visionMcp = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\gemini-vision-mcp.js"))
     $useSearch = ($env:AI_SAFE_DCLAUDE_SEARCH -ne '0') -and (Test-Path -LiteralPath $searchMcp)
     $useImage  = ($env:AI_SAFE_DCLAUDE_IMAGE  -ne '0') -and (Test-Path -LiteralPath $imageMcp)
     $useAgy    = ($env:AI_SAFE_DCLAUDE_AGY_IMAGE -ne '0') -and (Test-Path -LiteralPath $agyMcp)
-    if (($useSearch -or $useImage -or $useAgy) -and ($helpText -match "--mcp-config")) {
+    $useVision = ($env:AI_SAFE_DCLAUDE_VISION -ne '0') -and (Test-Path -LiteralPath $visionMcp)
+    if (($useSearch -or $useImage -or $useAgy -or $useVision) -and ($helpText -match "--mcp-config")) {
         $logDir = $env:AI_SAFE_LOG_DIR
         if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
         try {
@@ -115,6 +119,7 @@ if ($env:DS_CLAUDE_MODE -eq '1') {
             if ($useSearch) { $servers["gemini-search"]      = @{ command = "node"; args = @($searchMcp) } }
             if ($useImage)  { $servers["pollinations-image"] = @{ command = "node"; args = @($imageMcp) } }
             if ($useAgy)    { $servers["agy-image"]          = @{ command = "node"; args = @($agyMcp) } }
+            if ($useVision) { $servers["gemini-vision"]      = @{ command = "node"; args = @($visionMcp) } }
             $mcpObj = @{ mcpServers = $servers }
             ($mcpObj | ConvertTo-Json -Depth 6 -Compress) | Set-Content -LiteralPath $mcpCfgPath -Encoding UTF8
             $argsList = $argsList + @("--mcp-config", $mcpCfgPath)
