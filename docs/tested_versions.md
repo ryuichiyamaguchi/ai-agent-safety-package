@@ -104,6 +104,7 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 | configs/codex/config.windows.toml | a29d775b798716fa523703831e146eed883e56ba8f8306a4fe2c524c18bc170c | v1.12.0 教室プロファイル: approval_policy on-request + approvals_reviewer auto_review + network_access true |
 | configs/gemini/policies/safety.toml | d63830fc7548c9987a1d84b7ec0212b6527f639a6af808ee29d00427ceb87f3c | v1.0.x から変更なし |
 | workspace-template/aiexclude.template | 9fee69aa1fa5dc7253ebb1419bc1f28b4ca24c8c794f5c6fcc011a1c4a2e444b | v1.0.x から変更なし |
+| workspace-template/dist-skills/hearing-ladder/SKILL.md | f6518a835afa3021f3e3dedb3d1580cf1feec7c926753d1db9f178bac3692b73 | 2026-07-06 追加: やさしい階段型ヒアリング(壁打ち)スキル。install が $workspace/.claude/skills/ へ配置し d-claude/claude が読む。Claude に読ませる prompt=実質コード相当のため配布ハッシュ検証対象に含める。 |
 
 ### v1.4.3（BOM 二重 hotfix）
 

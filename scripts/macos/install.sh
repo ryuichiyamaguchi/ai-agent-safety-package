@@ -138,6 +138,7 @@ case "$PLATFORM" in
 esac
 verify_hash "configs/gemini/policies/safety.toml"
 verify_hash "workspace-template/aiexclude.template"
+verify_hash "workspace-template/dist-skills/hearing-ladder/SKILL.md"
 
 copy_with_backup() {
   src="$1"
@@ -188,6 +189,28 @@ copy_with_backup "$package_root/configs/codex/hooks.mac.json" "$workspace/.codex
 copy_with_backup "$package_root/configs/gemini/settings.mac.json" "$workspace/.gemini/settings.json"
 copy_with_backup "$package_root/configs/gemini/policies/safety.toml" "$workspace/.gemini/policies/safety.toml"
 copy_with_backup "$package_root/workspace-template/aiexclude.template" "$workspace/.aiexclude"
+
+# 配布スキルを workspace の .claude/skills/ に配置。d-claude / claude が起動時に
+# ${workspace}/.claude/skills 配下を読み込むので、ここに置けば受講者もそのまま使える。
+# リポジトリ側は dist-skills/ に置く（.gitignore が .claude/ を除外するため）。
+# スキル単位で処理: 同名の既存スキル（ユーザーが手を入れた版も含む）は backup へ退避してから
+# ディレクトリごと入れ替える（copy_with_backup と同じ思想＝上書き前に必ず控えを取る／古い
+# support ファイルが残らない）。同梱していない他スキルには触れない。
+if [ -d "$package_root/workspace-template/dist-skills" ]; then
+  mkdir -p "$workspace/.claude/skills"
+  for skill_src in "$package_root/workspace-template/dist-skills"/*/; do
+    [ -d "$skill_src" ] || continue
+    skill_name="$(basename "$skill_src")"
+    skill_dest="$workspace/.claude/skills/$skill_name"
+    if [ -e "$skill_dest" ]; then
+      safe_name="$(printf '%s' "$skill_dest" | sed 's#[/:]#_#g')"
+      cp -R "$skill_dest" "$backup_dir/$safe_name"
+      rm -rf "$skill_dest"
+    fi
+    cp -R "$skill_src" "$skill_dest"
+  done
+  echo "配布スキルを配置しました: $workspace/.claude/skills"
+fi
 
 # 受講者向けスタートフォルダ（番号ラッパー + 案内 HTML）を workspace に配置。
 # ファイルシステム構造とは別に「ここを見てポチポチやれば使える」入口を用意する。

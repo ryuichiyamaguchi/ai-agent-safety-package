@@ -96,6 +96,7 @@ switch ($Platform) {
 }
 Test-DistributionHash "configs/gemini/policies/safety.toml"
 Test-DistributionHash "workspace-template/aiexclude.template"
+Test-DistributionHash "workspace-template/dist-skills/hearing-ladder/SKILL.md"
 
 function Copy-WithBackup([string]$Source, [string]$Dest) {
     $destDir = Split-Path -Parent $Dest
@@ -193,6 +194,28 @@ Copy-WithBackup (Join-Path $packageRoot "configs\codex\hooks.windows.json") (Joi
 Copy-WithBackup (Join-Path $packageRoot "configs\gemini\settings.windows.json") (Join-Path $Workspace ".gemini\settings.json")
 Copy-WithBackup (Join-Path $packageRoot "configs\gemini\policies\safety.toml") (Join-Path $Workspace ".gemini\policies\safety.toml")
 Copy-WithBackup (Join-Path $packageRoot "workspace-template\aiexclude.template") (Join-Path $Workspace ".aiexclude")
+
+# 配布スキルを workspace の .claude\skills\ に配置。d-claude / claude が起動時に
+# ${workspace}\.claude\skills 配下を読み込むので、ここに置けば受講者もそのまま使える。
+# リポジトリ側は dist-skills\ に置く（.gitignore が .claude/ を除外するため）。
+# スキル単位で処理: 同名の既存スキル（ユーザーが手を入れた版も含む）は backup へ退避してから
+# 入れ替える（Copy-WithBackup と同じ思想）。同梱していない他スキルには触れない。
+$skillsSrc = Join-Path $packageRoot "workspace-template\dist-skills"
+if (Test-Path -LiteralPath $skillsSrc) {
+    $skillsDest = Join-Path $Workspace ".claude\skills"
+    New-Item -ItemType Directory -Force -Path $skillsDest | Out-Null
+    Get-ChildItem -LiteralPath $skillsSrc -Directory -Force | ForEach-Object {
+        $skillDestDir = Join-Path $skillsDest $_.Name
+        if (Test-Path -LiteralPath $skillDestDir) {
+            $relativeName = ($skillDestDir -replace "[:\\\/]+", "_")
+            New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+            Copy-Item -LiteralPath $skillDestDir -Destination (Join-Path $backupDir $relativeName) -Recurse -Force
+            Remove-Item -LiteralPath $skillDestDir -Recurse -Force
+        }
+        Copy-Item -LiteralPath $_.FullName -Destination $skillDestDir -Recurse -Force
+    }
+    Write-Host "配布スキルを配置しました: $skillsDest"
+}
 
 # A-1: .gitignore.template を workspace ルートに .gitignore としてコピーする。
 # 既存の .gitignore は上書きせず、auth.json / .codex / .claude 等の必須エントリを追記する。
