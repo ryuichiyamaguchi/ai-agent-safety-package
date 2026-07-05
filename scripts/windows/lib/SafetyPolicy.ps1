@@ -285,6 +285,22 @@ function Allow-Action([object]$HookInput, [string]$Mode, [string]$Reason, [strin
     exit 0
 }
 
+# Ask-Action — 決定的 deny (exit 2) と違い、Claude に承認ダイアログを出させる。
+# permissionDecision JSON を stdout に出して exit 0（exit 0 のときだけ JSON が処理される）。
+# defaultMode=acceptEdits でも hook の permissionDecision が優先される。
+function Ask-Action([object]$HookInput, [string]$Mode, [string]$Reason, [string]$ObservedText, [object]$Policy) {
+    Write-AuditLog $HookInput $Mode "ask" $Reason $ObservedText $Policy
+    $obj = [PSCustomObject]@{
+        hookSpecificOutput = [PSCustomObject]@{
+            hookEventName = "PreToolUse"
+            permissionDecision = "ask"
+            permissionDecisionReason = $Reason
+        }
+    }
+    [Console]::Out.WriteLine(($obj | ConvertTo-Json -Depth 6 -Compress))
+    exit 0
+}
+
 function Fail-Closed([string]$Mode, [string]$Message) {
     [Console]::Error.WriteLine("AI Safety Guard FAILED CLOSED (" + $Mode + "): " + $Message)
     exit 2

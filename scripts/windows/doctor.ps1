@@ -137,6 +137,13 @@ function Expect-Allow([string]$Name, [string]$ScriptName, [string]$Json) {
     Add-Result $Name ($r.ExitCode -eq 0) ("exit=" + $r.ExitCode + " " + ($r.Stderr.Trim()))
 }
 
+# ask = exit 0 かつ stdout に permissionDecision":"ask"（承認ダイアログを出す JSON）。
+function Expect-Ask([string]$Name, [string]$ScriptName, [string]$Json) {
+    $r = Invoke-Guard $ScriptName $Json
+    $ok = ($r.ExitCode -eq 0) -and ($r.Stdout -match '"permissionDecision"\s*:\s*"ask"')
+    Add-Result $Name $ok ("exit=" + $r.ExitCode + " out=" + ($r.Stdout.Trim()))
+}
+
 $readCmd = "cat " + $targetName
 # 1(prompt) v1.12.1 UX: 発話は寛容＝プロンプトに危険コマンド/保護パス regex を適用しない。
 # 「cat .env の中身を見たい」等の学習質問は allow（実行は下の guard-bash が block する）。旧版は
@@ -156,8 +163,19 @@ Expect-Block "3 scripted protected read" "guard-bash.ps1" (New-HookJson "Bash" @
 $headRead = "head " + $targetName
 Expect-Block "3b non-cat read of protected .env (head)" "guard-bash.ps1" (New-HookJson "Bash" @{ command = $headRead })
 
+# 4 ワークスペース外書き込みは「即ブロック」でなく「人間に確認 (ask)」。秘密/保護パス/危険コマンド
+#   生成は下と 3/3b で引き続き決定的 deny。mac doctor.sh の case 4 と対称。
 $outsidePath = Join-Path ([System.IO.Path]::GetTempPath()) "ai-safe-outside-write.txt"
-Expect-Block "4 write outside workspace" "guard-write.ps1" (New-HookJson "Write" @{ file_path = $outsidePath; content = "hello" })
+Expect-Ask "4 write outside workspace asks" "guard-write.ps1" (New-HookJson "Write" @{ file_path = $outsidePath; content = "hello" })
+# 4r 相対 .. 外部書き込みも ask（絶対パスと相対 .. の両方を固定。mac 4/4b と対称）。
+$relOutside = "..\ai-safe-outside-rel.txt"
+Expect-Ask "4r write outside workspace (relative ..) asks" "guard-write.ps1" (New-HookJson "Write" @{ file_path = $relOutside; content = "hello" })
+# 4c ワークスペース内書き込みは従来どおり許可。
+$insidePath = Join-Path $Workspace "inside.txt"
+Expect-Allow "4c write inside workspace allowed" "guard-write.ps1" (New-HookJson "Write" @{ file_path = $insidePath; content = "hello" })
+# 4d 順序保証: ワークスペース外でも保護パス(.env)への書き込みは ask でなく決定的 deny。
+$envOutside = Join-Path ([System.IO.Path]::GetTempPath()) ".env"
+Expect-Block "4d protected .env write outside stays blocked" "guard-write.ps1" (New-HookJson "Write" @{ file_path = $envOutside; content = "hello" })
 
 $removeCmd = "r" + "m -r" + "f /tmp/ai-safe-test"
 Expect-Block "5 recursive forced delete" "guard-bash.ps1" (New-HookJson "Bash" @{ command = $removeCmd })

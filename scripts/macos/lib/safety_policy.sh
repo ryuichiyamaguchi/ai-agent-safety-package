@@ -310,6 +310,17 @@ allow() {
   exit 0
 }
 
+# ask() — 決定的 deny (exit 2) と違い、Claude に承認ダイアログを出させる。
+# permissionDecision JSON を stdout に出して exit 0（exit 0 のときだけ JSON が処理される）。
+# defaultMode=acceptEdits でも hook の permissionDecision が優先されるので確実に確認が挟まる。
+ask() {
+  local reason="$1"
+  audit_log "ask" "$reason"
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s"}}\n' \
+    "$(json_escape "$reason")"
+  exit 0
+}
+
 # ---------------------------------------------------------------------------
 # Guard predicates (policy-driven, no hardcoded patterns)
 # ---------------------------------------------------------------------------
@@ -337,19 +348,36 @@ EOF
 }
 
 # Extract the plain-text value of a JSON string field from RAW_INPUT.
-# Handles common cases: single-line values without embedded backslash escapes.
+# 値がエスケープ（\/ \" \\ 等）を含んでもバックスラッシュで打ち切らずに丸ごと捕捉し、
+# 一般的な JSON エスケープを復号して「本物のパス/文字列」を返す。これがないと
+# `"file_path":"\/tmp\/.env"` のような入力で抽出が空になり、末尾 `$` アンカー付きの
+# protectedPathRegex（.env$ 等）がクリーンな値に当たらず deny をすり抜ける。
 # Returns empty string when field is absent.
 _extract_json_field() {
-  local field="$1"
-  printf '%s' "$RAW_INPUT" \
-    | sed -nE "s/.*\"${field}\"[[:space:]]*:[[:space:]]*\"([^\"\\\\]*)\".*/\1/p" \
-    | head -n 1
+  local field="$1" val
+  val="$(printf '%s' "$RAW_INPUT" \
+    | sed -nE "s/.*\"${field}\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\".*/\1/p" \
+    | head -n 1)"
+  # \uXXXX unicode エスケープを含むときだけ perl で復号（大半のケースは spawn を避ける）。
+  # これがないと `/tmp/.env`（= /tmp/.env）が末尾 $ アンカーの protectedPathRegex を
+  # すり抜ける（Windows は ConvertFrom-Json で復号済みなので mac 固有の穴だった）。
+  case "$val" in
+    *'\u'*)
+      if command -v perl >/dev/null 2>&1; then
+        val="$(printf '%s' "$val" | perl -pe 's/\\u([0-9a-fA-F]{4})/chr(hex($1))/ge' 2>/dev/null)"
+      fi ;;
+  esac
+  # 残りの一般的な JSON エスケープ（\/ \" \\）を復号。
+  printf '%s' "$val" | sed -e 's/\\\//\//g' -e 's/\\"/"/g' -e 's/\\\\/\\/g'
 }
 
 # Build a multi-line string of the candidate texts to inspect:
 # RAW_INPUT itself + extracted values of known string fields.
 # This ensures patterns with strict anchors (e.g. (\s|$)) match correctly
 # even when the value is embedded inside a JSON blob.
+# path/target_path/notebook_path は Write/Edit/NotebookEdit の書き込み対象キー
+# （Windows Get-WriteTarget と対称）。これらを抽出対象に含めないと、file_path 以外の
+# キーで指定された保護パス（例: notebook_path=".env"）が corpus に現れず素通りする。
 _inspection_corpus() {
   printf '%s\n' "$RAW_INPUT"
   _extract_json_field "command"
@@ -357,6 +385,9 @@ _inspection_corpus() {
   _extract_json_field "content"
   _extract_json_field "url"
   _extract_json_field "file_path"
+  _extract_json_field "path"
+  _extract_json_field "target_path"
+  _extract_json_field "notebook_path"
 }
 
 _grep_corpus() {

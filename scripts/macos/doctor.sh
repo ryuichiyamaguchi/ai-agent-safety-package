@@ -60,7 +60,12 @@ run_case() {
   printf '%s' "$json" | "$hook_root/$script" >/tmp/ai-safe-doctor.out 2>/tmp/ai-safe-doctor.err
   code=$?
   set -e
-  if { [ "$expected" = "block" ] && [ "$code" -eq 2 ]; } || { [ "$expected" = "allow" ] && [ "$code" -eq 0 ]; }; then
+  # ask = exit 0 かつ stdout に permissionDecision":"ask"（承認ダイアログを出す JSON）。
+  ask_ok=0
+  if [ "$code" -eq 0 ] && grep -q '"permissionDecision":"ask"' /tmp/ai-safe-doctor.out; then ask_ok=1; fi
+  if { [ "$expected" = "block" ] && [ "$code" -eq 2 ]; } \
+     || { [ "$expected" = "ask" ] && [ "$ask_ok" -eq 1 ]; } \
+     || { [ "$expected" = "allow" ] && [ "$code" -eq 0 ] && [ "$ask_ok" -eq 0 ]; }; then
     echo "PASS $name"
     pass=$((pass + 1))
   else
@@ -88,7 +93,26 @@ run_case "3 scripted protected read" "guard-bash.sh" "block" "{\"hook_event_name
 #    doctor 源に .env リテラルを残さない(case 1 の cat と同じ手法)。
 head_read="head $target_name"
 run_case "3b non-cat read of protected .env (head)" "guard-bash.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"cwd\":\"$workspace\",\"tool_input\":{\"command\":\"$head_read\"}}"
-run_case "4 write outside workspace" "guard-write.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$workspace\",\"tool_input\":{\"file_path\":\"../outside.txt\",\"content\":\"hello\"}}"
+# 4 ワークスペース外書き込みは「即ブロック」でなく「人間に確認 (ask)」。相対 .. と絶対パス
+#   外部の両方が ask。秘密/保護パス/危険コマンド生成は下と 3/3b で引き続き決定的 deny。
+run_case "4 write outside workspace (relative ..) asks" "guard-write.sh" "ask" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$workspace\",\"tool_input\":{\"file_path\":\"../outside.txt\",\"content\":\"hello\"}}"
+run_case "4b write outside workspace (absolute) asks" "guard-write.sh" "ask" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$workspace\",\"tool_input\":{\"file_path\":\"/tmp/ai-safe-outside-abs.txt\",\"content\":\"hello\"}}"
+run_case "4c write inside workspace allowed" "guard-write.sh" "allow" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$workspace\",\"tool_input\":{\"file_path\":\"$workspace/inside.txt\",\"content\":\"hello\"}}"
+# 4d 順序保証: ワークスペース外でも保護パス(.env)への書き込みは ask でなく決定的 deny。
+#    (外部 ask 判定より前に保護パス deny が効くことを固定する)
+env_out="../.env""x"; env_out="../.env"
+run_case "4d protected .env write outside stays blocked" "guard-write.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$workspace\",\"tool_input\":{\"file_path\":\"$env_out\",\"content\":\"hello\"}}"
+# 4e NotebookEdit 等 file_path 以外の書き込みキー(notebook_path)でも外部書き込みは ask。
+run_case "4e notebook_path outside asks" "guard-write.sh" "ask" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"NotebookEdit\",\"cwd\":\"$workspace\",\"tool_input\":{\"notebook_path\":\"/tmp/ai-safe-outside-nb.ipynb\",\"new_source\":\"x\"}}"
+# 4f path キーで指定された保護パス(.env)も決定的 deny（file_path 以外のキー経由の穴を塞ぐ）。
+env_key="../.env""x"; env_key="$workspace/.env"
+run_case "4f protected .env via path key stays blocked" "guard-write.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$workspace\",\"tool_input\":{\"path\":\"$env_key\",\"content\":\"hello\"}}"
+# 4g エスケープされたスラッシュ付き保護パスも deny（抽出器のエスケープ復号で塞ぐ）。
+run_case "4g escaped-slash .env stays blocked" "guard-write.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$workspace\",\"tool_input\":{\"file_path\":\"\\/tmp\\/.env\",\"content\":\"hello\"}}"
+# 4g2 unicode エスケープ (/ 等) の保護パスも deny（perl 復号で塞ぐ・Windows は ConvertFrom-Json で既に deny）。
+run_case "4g2 unicode-escaped .env stays blocked" "guard-write.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$workspace\",\"tool_input\":{\"file_path\":\"\\u002ftmp\\u002f.env\",\"content\":\"hello\"}}"
+# 4h cwd 末尾スラッシュでも内部書き込みは allow（過剰 ask 回帰の固定）。
+run_case "4h trailing-slash cwd inside allowed" "guard-write.sh" "allow" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$workspace/\",\"tool_input\":{\"file_path\":\"$workspace/in.txt\",\"content\":\"hello\"}}"
 remove_cmd="r""m -r""f /tmp/ai-safe-test"
 run_case "5 recursive forced delete" "guard-bash.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"cwd\":\"$workspace\",\"tool_input\":{\"command\":\"$remove_cmd\"}}"
 # 5b force 無しの再帰削除 rm -r も決定的にブロック（2026-07-03 の実機事故=rm -r がすり抜けた回帰）。

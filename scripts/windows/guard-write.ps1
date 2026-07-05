@@ -11,10 +11,14 @@ try {
     $content = Get-WriteContent $inputObj
     $observed = $target + "`n" + $content
 
+    # 保護パス・秘密・危険生成は deny（exit 2）。ワークスペース外書き込みだけは deny でなく
+    # ask（人間に承認を求める）にする。ask は最後に判定する — 先に deny 群を全部通すことで、
+    # 「ワークスペース外の .env」のような危険物が ask で素通りするのを防ぐ。
+    $outsideWorkspace = $false
     if (-not [string]::IsNullOrWhiteSpace($target)) {
         $resolved = Resolve-SafePath $target $cwd
         if (-not (Test-IsPathInside $resolved $cwd)) {
-            Block-Action $inputObj "write" ("write outside workspace: " + $resolved) $observed $policy
+            $outsideWorkspace = $true
         }
         $protectedTarget = Test-ProtectedPathText $resolved $policy
         if ($protectedTarget) {
@@ -35,6 +39,10 @@ try {
     $danger = Find-RegexMatch $content $policy.dangerousCommandRegex "dangerous embedded command"
     if ($danger) {
         Block-Action $inputObj "write" "generated content embeds dangerous command" $observed $policy
+    }
+
+    if ($outsideWorkspace) {
+        Ask-Action $inputObj "write" ("ワークスペース外への書き込みです（" + $resolved + "）。許可しますか？") $observed $policy
     }
 
     Allow-Action $inputObj "write" "write passed policy" $observed $policy
