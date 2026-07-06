@@ -21,7 +21,7 @@ if "%KEY%"=="" (
     exit /b 1
 )
 set "DS_KEY=%KEY%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$d=Join-Path $env:USERPROFILE '.deepseek-claude'; [void](New-Item -ItemType Directory -Force $d); Set-Content -NoNewline -Encoding ascii -Path (Join-Path $d 'auth') -Value $env:DS_KEY"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$k=($env:DS_KEY).Trim(); $d=Join-Path $env:USERPROFILE '.deepseek-claude'; [void](New-Item -ItemType Directory -Force $d); $p=Join-Path $d 'auth'; [System.IO.File]::WriteAllText($p, $k+[char]10, (New-Object System.Text.UTF8Encoding($false))); $rb=([System.IO.File]::ReadAllText($p)).Trim(); if($k.Length -gt 0 -and $rb -eq $k){exit 0}else{exit 1}"
 if errorlevel 1 (
     echo.
     echo ï€ë∂Ç…é∏îsÇµÇ‹ÇµÇΩÅBÇ‡Ç§àÍìxÇ®ééÇµÇ≠ÇæÇ≥Ç¢ÅB

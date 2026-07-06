@@ -71,6 +71,25 @@ if ($helpText -match "--permission-mode") {
     $argsList = @("--permission-mode", "default") + $argsList
 }
 
+# ★安全機能の適用は claude --help のフラグ検出に依存する。Claude Code の版が古い/新しい/
+#   --help が取得できないと、正直プロンプト・MCP・権限モードが「黙って」スキップされ、
+#   d-claude が“素の Claude Code + DeepSeek”に劣化する(=賢さもガードも欠ける)。これを
+#   沈黙させず、その場で受講者に見える警告にする(版差による原因不明の劣化を可視化)。
+if ($env:DS_CLAUDE_MODE -eq '1') {
+    $missing = @()
+    if (-not $helpText) { $missing += "claude --help が取得できない" }
+    else {
+        foreach ($f in @('--append-system-prompt','--mcp-config','--permission-mode')) {
+            if ($helpText -notmatch [regex]::Escape($f)) { $missing += $f }
+        }
+    }
+    if ($missing.Count -gt 0) {
+        Write-Warning ("d-claude の一部の安全/補助機能が、この Claude Code の版では適用できません: " + ($missing -join ", "))
+        Write-Host    "  → 賢さやツール(検索/画像)、deny/ask/allow が欠けることがあります。" -ForegroundColor Yellow
+        Write-Host    "     Claude Code を動作確認済みの版に更新してください（診断.bat で版を確認できます）。" -ForegroundColor Yellow
+    }
+}
+
 # d-claude (DeepSeek 駆動) のときだけ、正直さ・身元の上書き指示を system prompt に追記する。
 # DeepSeek は Claude Code の「あなたは Claude」プロンプトで Anthropic を装い、できないことを
 # 「できる」・やっていないことを「やった」と過剰申告する傾向がある。--append-system-prompt で
