@@ -13,6 +13,11 @@ param(
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# ★自己ロック回避: この updater は workspace の .ai-safety\hooks\windows\ の中から実行される
+#   ことがある。その場合、後で install.ps1 がそのフォルダを削除/更新しようとすると「使用中」で
+#   失敗する。作業ディレクトリを一時フォルダへ移し、workspace フォルダを掴まないようにする。
+try { Set-Location -LiteralPath ([System.IO.Path]::GetTempPath()) } catch {}
+
 $repo  = "ryuichiyamaguchi/ai-agent-safety-package"
 $asset = "ai-agent-safety-package.zip"
 $base  = "https://github.com/$repo/releases/latest/download"

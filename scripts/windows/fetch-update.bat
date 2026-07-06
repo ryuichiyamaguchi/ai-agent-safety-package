@@ -1,5 +1,6 @@
 @echo off
 chcp 932 >nul 2>&1
+cd /d "%TEMP%"
 setlocal
 set "SCRIPT_DIR=%~dp0"
 

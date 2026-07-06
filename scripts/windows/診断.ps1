@@ -48,14 +48,14 @@ else {
     OK ("ワークスペース: " + $Workspace)
     $policy = Join-Path $Workspace ".ai-safety\policy\safety-policy.json"
     if (Test-Path -LiteralPath $policy) {
-        try { $pv = (Get-Content -LiteralPath $policy -Raw | ConvertFrom-Json).packageVersion; OK ("policy: packageVersion=" + $pv) }
-        catch { BAD "policy JSON が壊れている（ダウンロード/解凍で破損の疑い）" }
+        try { $pv = (Get-Content -LiteralPath $policy -Raw -Encoding UTF8 | ConvertFrom-Json).packageVersion; OK ("policy: packageVersion=" + $pv) }
+        catch { BAD "policy JSON を読めない（本当に破損 or 文字コード）。ガードは -Encoding UTF8 で読むので実害有無は doctor で確認" }
     } else { BAD "policy が無い（未インストール or 破損）" }
 
     $settings = Join-Path $Workspace ".claude\settings.json"
     if (Test-Path -LiteralPath $settings) {
         try {
-            $sj = Get-Content -LiteralPath $settings -Raw | ConvertFrom-Json
+            $sj = Get-Content -LiteralPath $settings -Raw -Encoding UTF8 | ConvertFrom-Json
             $mode = $sj.permissions.defaultMode
             $denyN = @($sj.permissions.deny).Count
             $hookN = @($sj.hooks.PreToolUse).Count

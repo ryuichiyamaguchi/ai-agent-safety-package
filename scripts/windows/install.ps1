@@ -132,11 +132,15 @@ if ($Platform -in 'win','both') {
     # B-4: PS 5.1 と 7 で Copy-Item -Recurse の挙動差を回避。
     # 宛先フォルダを先に削除して作り直し、中身 (*) を明示コピーする。
     $winDest = Join-Path $Workspace ".ai-safety\hooks\windows"
+    # 更新を fetch-update 経由で「このフォルダの中から」実行していると、フォルダが使用中で
+    # 削除できず更新が中断する。削除は best-effort(-EA SilentlyContinue)にし、上書きコピーで
+    # 更新する。実行中の updater 自身のファイル(fetch-update.*)は上書きできないことがあるが
+    # 飛ばして続行し、他のガード/ランチャーは確実に更新する(updater 自身は次回起動で反映)。
     if (Test-Path -LiteralPath $winDest) {
-        Remove-Item -LiteralPath $winDest -Recurse -Force
+        Remove-Item -LiteralPath $winDest -Recurse -Force -ErrorAction SilentlyContinue
     }
     New-Item -ItemType Directory -Force -Path $winDest | Out-Null
-    Copy-Item -Path (Join-Path $packageRoot "scripts\windows\*") -Destination $winDest -Recurse -Force
+    Copy-Item -Path (Join-Path $packageRoot "scripts\windows\*") -Destination $winDest -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 if ($Platform -in 'mac','both') {
