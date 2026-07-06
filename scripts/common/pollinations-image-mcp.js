@@ -133,7 +133,13 @@ async function generate(args) {
   if (!prompt) return { ok: false, message: 'prompt が空です。作りたい画像の内容を指定してください。' };
   const width = clampDim(args.width, 1024);
   const height = clampDim(args.height, 1024);
-  const url = buildUrl(prompt, width, height, args.seed);
+  // seed 未指定なら毎回ランダムにする（Pollinations は seed 固定だと同じ prompt=同じ画像に
+  // なる決定的仕様。seed を振らないと「猫」がどのPCでも毎回同一になる）。再現したい人は
+  // seed を明示すれば同じ画像を再取得できる。
+  const seed = (args.seed != null && Number.isFinite(Number(args.seed)))
+    ? args.seed
+    : Math.floor(Math.random() * 1000000000);
+  const url = buildUrl(prompt, width, height, seed);
 
   const r = await fetchImage(url, 3);
   if (!r.ok) return r;
