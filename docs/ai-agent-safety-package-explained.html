@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AIエージェント安全パッケージのやさしい説明</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #202124;
+      --muted: #5d636f;
+      --line: #d8dde6;
+      --paper: #fffaf0;
+      --white: #ffffff;
+      --blue: #1b67b2;
+      --green: #167a63;
+      --red: #b53d2f;
+      --yellow: #a36a00;
+      --aqua: #dff6f1;
+      --cream: #fff7e3;
+      --lavender: #ece9ff;
+      --shadow: 0 14px 32px rgba(31, 45, 61, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(27,103,178,.08) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(27,103,178,.06) 1px, transparent 1px),
+        #f8faf7;
+      background-size: 44px 44px;
+      font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+      line-height: 1.75;
+      letter-spacing: 0;
+    }
+
+    /* Japanese text layout fix */
+    h1, h2, h3 { word-break: keep-all; overflow-wrap: break-word; }
+    p, span, li, a, td { overflow-wrap: break-word; }
+    img { object-fit: cover; }
+    .phrase { display: inline; }
+    @media (min-width: 768px) {
+      .phrase { display: inline-block; }
+    }
+    @media (max-width: 767px) {
+      .hero-main { font-size: clamp(1.5rem, 7vw, 2.5rem) !important; line-height: 1.3 !important; }
+      .hero-sub { font-size: clamp(0.9rem, 3.5vw, 1.25rem) !important; line-height: 1.5 !important; }
+      nav { padding: 0.75rem 1rem !important; }
+      nav .hidden { display: none !important; }
+    }
+
+    a { color: var(--blue); }
+
+    .page {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    .hero {
+      min-height: 86vh;
+      display: grid;
+      align-items: center;
+      padding: 42px 0 28px;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(280px, .95fr);
+      gap: clamp(24px, 4vw, 54px);
+      align-items: center;
+    }
+
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.75);
+      font-weight: 700;
+      color: var(--green);
+      width: fit-content;
+    }
+
+    .hero-main {
+      margin: 18px 0 14px;
+      font-size: clamp(2.2rem, 5.2vw, 5.25rem);
+      line-height: 1.06;
+      max-width: 9.5em;
+      letter-spacing: 0;
+    }
+
+    .hero-sub {
+      font-size: clamp(1rem, 1.7vw, 1.35rem);
+      color: var(--muted);
+      max-width: 35em;
+      margin: 0 0 24px;
+    }
+
+    .hero-note {
+      display: grid;
+      gap: 10px;
+      padding-left: 16px;
+      border-left: 5px solid var(--green);
+      color: #2d3b42;
+      font-weight: 700;
+    }
+
+    .hero-visual {
+      background: var(--white);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      padding: clamp(16px, 3vw, 28px);
+    }
+
+    .route-map {
+      display: grid;
+      gap: 14px;
+    }
+
+    .route-step {
+      display: grid;
+      grid-template-columns: 42px 1fr;
+      gap: 12px;
+      align-items: center;
+      padding: 14px;
+      background: #f7fbff;
+      border: 1px solid #c9d9eb;
+    }
+
+    .num {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      color: var(--white);
+      background: var(--blue);
+      font-weight: 800;
+    }
+
+    .route-step strong { display: block; font-size: 1.04rem; }
+    .route-step small { color: var(--muted); font-weight: 600; }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      background: rgba(248,250,247,.92);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(10px);
+    }
+
+    .nav-inner {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      overflow-x: auto;
+      padding: 10px 0;
+    }
+
+    .nav-inner a {
+      white-space: nowrap;
+      text-decoration: none;
+      font-weight: 700;
+      color: #2a3441;
+      padding: 7px 10px;
+      border: 1px solid transparent;
+    }
+
+    .nav-inner a:hover {
+      border-color: var(--line);
+      background: var(--white);
+    }
+
+    section {
+      padding: clamp(42px, 7vw, 82px) 0;
+      border-top: 1px solid rgba(32,33,36,.08);
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: clamp(1.7rem, 3vw, 2.7rem);
+      line-height: 1.24;
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 1.12rem;
+      line-height: 1.45;
+    }
+
+    .lead {
+      color: var(--muted);
+      font-size: 1.08rem;
+      max-width: 54em;
+      margin: 0 0 24px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      background: var(--white);
+      border: 1px solid var(--line);
+      box-shadow: 0 8px 18px rgba(31,45,61,.07);
+      padding: 20px;
+      border-radius: 8px;
+    }
+
+    .card p { margin: 0; color: var(--muted); }
+
+    .ok { border-top: 5px solid var(--green); }
+    .warn { border-top: 5px solid var(--yellow); }
+    .no { border-top: 5px solid var(--red); }
+
+    .split-band {
+      display: grid;
+      grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+      gap: clamp(20px, 4vw, 42px);
+      align-items: center;
+    }
+
+    .photo {
+      width: 100%;
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      background: var(--white);
+      display: block;
+    }
+
+    .caption {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: .92rem;
+    }
+
+    .layer-diagram {
+      display: grid;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .layer {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 16px;
+      align-items: center;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      background: var(--white);
+      border-left: 8px solid var(--blue);
+    }
+
+    .layer:nth-child(2) { border-left-color: var(--green); }
+    .layer:nth-child(3) { border-left-color: #7156bf; }
+    .layer:nth-child(4) { border-left-color: var(--yellow); }
+
+    .label {
+      font-weight: 800;
+      color: #26313d;
+    }
+
+    .pill-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      background: #f5f8fb;
+      padding: 4px 9px;
+      font-size: .92rem;
+      font-weight: 700;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      background: var(--white);
+      border: 1px solid var(--line);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 680px;
+      background: var(--white);
+    }
+
+    th, td {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th { background: #eef5f9; }
+
+    .callout {
+      border: 2px solid #2a3441;
+      background: var(--cream);
+      padding: 22px;
+      font-weight: 700;
+    }
+
+    .callout p { margin: 0; }
+
+    .checklist {
+      display: grid;
+      gap: 12px;
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+
+    .checklist li {
+      background: var(--white);
+      border: 1px solid var(--line);
+      padding: 14px 16px;
+      border-left: 7px solid var(--green);
+    }
+
+    code {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      background: #eef1f5;
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-size: .94em;
+    }
+
+    .command {
+      background: #17212b;
+      color: #f5f7fb;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      line-height: 1.6;
+    }
+
+    footer {
+      padding: 42px 0 60px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+    }
+
+    @media (max-width: 900px) {
+      .hero-grid, .grid-2, .grid-3, .split-band {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        min-height: auto;
+      }
+
+      .layer {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media print {
+      nav { position: static; }
+      body { background: white; }
+      .card, .hero-visual, .photo { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero page">
+    <div class="hero-grid">
+      <div>
+        <div class="kicker">AI Agent Safety Package</div>
+        <h1 class="hero-main">
+          <span class="phrase">AIに任せる前に、</span><span class="phrase">パソコンに柵をつける</span>
+        </h1>
+        <p class="hero-sub">このページは、AIエージェント安全パッケージが何を守り、何を守れないのかを、はじめての人向けに説明するための案内です。</p>
+        <div class="hero-note">
+          <span>結論：これは「AIを完全に信じる道具」ではありません。</span>
+          <span>AIが危ない操作をしようとした時に、途中で止めるための安全装置です。</span>
+        </div>
+      </div>
+      <div class="hero-visual" aria-label="安全に使う流れ">
+        <div class="route-map">
+          <div class="route-step">
+            <div class="num">1</div>
+            <div><strong>作業フォルダを決める</strong><small>AIに触らせる場所を限定します。</small></div>
+          </div>
+          <div class="route-step">
+            <div class="num">2</div>
+            <div><strong>安全パッケージを入れる</strong><small>設定・hook・ポリシーを配置します。</small></div>
+          </div>
+          <div class="route-step">
+            <div class="num">3</div>
+            <div><strong>安全起動でAIを開く</strong><small>普通に起動せず、launcher経由にします。</small></div>
+          </div>
+          <div class="route-step">
+            <div class="num">4</div>
+            <div><strong>怪しい操作を止める</strong><small>外部送信・秘密ファイル・危険コマンドを確認します。</small></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="#plain">一言で</a>
+      <a href="#scope">守る範囲</a>
+      <a href="#layers">4つの防御</a>
+      <a href="#howto">使い方</a>
+      <a href="#limits">守れないこと</a>
+      <a href="#advanced">専門向け</a>
+    </div>
+  </nav>
+
+  <main>
+    <section id="plain">
+      <div class="page">
+        <h2>一言でいうと、AI用の「作業部屋」と「見張り」です</h2>
+        <p class="lead">AIエージェントは、チャットで答えるだけではなく、あなたのパソコンでファイルを読んだり、コマンドを実行したりします。便利ですが、間違えると危険です。</p>
+        <div class="grid-3">
+          <article class="card ok">
+            <h3>作業部屋を決める</h3>
+            <p>AIが作業してよいフォルダを決めます。家全体ではなく、机の上だけを触らせるイメージです。</p>
+          </article>
+          <article class="card ok">
+            <h3>見張りを入れる</h3>
+            <p>AIが危ない操作をしようとした時、実行前にチェックして止めます。</p>
+          </article>
+          <article class="card warn">
+            <h3>使い方の約束がある</h3>
+            <p>普通にAIを起動すると見張りを通らない場合があります。必ず安全起動を使います。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="scope">
+      <div class="page">
+        <div class="split-band">
+          <div>
+            <h2>このパッケージが守るのは「CLIで動くAI」です</h2>
+            <p class="lead">CLIとは、黒い画面やターミナルで起動するAIツールのことです。Codex CLI、Claude Code、Gemini CLIなどが対象です。</p>
+            <div class="pill-list">
+              <span class="pill">Codex CLI</span>
+              <span class="pill">Claude Code</span>
+              <span class="pill">Gemini CLI</span>
+              <span class="pill">Antigravity CLIは一部</span>
+            </div>
+          </div>
+          <div>
+            <img class="photo" src="assets/isolation-stair.png" alt="隔離の強さを階段で表した図">
+            <p class="caption">CLI単体の防御は強すぎる箱ではありません。作業フォルダ、hook、承認、OS制限を重ねて守ります。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="layers">
+      <div class="page">
+        <h2>4つの防御が重なって止めます</h2>
+        <p class="lead">どれか1つで全部を守るのではなく、複数の関所を重ねます。専門的には多層防御です。</p>
+        <div class="layer-diagram">
+          <div class="layer">
+            <div class="label">1. 作業範囲</div>
+            <div>AIが触ってよい場所を作業フォルダに寄せます。外側への書き込みはサンドボックスで止めます。</div>
+          </div>
+          <div class="layer">
+            <div class="label">2. 通信制限</div>
+            <div><code>curl</code> や <code>wget</code> など、外へ送る足場になりやすい操作を止めます。</div>
+          </div>
+          <div class="layer">
+            <div class="label">3. 秘密の除外</div>
+            <div>APIキーなどの環境変数をAIに渡さないようにします。見えなければ読まれません。</div>
+          </div>
+          <div class="layer">
+            <div class="label">4. hookと承認</div>
+            <div>危険コマンド、秘密ファイル、怪しいWebアクセスを実行前に検査し、必要なら止めます。</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="howto">
+      <div class="page">
+        <h2>使う時の合言葉は「入れるだけではなく、安全起動」</h2>
+        <p class="lead">インストールは玄関に鍵を置く作業です。実際に鍵をかけるには、安全起動のコマンドやボタンを使う必要があります。</p>
+        <div class="grid-2">
+          <article class="card ok">
+            <h3>Windows</h3>
+            <p>インストール後、作業フォルダで安全起動します。</p>
+            <div class="command">powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1</div>
+          </article>
+          <article class="card ok">
+            <h3>Mac</h3>
+            <p>インストール後、作業フォルダで安全起動します。</p>
+            <div class="command">bash .ai-safety/hooks/macos/launch-codex-safe.sh</div>
+          </article>
+        </div>
+        <div class="callout" style="margin-top: 18px;">
+          <p>受講者向けには「AIを開く時は、普通の <code>codex</code> ではなく、安全起動を使う」とだけ覚えてもらうのが安全です。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="limits">
+      <div class="page">
+        <h2>守れること、守れないこと</h2>
+        <p class="lead">ここを曖昧にすると事故になります。守備範囲は正直に分けます。</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>場面</th>
+                <th>効くか</th>
+                <th>理由</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>安全起動したCodex CLIが危険コマンドを出す</td>
+                <td>効く</td>
+                <td>hook、承認、サンドボックスで止める対象です。</td>
+              </tr>
+              <tr>
+                <td>AIが作業フォルダの外へファイルを書こうとする</td>
+                <td>効く</td>
+                <td>workspace制限とOSサンドボックスの対象です。</td>
+              </tr>
+              <tr>
+                <td>ブラウザ版ChatGPTに自分で秘密を貼る</td>
+                <td>効かない</td>
+                <td>このパッケージを通らず、ブラウザから直接送信されます。</td>
+              </tr>
+              <tr>
+                <td>Computer Use系のAIが画面を直接操作する</td>
+                <td>基本対象外</td>
+                <td>CLI hookを通らないため、OSの権限設定が中心になります。</td>
+              </tr>
+              <tr>
+                <td>Antigravity CLIの手動設定が未完了</td>
+                <td>一部のみ</td>
+                <td>launcherで効く部分と、利用者が設定画面で合わせる部分が分かれます。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="page">
+        <div class="split-band">
+          <div>
+            <img class="photo" src="assets/macos-windows.png" alt="macOSとWindowsの防御モデル比較">
+            <p class="caption">MacとWindowsではOS側の守り方が違います。同じ説明だけでは足りないため、手順はOS別に分けます。</p>
+          </div>
+          <div>
+            <h2>MacとWindowsでは、同じ「安全」でも中身が違います</h2>
+            <p class="lead">Macはアプリ権限の確認が強く、Windowsは学校PCの権限・SmartScreen・PowerShellの癖で詰まりやすいです。だからこのパッケージはOS別の手順とdoctor確認を持っています。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="advanced">
+      <div class="page">
+        <h2>少し専門的に言うと</h2>
+        <p class="lead">このパッケージは、AIモデルそのものを改造するものではありません。CLIツールがOSに命令を出す手前で、設定・hook・sandbox・policyを挟みます。</p>
+        <div class="grid-2">
+          <article class="card">
+            <h3>主な構成</h3>
+            <ul>
+              <li><code>configs/</code>：Codex、Claude、Geminiの設定</li>
+              <li><code>scripts/</code>：安全起動、doctor、guard</li>
+              <li><code>policy/safety-policy.json</code>：止める対象のルール</li>
+              <li><code>workspace-template/</code>：受講者用の作業フォルダ設定</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>確認すること</h3>
+            <ul>
+              <li>インストール後にdoctorが通るか</li>
+              <li>普通のAI起動ではなくlauncher経由か</li>
+              <li>バージョン表と配布ZIPが一致しているか</li>
+              <li>守備範囲外のツールを混ぜていないか</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="page">
+        <h2>受講者に伝える最小ルール</h2>
+        <ul class="checklist">
+          <li>AIに本物のパスワード、APIキー、顧客情報を貼らない。</li>
+          <li>AIを使う時は、決められた作業フォルダを開く。</li>
+          <li>AIを起動する時は、安全起動を使う。</li>
+          <li>警告や承認画面が出たら、意味が分からないまま許可しない。</li>
+          <li>doctorで失敗が出たら、そのまま使わず講師に見せる。</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="page">
+      <p>作成日: 2026-05-28 / 対象: AI Agent Safety Package v1.4.x review draft</p>
+      <p>このHTMLは説明用です。配布前には、現在のrelease version、doctor結果、Sena/Zena review結果に合わせて更新してください。</p>
+    </div>
+  </footer>
+</body>
+</html>
