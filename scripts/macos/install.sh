@@ -78,9 +78,13 @@ mkdir -p "$backup_dir" "$workspace/.ai-safety/hooks" "$workspace/.ai-safety/poli
 
 echo "Installing for platform: $PLATFORM"
 
-# H6: verify distribution integrity against docs/tested_versions.md hash table.
-# Mismatch warns and asks for confirmation (does not hard-fail, since instructors
-# may customize policy.json on purpose).
+# H6/B: verify distribution integrity against docs/tested_versions.md hash table.
+# 破損/改変された配布物を「同じPCで人により違うエラー」の温床にしないため、
+# ハッシュ不一致は**既定で中止**する（何もコピーする前に exit 非0）。verify_hash 群は
+# 全コピー処理より前に呼ぶので、中止時はワークスペースを一切変更しない。
+# 開発者/講師が意図的に policy.json 等を変更したときだけ、明示 opt-out
+# AI_SAFE_ALLOW_HASH_MISMATCH=1 で続行できる（その場合も警告は出す）。
+# 旧 AI_SAFETY_STRICT=1 は「既定で中止」に統合され不要になった（既定が常に strict）。
 verify_hash() {
   rel_path="$1"
   abs_path="$package_root/$rel_path"
@@ -92,19 +96,16 @@ verify_hash() {
   [ -n "$expected" ] || return 0
   actual="$(shasum -a 256 "$abs_path" | awk '{print $1}')"
   if [ "$actual" != "$expected" ]; then
-    echo "Warning: SHA-256 mismatch for $rel_path" >&2
-    echo "  expected: $expected" >&2
-    echo "  actual:   $actual" >&2
-    if [ -t 0 ]; then
-      printf "Continue anyway? [y/N] " >&2
-      read -r yn
-      case "$yn" in
-        y|Y) : ;;
-        *) echo "Aborted by user." >&2; exit 1 ;;
-      esac
+    echo "エラー: 配布ファイルのハッシュが一致しません: $rel_path" >&2
+    echo "  期待値: $expected" >&2
+    echo "  実際:   $actual" >&2
+    echo "  配布が壊れているか、改変された可能性があります。安全のためインストールを中止します。" >&2
+    if [ "${AI_SAFE_ALLOW_HASH_MISMATCH:-0}" = "1" ]; then
+      echo "  （AI_SAFE_ALLOW_HASH_MISMATCH=1 が設定されているため、警告のまま続行します。開発者/講師のカスタマイズ用）" >&2
     else
-      echo "Non-interactive shell: continuing with mismatch (set AI_SAFETY_STRICT=1 to abort)." >&2
-      if [ "${AI_SAFETY_STRICT:-0}" = "1" ]; then exit 1; fi
+      echo "  講師が意図的に変更した場合は docs/tested_versions.md のハッシュを更新するか、" >&2
+      echo "  環境変数 AI_SAFE_ALLOW_HASH_MISMATCH=1 を設定して再実行してください。" >&2
+      exit 1
     fi
   fi
 }

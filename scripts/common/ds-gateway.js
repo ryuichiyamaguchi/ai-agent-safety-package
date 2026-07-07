@@ -72,6 +72,13 @@ function addCounts(acc, c) {
   for (const k of Object.keys(c)) acc[k] = (acc[k] || 0) + c[k];
 }
 
+// Anthropic content block の既知バイナリ MIME ホワイトリスト（module 共有）。
+// 用途1: 正規 base64 メディアを secret マスク除外する判定（isLegitimateBase64Source）。
+// 用途2: 画像 placeholder に echo してよい media_type かの判定（D・RED-1 修正）。
+const BINARY_MIME = new Set([
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf',
+]);
+
 function maskValue(v, counts, ctx) {
   // Generic deep-walk: mask EVERY string leaf in any string/array/object.
   // This uniformly covers text, tool_result.content, tool_use.input, and any future fields.
@@ -84,6 +91,28 @@ function maskValue(v, counts, ctx) {
     return v.map((item) => maskValue(item, counts, ctx));
   }
   if (v && typeof v === 'object') {
+    // D (2026-07): d-claude 経路では DeepSeek は画像を見られない（実測=黙殺）のに、base64 画像を
+    // そのまま送ると毎ターン全履歴分の巨大トークンを浪費する。ds-gateway は DeepSeek 専用経路
+    // （upstream=api.deepseek.com）なので、素の Anthropic 直叩き（claude-safe）には影響しない。
+    // 画像 content block を短いテキストプレースホルダに差し替える（Anthropic 互換の text block を
+    // 維持＝構造は壊さない）。tool_result.content[] 内の画像も deep-walk 中にここで捕捉される。
+    // ※ document(PDF) は対象外（下の base64 保全ロジックへ流す）。data の中身は一切載せない。
+    if (v.type === 'image' && v.source && typeof v.source === 'object' && v.source.type === 'base64') {
+      // media_type は placeholder に生 echo しない（RED-1 修正）。MIME 形状 regex は
+      // "sk-ant-…/png" のようなハイフン込み 40 字以下の秘密を誤って通す（=マスク迂回の回帰）ため、
+      // 既知の安全な画像 MIME ホワイトリスト(BINARY_MIME)との完全一致のみ echo し、集合外は「不明」。
+      let mime = '不明';
+      if (typeof v.source.media_type === 'string') {
+        const mt = String(v.source.media_type).split(';')[0].trim();
+        if (BINARY_MIME.has(mt)) mime = mt;
+      }
+      let approxBytes = 0;
+      if (typeof v.source.data === 'string') {
+        const b = v.source.data.replace(/[^A-Za-z0-9+/]/g, '');
+        approxBytes = Math.floor(b.length * 3 / 4);
+      }
+      return { type: 'text', text: '[画像データは送信していません: ' + mime + ' 約' + approxBytes + 'bytes。DeepSeek は画像を見られません。内容確認は describe_image ツールを使ってください]' };
+    }
     // F-7/F-9/F-9fin: Anthropic content block の base64 メディアデータ（image/document 等の source.data）は
     // バイナリを base64 エンコードした文字列であり、secret パターンに偶然一致し得るが
     // 実際には機微情報ではない。ただし除外条件を厳格化して偽装漏洩穴を塞ぐ。
@@ -97,9 +126,7 @@ function maskValue(v, counts, ctx) {
     //      ※ '-' '_' は base64url の拡張。標準 base64 の Anthropic スキーマには現れないため許可しない。
     //   4. v.data.length > 512 — 本物のメディアは圧倒的に大きい。
     //      短い secret 偽装（AKIA系20字等）を弾く。
-    const BINARY_MIME = new Set([
-      'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf',
-    ]);
+    // ※ BINARY_MIME は module スコープに hoist 済み（画像 placeholder の media_type 判定と共有）。
     const isLegitimateBase64Source = (
       v.type === 'base64' &&
       typeof v.media_type === 'string' && BINARY_MIME.has(String(v.media_type).split(';')[0].trim()) &&

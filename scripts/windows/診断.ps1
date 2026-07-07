@@ -23,6 +23,19 @@ Line ""
 Line "■ 1. ツールの版（人によって違う＝症状が変わる原因）"
 $claudeVer = ""; try { $claudeVer = (& claude --version 2>&1 | Out-String).Trim() } catch { $claudeVer = "(取得失敗)" }
 if ($claudeVer -and $claudeVer -notmatch "失敗") { OK ("Claude Code: " + $claudeVer) } else { BAD "Claude Code が見つからない/起動できない" }
+# 動作確認済みの Claude Code 版との比較（版差＝「人により違う」「機能が黙って落ちる」の親玉）。
+# 期待版の SSOT は policy の testedClaudeCodeVersion。
+$expectedCc = ""
+$polForVer = Join-Path $Workspace ".ai-safety\policy\safety-policy.json"
+if (Test-Path -LiteralPath $polForVer) {
+    try { $expectedCc = ([System.IO.File]::ReadAllText($polForVer, [System.Text.Encoding]::UTF8) | ConvertFrom-Json).testedClaudeCodeVersion } catch { $expectedCc = "" }
+}
+if ($expectedCc) {
+    $ccM = [regex]::Match([string]$claudeVer, '[0-9]+\.[0-9]+\.[0-9]+')
+    if (-not $ccM.Success) { WARN ("Claude Code 期待版=" + $expectedCc + " / 実版=取得できず（動作確認済みの版に揃えてください）") }
+    elseif ($ccM.Value -eq $expectedCc) { OK ("Claude Code 版が動作確認済みと一致 (" + $expectedCc + ")") }
+    else { WARN ("Claude Code 版ちがい: 実版=" + $ccM.Value + " / 動作確認済み=" + $expectedCc + " → 揃えるには npm install -g @anthropic-ai/claude-code@" + $expectedCc) }
+}
 $nodeVer = ""; try { $nodeVer = (& node --version 2>&1 | Out-String).Trim() } catch { $nodeVer = "" }
 if ($nodeVer) { OK ("node: " + $nodeVer + "（MCP/ゲートウェイに必須）") } else { BAD "node が無い → 検索/画像/vision の MCP が動かない・ゲートウェイも動かない" }
 Line ""
@@ -92,6 +105,71 @@ $shim = Join-Path $bin "d-claude.cmd"
 if (Test-Path -LiteralPath $shim) { OK ("シムあり: " + $shim) } else { BAD "d-claude.cmd が無い → setup-commands 未実行/失敗" }
 $userPath = [Environment]::GetEnvironmentVariable('Path','User'); if (-not $userPath){$userPath=""}
 if (($userPath.Split(';')) -contains $bin) { OK "ユーザーPATHに bin 登録済み（新しいターミナルで有効）" } else { BAD "bin が PATH に無い → どこからでも d-claude と打てない" }
+Line ""
+
+# 6) d-claude の実体解決（どの d-claude が実際に呼ばれるか＝野良シャドーイング検出）
+Line "■ 6. d-claude の実体（野良シャドーイング検出）"
+Line "    ※ PowerShell は 関数/エイリアス を PATH の .cmd より優先します。学校PC上に野良の"
+Line "       d-claude 関数（プロファイル定義）や別スクリプトがあると、正規ランチャーをバイパスして"
+Line "       『素の claude + DeepSeek 化（=バカ）』『人により違う英語エラー』の原因になります。"
+$legitDClaude = @($shim, (Join-Path $Workspace "d-claude.cmd"))
+$dcAll = @(Get-Command d-claude -All -ErrorAction SilentlyContinue)
+if ($dcAll.Count -eq 0) {
+    WARN "現在のセッションで d-claude が見つかりません（この診断は -NoProfile 実行のため、プロファイル定義の関数はここには出ません。下のプロファイル走査で確認します）"
+} else {
+    Line "    解決順（先頭 → が実際に呼ばれる勝者）:"
+    for ($i = 0; $i -lt $dcAll.Count; $i++) {
+        $c = $dcAll[$i]
+        if ($c.Source) { $where = $c.Source }
+        elseif ($c.CommandType -eq 'Alias') { $where = "エイリアス → " + [string]$c.Definition }
+        elseif ($c.CommandType -eq 'Function') { $where = "関数（プロファイル等で定義）" }
+        else { $where = [string]$c.Definition }
+        $mark = if ($i -eq 0) { " -> " } else { "    " }
+        Line ("    " + $mark + "[" + $c.CommandType + "] " + $where)
+    }
+    $winner = $dcAll[0]
+    $winnerPath = ""
+    if ($winner.Source) { $winnerPath = $winner.Source }
+    $winnerLegit = (($winner.CommandType -eq 'Application') -or ($winner.CommandType -eq 'ExternalScript')) -and ($legitDClaude -contains $winnerPath)
+    if ($winnerLegit) {
+        OK ("d-claude の勝者は正規シムです: " + $winnerPath)
+    } else {
+        BAD "d-claude の勝者が正規シムではありません（野良の関数/エイリアス/別スクリプトが優先されています）"
+        Line ("       正規シムの場所: " + $shim + "  または  " + (Join-Path $Workspace "d-claude.cmd"))
+    }
+}
+# PowerShell プロファイル 4種を静的に走査（-NoProfile でも野良定義を必ず捕捉できる）。
+Line "    ● PowerShell プロファイルの d-claude 定義を走査:"
+$profileFound = $false
+foreach ($pn in @('AllUsersAllHosts','AllUsersCurrentHost','CurrentUserAllHosts','CurrentUserCurrentHost')) {
+    $pp = $null
+    if ($PROFILE) { $pp = $PROFILE.$pn }
+    if ($pp -and (Test-Path -LiteralPath $pp)) {
+        $hits = @(Select-String -LiteralPath $pp -Pattern 'd-claude' -SimpleMatch -ErrorAction SilentlyContinue)
+        if ($hits.Count -gt 0) {
+            $profileFound = $true
+            BAD ("プロファイルに d-claude の記述あり: " + $pn + " (" + $pp + ")")
+            foreach ($h in $hits) { Line ("       " + $h.LineNumber + "行目: " + $h.Line.Trim()) }
+        }
+    }
+}
+if (-not $profileFound) {
+    OK "PowerShell プロファイルに d-claude の記述はありません（野良定義なし）"
+} else {
+    Line "    ● 対処: 上のプロファイル該当行を削除するか、行頭に # を付けてコメントアウトし、"
+    Line "       新しいターミナルを開き直してください（この診断は何も書き換えません）。"
+}
+# 他シムの勝者も軽く確認（同種のシャドーイングが無いか）。
+Line "    ● 他コマンドの勝者（参考・勝者のみ表示）:"
+foreach ($cmdName in @('claude-safe','codex-safe','agy-safe','monitor')) {
+    $one = @(Get-Command $cmdName -All -ErrorAction SilentlyContinue)
+    if ($one.Count -eq 0) { Line ("       " + $cmdName + ": （見つからない）") }
+    else {
+        $w = $one[0]
+        if ($w.Source) { $wp = $w.Source } elseif ($w.CommandType -eq 'Function') { $wp = "関数（プロファイル定義）" } else { $wp = [string]$w.Definition }
+        Line ("       " + $cmdName + ": [" + $w.CommandType + "] " + $wp)
+    }
+}
 Line ""
 
 Line "============================================================"

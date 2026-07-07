@@ -21,7 +21,10 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-for pkg in "@openai/codex" "@anthropic-ai/claude-code"; do
+# Claude Code は動作確認済みの版 (2.1.201) に固定する。最新版だと --help のフラグ構成が変わり、
+# d-claude の正直プロンプト/MCP/権限モードが「黙ってスキップ」され劣化する事故が起きるため。
+# 期待版の SSOT は policy/safety-policy.json の testedClaudeCodeVersion（起動時/診断で照合）。
+for pkg in "@openai/codex" "@anthropic-ai/claude-code@2.1.201"; do
   echo "------------------------------------------------------------"
   echo "導入中: $pkg"
   if npm install -g "$pkg"; then

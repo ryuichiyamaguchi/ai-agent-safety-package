@@ -37,8 +37,11 @@ $backupDir = Join-Path $homeSafety ("backups\" + (Get-Date -Format "yyyyMMdd-HHm
 
 Write-Host ("Installing for platform: " + $Platform)
 
-# H6: verify distribution integrity against docs\tested_versions.md hash table.
-# Mismatch warns and asks for confirmation. Set AI_SAFETY_STRICT=1 to hard-fail in non-interactive runs.
+# H6/B: verify distribution integrity against docs\tested_versions.md hash table.
+# ハッシュ不一致は既定で中止する（何もコピーする前に throw で exit 非0）。Test-DistributionHash 群は
+# 全コピー処理より前に呼ぶので、中止時はワークスペースを一切変更しない。開発者/講師が意図的に
+# policy.json 等を変更したときだけ、明示 opt-out AI_SAFE_ALLOW_HASH_MISMATCH=1 で続行できる（警告は出す）。
+# 旧 AI_SAFETY_STRICT=1 は「既定で中止」に統合され不要になった（既定が常に strict）。
 function Test-DistributionHash([string]$RelPath) {
     $absPath = Join-Path $packageRoot ($RelPath -replace '/', '\')
     if (-not (Test-Path -LiteralPath $absPath)) { return }
@@ -54,15 +57,15 @@ function Test-DistributionHash([string]$RelPath) {
     if (-not $expected) { return }
     $actual = (Get-FileHash -LiteralPath $absPath -Algorithm SHA256).Hash.ToLower()
     if ($actual -ne $expected) {
-        Write-Warning ("SHA-256 mismatch for " + $RelPath)
-        Write-Warning ("  expected: " + $expected)
-        Write-Warning ("  actual:   " + $actual)
-        if ([Environment]::UserInteractive -and $Host.UI.RawUI) {
-            $yn = Read-Host "Continue anyway? [y/N]"
-            if ($yn -notmatch '^[yY]') { throw "Aborted by user due to hash mismatch." }
+        Write-Warning ("配布ファイルのハッシュが一致しません: " + $RelPath)
+        Write-Warning ("  期待値: " + $expected)
+        Write-Warning ("  実際:   " + $actual)
+        if ($env:AI_SAFE_ALLOW_HASH_MISMATCH -eq '1') {
+            Write-Warning "  AI_SAFE_ALLOW_HASH_MISMATCH=1 が設定されているため、警告のまま続行します（開発者/講師のカスタマイズ用）。"
         } else {
-            Write-Warning "Non-interactive shell: continuing with mismatch (set AI_SAFETY_STRICT=1 to abort)."
-            if ($env:AI_SAFETY_STRICT -eq '1') { throw "Hash mismatch with AI_SAFETY_STRICT=1." }
+            throw ("配布ファイルのハッシュ不一致のためインストールを中止しました: " + $RelPath + "`n" +
+                   "  配布が壊れているか改変された可能性があります。`n" +
+                   "  講師が意図的に変更した場合は docs\tested_versions.md のハッシュを更新するか、環境変数 AI_SAFE_ALLOW_HASH_MISMATCH=1 を設定して再実行してください。")
         }
     }
 }

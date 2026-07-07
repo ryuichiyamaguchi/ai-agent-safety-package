@@ -23,7 +23,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
-for %%P in (@openai/codex @anthropic-ai/claude-code) do (
+REM Claude Code は動作確認済みの版 (2.1.201) に固定する。最新版だと --help のフラグ構成が変わり
+REM d-claude の機能が黙ってスキップされ劣化する事故を防ぐ（期待版の SSOT=policy/safety-policy.json testedClaudeCodeVersion）。
+for %%P in (@openai/codex @anthropic-ai/claude-code@2.1.201) do (
   echo ------------------------------------------------------------
   echo 導入中: %%P
   call npm install -g %%P

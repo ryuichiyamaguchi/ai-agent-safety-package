@@ -7,9 +7,15 @@ v1.0 リリース時点（2026-05-12）で動作確認した CLI のバージョ
 | ツール | 確認済みバージョン | 備考 |
 |---|---|---|
 | Codex CLI | 0.135.0 | 主たる対象。Safe Auto Mode の隔離ドリル/launcher は 0.135 の新 sandbox 構文(`codex sandbox --permissions-profile`)と profile 分離(`safe.config.toml`)前提 |
-| Claude Code | 2.1.139 | hook 仕様準拠（v1.2.1 から `permissions.deny` 内部ツール対応） |
+| Claude Code | **2.1.201（動作確認済み・固定）** | 導入スクリプト（`0_AIツールをまとめて入れる`）は `@2.1.201` を固定インストール。期待版の SSOT は `policy/safety-policy.json` の `testedClaudeCodeVersion`。`launch-claude-safe.{sh,ps1}` と `診断.ps1` が実版と照合し差異を日本語警告する。hook 仕様準拠（v1.2.1 から `permissions.deny` 内部ツール対応） |
 | Gemini CLI | **0.41.2（凍結版）** | BeforeAgent / BeforeTool / AfterModel / AfterAgent hook。**2026-06-18 で公式廃止**（後継: Antigravity CLI） |
 | Antigravity CLI (`agy`) | **1.0.0 / 1.0.1** | v1.3.0 で `launch-agy-safe.{sh,ps1}` を追加し並立対応。`--sandbox` 強制起動 + `proceed-in-sandbox` permission mode で防御。設定ファイル経由の deny キー有効性は未確認（v1.3.1 で実機受講者環境にて再検証） |
+
+> **Claude Code の版を更新するときは、`policy/safety-policy.json` の `testedClaudeCodeVersion`（SSOT）と、
+> user-facing に直書きされた `@x.y.z` リテラルを必ず同時に更新する**こと。直書き箇所:
+> `0_AIツールをまとめて入れる-Mac.command` / `0_AIツールをまとめて入れる-Windows.bat` / `docs/05_Claude_Codeを安全に使う.md` /
+> `docs/09_各AIのインストール.md` / `スタート.html` / `launch-claude-safe.{sh,ps1}` の不在時案内。
+> 片方だけ変えると導入は旧版のまま入り、`launch-claude-safe`/`診断.ps1` の版差警告が全受講者に毎回出るドリフトになる。
 
 ## ⚠ Gemini CLI → Antigravity CLI 移行ステータス（v1.3.0 時点）
 
@@ -58,8 +64,10 @@ v1.0 リリース時点（2026-05-12）で動作確認した CLI のバージョ
 ## 配布物 SHA-256 ハッシュ一覧（H6: 配布物改ざん検知）
 
 `install.sh` / `install.ps1` 起動時、以下のファイルの SHA-256 を本表と照合する。
-mismatch が出た場合、配布 URL すり替えや手動改変の可能性があるため、警告を表示し
-**継続するか確認プロンプト**を出す（強制 exit はしない、講師カスタマイズ運用を想定）。
+mismatch が出た場合、配布 URL すり替えや手動改変・破損の可能性があるため、
+**既定でインストールを中止する**（何もコピーする前に exit 非0＝破損配布を弾く。2026-07 B1）。
+講師が意図的に policy 等をカスタマイズする運用では、本表のハッシュを更新するか、
+環境変数 `AI_SAFE_ALLOW_HASH_MISMATCH=1` を設定したときのみ警告付きで続行できる。
 
 講師は新リリース時にこの表を更新すること。値は `shasum -a 256 <file>`（macOS）
 または `Get-FileHash -Algorithm SHA256 <file>`（Windows）で算出する。
@@ -92,7 +100,7 @@ mismatch が出た場合、配布 URL すり替えや手動改変の可能性が
 
 | ファイル | SHA-256 | 備考 |
 |---------|---------|------|
-| policy/safety-policy.json | 2276db83a4086cedb6357f3bfc0a454120ec20d626fb945ce3085b39429d8c84 | v1.12.1 deny floor 網羅性修正（レビュー RED-A/B ＋ Codex 追補対応）: `cat${IFS}.env`・`.envrc`・`-execdir rm`・PowerShell alias(`del -Recurse`/`ls -r\|rm`)・`rd/s`・`diskutil eraseDisk`/`Remove-Partition`・`--output`系2段DL も追加捕捉。旧 v1.12.1 中間 hash=a932cb93…。 再帰削除を長オプション前置(`rm --force -r`)・split flags・`find -delete`/`-exec rm`・PowerShell 省略形(`-rec`/`-re`)・`gci -r \| rm` まで捕捉／`.env` 読取を head/tail/grep/sed/awk/cp/strings 等に拡大＋引用符・`@`前置・pathlib・curl 流出も捕捉／`format` を drive/slash 必須化し `git format-patch` 過剰ブロック解消＋`Clear-Disk`/`Format-Volume` 追加／`dd of="/dev/"` 引用符・backtick `\`curl\``・2段DL実行・空白 fork bomb・`pnpm/yarn/npm --workspace publish` を追加／`del /q` 単独の過剰ブロック撤廃。mac grep・.NET -match 両エンジンで 83 ケース(BLOCK 57/PASS 26)一致・本物 guard-bash 実機立証。packageVersion 1.12.1。旧 v1.12.0 hash=8acb93c5… |
+| policy/safety-policy.json | 40fabc3f79eb7e559a869114aa723934688ec8b718c9cc8ba8440180c7632667 | 2026-07-07 (C): `testedClaudeCodeVersion` キー (=2.1.201) を追加。Claude Code 動作確認済み版の SSOT。install が本ハッシュと照合するため更新必須。旧 hash=2276db83…（内容は下記 v1.12.1 の deny floor と同一）。v1.12.1 deny floor 網羅性修正（レビュー RED-A/B ＋ Codex 追補対応）: `cat${IFS}.env`・`.envrc`・`-execdir rm`・PowerShell alias(`del -Recurse`/`ls -r\|rm`)・`rd/s`・`diskutil eraseDisk`/`Remove-Partition`・`--output`系2段DL も追加捕捉。旧 v1.12.1 中間 hash=a932cb93…。 再帰削除を長オプション前置(`rm --force -r`)・split flags・`find -delete`/`-exec rm`・PowerShell 省略形(`-rec`/`-re`)・`gci -r \| rm` まで捕捉／`.env` 読取を head/tail/grep/sed/awk/cp/strings 等に拡大＋引用符・`@`前置・pathlib・curl 流出も捕捉／`format` を drive/slash 必須化し `git format-patch` 過剰ブロック解消＋`Clear-Disk`/`Format-Volume` 追加／`dd of="/dev/"` 引用符・backtick `\`curl\``・2段DL実行・空白 fork bomb・`pnpm/yarn/npm --workspace publish` を追加／`del /q` 単独の過剰ブロック撤廃。mac grep・.NET -match 両エンジンで 83 ケース(BLOCK 57/PASS 26)一致・本物 guard-bash 実機立証。packageVersion 1.12.1。旧 v1.12.0 hash=8acb93c5… |
 | configs/codex/hooks.mac.json | 6f03deee71871c40dd81d098867a4860284700f98135fbb05730936738a729ca | v1.0.x から変更なし |
 | configs/codex/hooks.windows.json | 4e55cf8fbffbe44f1023455c902934f00d4a81d2637ba54c495cfaded18ca97c | v1.7.2 で Codex 二重包み対策に -File 形式へ変更 |
 | configs/claude/settings.mac.json | accffeaa1887f397635a291bd9d4d846974baf0861c1c2be1b661d8de7b9a486 | v1.12.0 教室プロファイル: defaultMode acceptEdits + allow 大幅拡大（読取/ビルド/install/git 定型/curl/wget）+ ask（git push/reset/checkout/rebase/sudo）。hooks は不変。初回体験修正で allow に低ストレス系 sed/awk/tar/unzip を追加（deny/ask は不変）。※`make*` はレシピ内で任意コマンドを hook 不可視に実行しうるため allow から除外し ask 層に戻した（Codex 指摘）。旧 hash=ac3a7b72…/76cfddc8… |

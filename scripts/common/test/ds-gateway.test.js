@@ -531,14 +531,14 @@ test('F-4: denylist unset (no path configured, default missing) loads as [] (nor
   assert.deepStrictEqual(r, [], 'unset denylist must be [] (normal), not a fail-closed sentinel');
 });
 
-// ── F-7: base64 メディアデータは deep-walk マスク対象から除外 ──
-test('F-7: source.data in base64 image block is preserved byte-for-byte (not masked)', async () => {
+// ── D: base64 画像 content block は DeepSeek 経路でテキストプレースホルダに差し替える ──
+// （旧 F-7: 画像を「バイト不変で保全」する挙動は、DeepSeek は画像を見られない＝毎ターン純浪費
+//   になるため D で「差し替え」に変更。document(PDF) は従来どおり保全する。）
+test('D: base64 image block is replaced by a JP placeholder text block (not forwarded to DeepSeek)', async () => {
   const { server: up, cap } = await startCaptureUpstream();
   after(()=>up.close());
   const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, denylistTerms: [] });
   const server = await gw.listen(); after(()=>server.close());
-  // Valid-looking base64 (>512 chars) containing AIza prefix that can appear in PNG ancillary chunk data.
-  // Must be >512 chars so the length-gate passes (short payloads are masked as a safety measure).
   const imageData = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk' +
     'AIza' + 'B'.repeat(600 - 64 - 4) + 'AAAA';
   await postJson(server.address().port, '/v1/messages', {
@@ -551,9 +551,14 @@ test('F-7: source.data in base64 image block is preserved byte-for-byte (not mas
     }],
   });
   const fwd = JSON.parse(cap.body);
-  const fwdData = fwd.messages[0].content[0].source.data;
-  assert.strictEqual(fwdData, imageData, 'image source.data must be byte-for-byte identical (not masked)');
-  assert.ok(!cap.body.includes('[MASKED:google]'), 'Google key pattern inside base64 must not be flagged');
+  const block = fwd.messages[0].content[0];
+  assert.strictEqual(block.type, 'text', 'image block must become a text block');
+  assert.ok(!('source' in block), 'no source/data must be forwarded');
+  assert.ok(block.text.includes('画像データは送信していません'), 'JP placeholder text present');
+  assert.ok(block.text.includes('describe_image'), 'placeholder points to describe_image');
+  assert.ok(block.text.includes('image/png'), 'sanitized media_type surfaced in placeholder');
+  assert.ok(!cap.body.includes(imageData), 'raw base64 image data must NOT reach upstream (token waste avoided)');
+  assert.ok(!cap.body.includes('[MASKED:google]'), 'image stripped whole, not scanned/masked as a secret');
 });
 
 test('F-7: base64 document source.data is also preserved', async () => {
@@ -578,7 +583,7 @@ test('F-7: base64 document source.data is also preserved', async () => {
   assert.strictEqual(fwdData, docData, 'document source.data must be byte-for-byte identical');
 });
 
-test('F-7: text content secrets are still masked even when base64 blocks exist', async () => {
+test('D: text content secrets are still masked even when base64 image blocks exist', async () => {
   const { server: up, cap } = await startCaptureUpstream();
   after(()=>up.close());
   const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, denylistTerms: [] });
@@ -594,7 +599,9 @@ test('F-7: text content secrets are still masked even when base64 blocks exist',
     }],
   });
   const fwd = JSON.parse(cap.body);
-  assert.strictEqual(fwd.messages[0].content[0].source.data, imageData, 'base64 data preserved');
+  assert.strictEqual(fwd.messages[0].content[0].type, 'text', 'image stripped to text placeholder');
+  assert.ok(fwd.messages[0].content[0].text.includes('画像データは送信していません'), 'placeholder present');
+  assert.ok(!cap.body.includes(imageData), 'image base64 not forwarded');
   assert.ok(!cap.body.includes('sk-ant-AAAAAAAAAAAAAAAAAAAAAA'), 'text content secret still masked');
 });
 
@@ -638,12 +645,12 @@ test('F-9: forged {type:"base64"} WITHOUT media_type is still masked (metadata l
   assert.ok(cap.body.includes('[MASKED:anthropic]'), 'must be replaced with [MASKED:anthropic]');
 });
 
-test('F-9: {type:"base64", media_type:"image/png"} with non-base64-charset data (hyphen) is masked', async () => {
+test('D: image block with a forged secret-as-data is stripped whole (secret never reaches upstream)', async () => {
   const { server: up, cap } = await startCaptureUpstream();
   after(()=>up.close());
   const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, denylistTerms: [] });
   const server = await gw.listen(); after(()=>server.close());
-  // data に base64 charset 外の文字（ハイフン）を含む → 本物の base64 でないためマスク対象。
+  // 画像 content block は data の中身に関わらず丸ごと差し替えるので、data に仕込んだ秘密も上流に届かない。
   await postJson(server.address().port, '/v1/messages', {
     messages: [{
       role: 'user',
@@ -653,16 +660,16 @@ test('F-9: {type:"base64", media_type:"image/png"} with non-base64-charset data 
       }],
     }],
   });
-  assert.ok(!cap.body.includes('sk-ant-AAAAAAAAAAAAAAAAAAAAAA'), 'non-base64-charset data must be masked');
-  assert.ok(cap.body.includes('[MASKED:anthropic]'), 'must be replaced with [MASKED:anthropic]');
+  assert.ok(!cap.body.includes('sk-ant-AAAAAAAAAAAAAAAAAAAAAA'), 'forged data dropped together with the image block');
+  const fwd = JSON.parse(cap.body);
+  assert.strictEqual(fwd.messages[0].content[0].type, 'text', 'replaced by placeholder text block');
 });
 
-test('F-9: legitimate base64 media (media_type + strict charset) is preserved byte-for-byte', async () => {
+test('D: even a legitimate base64 image (strict charset) is stripped to a placeholder (DeepSeek is blind to it)', async () => {
   const { server: up, cap } = await startCaptureUpstream();
   after(()=>up.close());
   const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, denylistTerms: [] });
   const server = await gw.listen(); after(()=>server.close());
-  // 純粋な base64 charset のみ（>512 chars）。4条件を全て満たすためバイト不変。
   const legitimateBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk' +
     'AIza' + 'B'.repeat(600 - 64 - 4) + 'AAAA';
   await postJson(server.address().port, '/v1/messages', {
@@ -675,7 +682,8 @@ test('F-9: legitimate base64 media (media_type + strict charset) is preserved by
     }],
   });
   const fwd = JSON.parse(cap.body);
-  assert.strictEqual(fwd.messages[0].content[0].source.data, legitimateBase64, 'legitimate base64 must be byte-for-byte identical');
+  assert.strictEqual(fwd.messages[0].content[0].type, 'text', 'legitimate image is still replaced by a text placeholder');
+  assert.ok(!cap.body.includes(legitimateBase64), 'large base64 image data must not be forwarded to DeepSeek');
 });
 
 // ── F-9 仕上げ: BINARY_MIME ホワイトリスト + length > 512 ──
@@ -699,12 +707,12 @@ test('F-9 (fin): short AKIA-style base64-charset secret (<=512 chars) is masked 
   assert.ok(!cap.body.includes('AKIAIOSFODNN7EXAMPLE'), 'short AKIA-style forged base64 must not pass through raw');
 });
 
-test('F-9 (fin): non-binary MIME (text/plain) large valid base64 data is masked', async () => {
+test('D: image block is stripped regardless of media_type (forged text/plain image too)', async () => {
   const { server: up, cap } = await startCaptureUpstream();
   after(()=>up.close());
   const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, denylistTerms: [] });
   const server = await gw.listen(); after(()=>server.close());
-  // text/plain は BINARY_MIME ホワイトリスト外 → length > 512 でも除外されずマスク対象。
+  // type:'image' なら media_type に関わらず丸ごと差し替えるので、data に仕込んだ google キー模擬も上流に届かない。
   const bigNonBinaryBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk' +
     'AIza' + 'B'.repeat(600 - 64 - 4) + 'AAAA';
   assert.ok(bigNonBinaryBase64.length > 512);
@@ -717,16 +725,17 @@ test('F-9 (fin): non-binary MIME (text/plain) large valid base64 data is masked'
       }],
     }],
   });
-  assert.ok(cap.body.includes('[MASKED:google]'), 'non-binary MIME data must be masked');
-  assert.ok(!cap.body.includes('AIzaBBBB'), 'google key pattern must not reach upstream raw');
+  assert.ok(!cap.body.includes('AIzaBBBB'), 'forged google key pattern must not reach upstream raw');
+  assert.ok(!cap.body.includes(bigNonBinaryBase64), 'image data dropped');
+  const fwd = JSON.parse(cap.body);
+  assert.strictEqual(fwd.messages[0].content[0].type, 'text', 'replaced by placeholder');
 });
 
-test('F-9 (fin): large legitimate base64 image (>512, binary MIME, strict charset) is preserved byte-for-byte', async () => {
+test('D: large legitimate base64 image (>512, binary MIME) is stripped and shrinks the forwarded body', async () => {
   const { server: up, cap } = await startCaptureUpstream();
   after(()=>up.close());
   const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, denylistTerms: [] });
   const server = await gw.listen(); after(()=>server.close());
-  // 600 字・pure base64 charset・media_type=image/png → 4条件を全て満たすためバイト不変保全。
   const largeImageData = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk' +
     'AIza' + 'B'.repeat(600 - 64 - 4) + 'AAAA';
   assert.ok(largeImageData.length > 512);
@@ -741,8 +750,86 @@ test('F-9 (fin): large legitimate base64 image (>512, binary MIME, strict charse
     }],
   });
   const fwd = JSON.parse(cap.body);
-  assert.strictEqual(fwd.messages[0].content[0].source.data, largeImageData,
-    'large legitimate base64 with binary MIME must be byte-for-byte identical');
+  assert.strictEqual(fwd.messages[0].content[0].type, 'text', 'large image replaced by placeholder');
+  assert.ok(!cap.body.includes(largeImageData), 'large base64 not forwarded');
+  assert.ok(cap.body.length < largeImageData.length, 'forwarded body is smaller than the stripped image (token savings)');
+});
+
+test('D: a secret hidden in media_type is NOT echoed into the placeholder', async () => {
+  const { server: up, cap } = await startCaptureUpstream();
+  after(()=>up.close());
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, denylistTerms: [] });
+  const server = await gw.listen(); after(()=>server.close());
+  await postJson(server.address().port, '/v1/messages', {
+    messages: [{
+      role: 'user',
+      content: [{
+        type: 'image',
+        source: { type: 'base64', media_type: 'sk-ant-AAAAAAAAAAAAAAAAAAAAAA', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA' },
+      }],
+    }],
+  });
+  assert.ok(!cap.body.includes('sk-ant-AAAAAAAAAAAAAAAAAAAAAA'), 'forged media_type secret must not be echoed by the placeholder');
+  const fwd = JSON.parse(cap.body);
+  const block = fwd.messages[0].content[0];
+  assert.strictEqual(block.type, 'text');
+  assert.ok(block.text.includes('不明'), 'invalid media_type falls back to 不明');
+});
+
+test('D: a MIME-shaped secret in media_type (sk-ant-.../png) is NOT echoed (RED-1 regression)', async () => {
+  // RED-1: 旧実装は MIME 形状 regex `^[\w.+-]{1,40}/[\w.+-]{1,40}$` を使い、"sk-ant-…/png" のような
+  // ハイフン込み 40 字以下の秘密を「正しい MIME」と誤認して placeholder に生 echo し、upstream に
+  // 秘密が到達していた（HEAD の maskText 経路の回帰）。BINARY_MIME ホワイトリスト照合で塞ぐ。
+  const { server: up, cap } = await startCaptureUpstream();
+  after(()=>up.close());
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, denylistTerms: [] });
+  const server = await gw.listen(); after(()=>server.close());
+  await postJson(server.address().port, '/v1/messages', {
+    messages: [{
+      role: 'user',
+      content: [{
+        type: 'image',
+        source: { type: 'base64', media_type: 'sk-ant-AAAAAAAAAAAAAAAAAAAAAA/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA' },
+      }],
+    }],
+  });
+  assert.ok(!cap.body.includes('sk-ant-AAAAAAAAAAAAAAAAAAAAAA'), 'MIME-shaped secret in media_type must NOT reach upstream');
+  const fwd = JSON.parse(cap.body);
+  const block = fwd.messages[0].content[0];
+  assert.strictEqual(block.type, 'text', 'image replaced by placeholder');
+  assert.ok(block.text.includes('不明'), 'non-whitelisted media_type falls back to 不明 (not echoed)');
+});
+
+test('D: a base64 image nested inside tool_result content is also stripped (deep-walk)', async () => {
+  const { server: up, cap } = await startCaptureUpstream();
+  after(()=>up.close());
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, denylistTerms: [] });
+  const server = await gw.listen(); after(()=>server.close());
+  const imageData = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA' + 'C'.repeat(600);
+  await postJson(server.address().port, '/v1/messages', { messages: [
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'x', content: [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageData } },
+    ] }] },
+  ]});
+  assert.ok(!cap.body.includes(imageData), 'nested tool_result image data must not be forwarded');
+  const fwd = JSON.parse(cap.body);
+  assert.strictEqual(fwd.messages[0].content[0].type, 'tool_result', 'outer structure preserved');
+  assert.strictEqual(fwd.messages[0].content[0].content[0].type, 'text', 'nested image replaced by placeholder');
+});
+
+test('D: a URL image (source.type=url) is left untouched (only base64 is stripped)', async () => {
+  const { server: up, cap } = await startCaptureUpstream();
+  after(()=>up.close());
+  const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, denylistTerms: [] });
+  const server = await gw.listen(); after(()=>server.close());
+  await postJson(server.address().port, '/v1/messages', { messages: [
+    { role: 'user', content: [{ type: 'image', source: { type: 'url', url: 'https://example.com/cat.png' } }] },
+  ]});
+  const fwd = JSON.parse(cap.body);
+  const block = fwd.messages[0].content[0];
+  assert.strictEqual(block.type, 'image', 'URL image block kept as image');
+  assert.strictEqual(block.source.type, 'url');
+  assert.strictEqual(block.source.url, 'https://example.com/cat.png', 'URL preserved');
 });
 
 test('audit log includes new PII category counts without raw values (§8)', async () => {

@@ -190,7 +190,11 @@ const TOOL = {
     + 'バナーなど「画像内に文字を正しく入れたい」ときや高品質が必要なときに使う。生成画像を'
     + 'ワークスペースの generated-images/ に保存しパスを返す。受講者自身の Google アカウントで'
     + '無料。1 枚 20 秒前後かかる。文字が不要な背景・写真・イラストを速く作るだけなら '
-    + 'generate_image（Pollinations）の方が速い。',
+    + 'generate_image（Pollinations）の方が速い。'
+    + '【重要・トークン節約】生成後に画像ファイルを Read ツールで開かないこと（base64 として'
+    + 'ローカルのコンテキストに載りトークンを大量消費する。d-claude では gateway が DeepSeek 送信前に'
+    + '画像を捨てるうえ DeepSeek は画像を見られないため、Read した分は完全な無駄になる）。'
+    + '内容を確認したいときは describe_image を使う。',
   inputSchema: {
     type: 'object',
     properties: {

@@ -44,7 +44,7 @@ npm --version
 ## ステップ 2：Claude Code をインストール
 
 ```bash
-npm install -g @anthropic-ai/claude-code
+npm install -g @anthropic-ai/claude-code@2.1.201
 claude --version
 ```
 
@@ -193,7 +193,7 @@ Codex（ChatGPT Pro）と異なり、Claude Code は **使用量に基づく課�
 ### Claude Code がインストールできない
 
 ```bash
-npm install -g @anthropic-ai/claude-code
+npm install -g @anthropic-ai/claude-code@2.1.201
 ```
 
 が失敗する場合：
@@ -215,7 +215,7 @@ npm install -g @anthropic-ai/claude-code
    mkdir -p ~/.npm-global
    npm config set prefix ~/.npm-global
    # PATH に ~/.npm-global/bin を追加（~/.zshrc 等に export PATH=~/.npm-global/bin:$PATH）
-   npm install -g @anthropic-ai/claude-code
+   npm install -g @anthropic-ai/claude-code@2.1.201
    ```
 
 #### 最終手段：`--force`（非推奨）
@@ -223,7 +223,7 @@ npm install -g @anthropic-ai/claude-code
 上の方法が使えない / うまく動かない場合の**最後の手段**としてのみ：
 
 ```bash
-npm install -g @anthropic-ai/claude-code --force
+npm install -g @anthropic-ai/claude-code@2.1.201 --force
 ```
 
 `--force` は依存関係の解決エラーや権限関連の警告を **黙らせる** ためのフラグです。本来は「原因を調べて直すべきエラー」まで通してしまうので、極力使わないでください。使った場合は「なぜそれが必要だったのか」を後で講師に共有して、根本原因を残さないようにすること。

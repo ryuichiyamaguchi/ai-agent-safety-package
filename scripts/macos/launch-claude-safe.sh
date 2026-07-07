@@ -44,9 +44,28 @@ fi
 # claude バイナリ検出（PATH 不在時は日本語で案内し、bash の "command not found" を防ぐ）。
 if ! command -v claude >/dev/null 2>&1; then
   echo "claude コマンドが見つかりません。" >&2
-  echo "先に Claude Code をインストールしてください（例: npm install -g @anthropic-ai/claude-code）。" >&2
+  echo "先に Claude Code をインストールしてください（例: npm install -g @anthropic-ai/claude-code@2.1.201）。" >&2
   echo "インストール済みなのに出る場合は、ターミナルを開き直すか PATH を確認してください。" >&2
   exit 1
+fi
+
+# C: Claude Code の版チェック（素の claude-safe / d-claude 共通）。動作確認済みの版
+# (policy の testedClaudeCodeVersion) と実版を比較し、差異があれば黙らず日本語で警告する
+# （起動は止めない）。版差は「フラグ欠落で機能が黙って落ちる」「人により違うエラー」の親玉。
+# 旧ポリシー（キー無し）や plutil 不在では静かにスキップ（この照合は任意の助言であり防御ではない）。
+_expected_cc_ver=""
+if [ -x /usr/bin/plutil ] && [ -f "$AI_SAFE_POLICY" ]; then
+  _expected_cc_ver="$(/usr/bin/plutil -extract testedClaudeCodeVersion raw -o - "$AI_SAFE_POLICY" 2>/dev/null || true)"
+fi
+if [ -n "$_expected_cc_ver" ]; then
+  _actual_cc_ver="$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+  if [ -z "$_actual_cc_ver" ]; then
+    echo "注意: Claude Code の版を確認できませんでした（claude --version が取得できない）。動作確認済みの版は ${_expected_cc_ver} です。" >&2
+  elif [ "$_actual_cc_ver" != "$_expected_cc_ver" ]; then
+    echo "注意: Claude Code の版が動作確認済みと異なります（実際: ${_actual_cc_ver} / 動作確認済み: ${_expected_cc_ver}）。" >&2
+    echo "      版差で一部の安全/補助機能が黙って無効化されることがあります。揃えるには次を実行してください:" >&2
+    echo "      npm install -g @anthropic-ai/claude-code@${_expected_cc_ver}" >&2
+  fi
 fi
 
 # --permission-mode の対応有無を help で判定（非対応の Claude Code でも壊れないように）

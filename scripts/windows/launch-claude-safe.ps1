@@ -58,7 +58,7 @@ if (-not $Claude) {
 }
 if (-not $Claude) {
     Write-Host "claude コマンドが見つかりません。"
-    Write-Host "「0_AIツールをまとめて入れる-Windows.bat」を実行したか、'npm install -g @anthropic-ai/claude-code' を確認してください。"
+    Write-Host "「0_AIツールをまとめて入れる-Windows.bat」を実行したか、'npm install -g @anthropic-ai/claude-code@2.1.201' を確認してください。"
     Write-Host "（場所を手動指定する場合は環境変数 CLAUDE_BIN にフルパスを設定）"
     exit 1
 }
@@ -69,6 +69,28 @@ $helpText = ""
 try { $helpText = (& $Claude --help 2>&1 | Out-String) } catch { $helpText = "" }
 if ($helpText -match "--permission-mode") {
     $argsList = @("--permission-mode", "default") + $argsList
+}
+
+# C: Claude Code の版チェック（素の claude-safe / d-claude 共通）。動作確認済みの版
+# (policy の testedClaudeCodeVersion) と実版を比較し、差異があれば黙らず日本語で警告する
+# （起動は止めない）。旧ポリシー（キー無し）では静かにスキップ（この照合は任意の助言）。
+$expectedCcVer = $null
+try {
+    if ($env:AI_SAFE_POLICY -and (Test-Path -LiteralPath $env:AI_SAFE_POLICY)) {
+        $polText = [System.IO.File]::ReadAllText($env:AI_SAFE_POLICY, [System.Text.Encoding]::UTF8)
+        $expectedCcVer = ($polText | ConvertFrom-Json).testedClaudeCodeVersion
+    }
+} catch { $expectedCcVer = $null }
+if ($expectedCcVer) {
+    $actualCcRaw = ""
+    try { $actualCcRaw = (& $Claude --version 2>&1 | Out-String) } catch { $actualCcRaw = "" }
+    $ccMatch = [regex]::Match($actualCcRaw, '[0-9]+\.[0-9]+\.[0-9]+')
+    if (-not $ccMatch.Success) {
+        Write-Warning ("Claude Code の版を確認できませんでした（claude --version が取得できない）。動作確認済みの版は " + $expectedCcVer + " です。")
+    } elseif ($ccMatch.Value -ne $expectedCcVer) {
+        Write-Warning ("Claude Code の版が動作確認済みと異なります（実際: " + $ccMatch.Value + " / 動作確認済み: " + $expectedCcVer + "）。")
+        Write-Host    ("  版差で一部の安全/補助機能が黙って無効化されることがあります。揃えるには: npm install -g @anthropic-ai/claude-code@" + $expectedCcVer) -ForegroundColor Yellow
+    }
 }
 
 # ★安全機能の適用は claude --help のフラグ検出に依存する。Claude Code の版が古い/新しい/

@@ -72,6 +72,29 @@ if (($env:Path -split ';') -notcontains $BinDir) {
     $env:Path = $env:Path.TrimEnd(';') + ';' + $BinDir
 }
 
+# E: 野良 d-claude シャドーイング検出（自動修正はしない・警告のみ）。
+# PowerShell は 関数/エイリアス（プロファイル定義）を PATH の .cmd より優先するため、野良の
+# d-claude 関数があると、いま登録した正規シムをバイパスしてしまう（=素の claude+DeepSeek 化）。
+$shadowFound = $false
+foreach ($pn in @('AllUsersAllHosts','AllUsersCurrentHost','CurrentUserAllHosts','CurrentUserCurrentHost')) {
+    $pp = $null
+    if ($PROFILE) { $pp = $PROFILE.$pn }
+    if ($pp -and (Test-Path -LiteralPath $pp)) {
+        $hits = @(Select-String -LiteralPath $pp -Pattern 'd-claude' -SimpleMatch -ErrorAction SilentlyContinue)
+        if ($hits.Count -gt 0) {
+            if (-not $shadowFound) {
+                Write-Warning "野良の d-claude 定義が PowerShell プロファイルに見つかりました。正規シムより優先され、バイパスの原因になります:"
+                $shadowFound = $true
+            }
+            foreach ($h in $hits) { Write-Warning ("  " + $pp + " の " + $h.LineNumber + "行目: " + $h.Line.Trim()) }
+        }
+    }
+}
+if ($shadowFound) {
+    Write-Host "  → 対処: 上の行を削除するか行頭に # を付けてコメントアウトし、新しいターミナルを開き直してください。" -ForegroundColor Yellow
+    Write-Host "     （このスクリプトは自動では書き換えません。詳しくは 7_困ったとき診断 を実行してください。）" -ForegroundColor Yellow
+}
+
 Write-Host ""
 Write-Host "完了しました。新しいターミナルを開くと、どのフォルダからでも次が使えます:"
 Write-Host "  monitor       … 見守りモニターを開く"
