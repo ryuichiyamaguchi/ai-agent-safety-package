@@ -9,6 +9,21 @@ function Line($s){ Write-Host $s }
 function OK($s){ Write-Host ("  [OK] " + $s) -ForegroundColor Green }
 function WARN($s){ Write-Host ("  [注意] " + $s) -ForegroundColor Yellow }
 function BAD($s){ Write-Host ("  [問題] " + $s) -ForegroundColor Red }
+function Get-DClaudeProfileDefinitionHits($Path) {
+    $out = @()
+    $lines = @(Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = [string]$lines[$i]
+        $trim = $line.TrimStart()
+        if ($trim.StartsWith("#")) { continue }
+        $isFunction = ($trim -match '^function\s+(global:|script:)?d-claude(\s|\{|\()')
+        $isAlias = ($trim -match '^(Set-Alias|New-Alias)\b' -and $trim -match '\bd-claude\b')
+        if ($isFunction -or $isAlias) {
+            $out += [pscustomobject]@{ LineNumber = $i + 1; Text = $trim }
+        }
+    }
+    return $out
+}
 
 Line "============================================================"
 Line "  d-claude 診断ツール（読み取り専用・何も変更しません）"
@@ -113,6 +128,7 @@ Line "    ※ PowerShell は 関数/エイリアス を PATH の .cmd より優�
 Line "       d-claude 関数（プロファイル定義）や別スクリプトがあると、正規ランチャーをバイパスして"
 Line "       『素の claude + DeepSeek 化（=バカ）』『人により違う英語エラー』の原因になります。"
 $legitDClaude = @($shim, (Join-Path $Workspace "d-claude.cmd"))
+$winnerLegit = $false
 $dcAll = @(Get-Command d-claude -All -ErrorAction SilentlyContinue)
 if ($dcAll.Count -eq 0) {
     WARN "現在のセッションで d-claude が見つかりません（この診断は -NoProfile 実行のため、プロファイル定義の関数はここには出ません。下のプロファイル走査で確認します）"
@@ -145,19 +161,23 @@ foreach ($pn in @('AllUsersAllHosts','AllUsersCurrentHost','CurrentUserAllHosts'
     $pp = $null
     if ($PROFILE) { $pp = $PROFILE.$pn }
     if ($pp -and (Test-Path -LiteralPath $pp)) {
-        $hits = @(Select-String -LiteralPath $pp -Pattern 'd-claude' -SimpleMatch -ErrorAction SilentlyContinue)
+        $hits = @(Get-DClaudeProfileDefinitionHits $pp)
         if ($hits.Count -gt 0) {
             $profileFound = $true
-            BAD ("プロファイルに d-claude の記述あり: " + $pn + " (" + $pp + ")")
-            foreach ($h in $hits) { Line ("       " + $h.LineNumber + "行目: " + $h.Line.Trim()) }
+            WARN ("プロファイルに d-claude の記述あり: " + $pn + " (" + $pp + ")")
+            foreach ($h in $hits) { Line ("       " + $h.LineNumber + "行目: " + $h.Text) }
         }
     }
 }
 if (-not $profileFound) {
     OK "PowerShell プロファイルに d-claude の記述はありません（野良定義なし）"
 } else {
-    Line "    ● 対処: 上のプロファイル該当行を削除するか、行頭に # を付けてコメントアウトし、"
-    Line "       新しいターミナルを開き直してください（この診断は何も書き換えません）。"
+    if ($winnerLegit) {
+        Line "    ● 現在の診断では正規シムが勝っていますが、通常の PowerShell では"
+        Line "       プロファイル関数が優先される可能性があります。"
+    }
+    Line "    ● 対処: 『7_野良d-claudeを退治』でバックアップ付きコメントアウトを実行するか、"
+    Line "       上の該当行を手でコメントアウトして、新しいターミナルを開き直してください。"
 }
 # 他シムの勝者も軽く確認（同種のシャドーイングが無いか）。
 Line "    ● 他コマンドの勝者（参考・勝者のみ表示）:"

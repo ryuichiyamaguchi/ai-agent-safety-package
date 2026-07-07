@@ -294,6 +294,19 @@ if ($Platform -eq 'win') {
             Write-Host "  後で手動登録するには: powershell -ExecutionPolicy Bypass -File `"$Workspace\.ai-safety\hooks\windows\setup-commands.ps1`" -Workspace `"$Workspace`""
         }
     }
+
+    # 既存PCに残った npm グローバル版や PowerShell プロファイル関数の d-claude は
+    # 正規シムより優先されることがある。更新ボタンだけで直せるよう、削除ではなく
+    # バックアップ退避/コメントアウトを自動実行する（失敗してもインストール本体は継続）。
+    $cleanupDClaude = Join-Path $packageRoot "scripts\windows\野良d-claudeを退治.ps1"
+    if (Test-Path -LiteralPath $cleanupDClaude) {
+        try {
+            & $cleanupDClaude -Workspace $Workspace -Yes
+        } catch {
+            Write-Warning ("野良 d-claude の自動退避に失敗しました(スキップ): " + $_.Exception.Message)
+            Write-Host "  必要なら後で スタート\7_野良d-claudeを退治.bat を実行してください。"
+        }
+    }
 }
 
 if ($InstallGlobalClaudeSettings) {

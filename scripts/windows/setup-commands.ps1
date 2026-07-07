@@ -9,6 +9,21 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Workspace = [System.IO.Path]::GetFullPath($Workspace)
+function Get-DClaudeProfileDefinitionHits($Path) {
+    $out = @()
+    $lines = @(Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = [string]$lines[$i]
+        $trim = $line.TrimStart()
+        if ($trim.StartsWith("#")) { continue }
+        $isFunction = ($trim -match '^function\s+(global:|script:)?d-claude(\s|\{|\()')
+        $isAlias = ($trim -match '^(Set-Alias|New-Alias)\b' -and $trim -match '\bd-claude\b')
+        if ($isFunction -or $isAlias) {
+            $out += [pscustomobject]@{ LineNumber = $i + 1; Text = $trim }
+        }
+    }
+    return $out
+}
 
 $hooksDir = Join-Path $Workspace ".ai-safety\hooks\windows"
 if (-not (Test-Path -LiteralPath $hooksDir)) {
@@ -80,19 +95,19 @@ foreach ($pn in @('AllUsersAllHosts','AllUsersCurrentHost','CurrentUserAllHosts'
     $pp = $null
     if ($PROFILE) { $pp = $PROFILE.$pn }
     if ($pp -and (Test-Path -LiteralPath $pp)) {
-        $hits = @(Select-String -LiteralPath $pp -Pattern 'd-claude' -SimpleMatch -ErrorAction SilentlyContinue)
+        $hits = @(Get-DClaudeProfileDefinitionHits $pp)
         if ($hits.Count -gt 0) {
             if (-not $shadowFound) {
                 Write-Warning "野良の d-claude 定義が PowerShell プロファイルに見つかりました。正規シムより優先され、バイパスの原因になります:"
                 $shadowFound = $true
             }
-            foreach ($h in $hits) { Write-Warning ("  " + $pp + " の " + $h.LineNumber + "行目: " + $h.Line.Trim()) }
+            foreach ($h in $hits) { Write-Warning ("  " + $pp + " の " + $h.LineNumber + "行目: " + $h.Text) }
         }
     }
 }
 if ($shadowFound) {
-    Write-Host "  → 対処: 上の行を削除するか行頭に # を付けてコメントアウトし、新しいターミナルを開き直してください。" -ForegroundColor Yellow
-    Write-Host "     （このスクリプトは自動では書き換えません。詳しくは 7_困ったとき診断 を実行してください。）" -ForegroundColor Yellow
+    Write-Host "  → 対処: スタートフォルダの 7_野良d-claudeを退治 を実行すると、バックアップ付きでコメントアウトできます。" -ForegroundColor Yellow
+    Write-Host "     手で直す場合は、上の行を削除するか行頭に # を付けて、新しいターミナルを開き直してください。" -ForegroundColor Yellow
 }
 
 Write-Host ""
