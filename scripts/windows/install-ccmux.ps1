@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # 改造版 ccmux.exe の既知 SHA-256（この値と一致しない exe は破損/別物として拒否）。
-$expect = "058789fb700586dd1977e410574d6fefffd88719df4a8e47702e841e8964032a"
+$expect = "4b200120b4ce3e159869c36094d849fea6ffdaa80fd79e1b7cb2ef3ced38b2d2"
 $relBase = "https://github.com/ryuichiyamaguchi/ai-agent-safety-package/releases/latest/download"
 
 function Fail([string]$m){ Write-Host ""; Write-Host ("【中止】" + $m) -ForegroundColor Red; Write-Host "このウィンドウを閉じて、もう一度お試しください。"; exit 1 }

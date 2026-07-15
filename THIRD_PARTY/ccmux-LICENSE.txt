@@ -6,8 +6,12 @@ ccmux — third-party notice
 
   元プロジェクト: ccmux  (https://github.com/Shin-sibainu/ccmux)
   改変者:        ryuichiyamaguchi（本パッケージ配布者）
-  改変内容:      ファイルツリーからのドラッグ&ドロップでファイルパスを
-                 コピー&ペーストできる機能を追加
+  改変版ソース:   https://github.com/ryuichiyamaguchi/ccmux
+  改変内容:      1. ファイルツリーからのドラッグ&ドロップでファイルパスを
+                    コピー&ペーストできる機能を追加
+                 2. Shift+マウスホイール / Shift+PageUp/PageDown で ccmux の
+                    スクロールバックを常時操作できる機能を追加
+                 （修飾キーなしのホイールは本家どおり画面内アプリへ転送）
 
 MIT ライセンスに従い、元の著作権表示およびライセンス本文を以下に同梱します。
 これは改造版であり、本家 ccmux とは別物です（名称混同にご注意ください）。
