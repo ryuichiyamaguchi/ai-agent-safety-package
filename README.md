@@ -1,15 +1,27 @@
-# AI エージェント安全運用パッケージ v1.13.0
+# AI エージェント安全運用パッケージ v1.14.0
 
-Codex CLI、Claude Code、Gemini CLI を「あなたを守る安全装置」付きで使うためのパッケージです。
+Codex CLI、Claude Code、OpenCode、Gemini CLI を「あなたを守る安全装置」付きで使うためのパッケージです。
 
 業務で使う本物のプロジェクトでも安心して AI エージェントを動かせるように設計されています。学校 PC でも、自宅 PC でも同じように動きます。
+
+## v1.14.0：Bouncer統合版とOpenCode + DeepSeek
+
+- Mac / Windows共通のBouncer統合ランチャーと見守りUI
+- 標準モードはローカルLLM不要。最大保護モードだけローカルGemmaを使用
+- OpenCode + DeepSeek V4 Proを標準経路、V4 Flashを補助モデルに設定
+- DeepSeek送信検査Gatewayが実キーをOpenCodeから隔離し、秘密情報を検査
+- Web検索は既定OFF。明示的に有効化した時も確認制
+- 統合起動時はプロジェクト固有のOpenCode設定と外部プラグインを無効化し、安全設定の迂回を防止
+- 従来の`d-claude`は上級の互換・比較経路として維持
+
+詳しくは [docs/10_OpenCode_DeepSeekを安全に使う.md](docs/10_OpenCode_DeepSeekを安全に使う.md) を参照してください。
 
 ## このパッケージを使うとどうなるか
 
 AI が暴走したり、騙されたりしても、以下のような事故が**仕組みで止まる**ようになります。
 
 - 自分の認証情報（`.env`、`.ssh`、`.aws` など）を AI が外に送ろうとしても止まる
-- AI が `curl` や `wget` で外部にデータを送ろうとしても止まる
+- AI が秘密情報を含む送信や匿名アップロード先への持ち出しを試みると止まる
 - AI が `rm -rf` のような危険コマンドを実行しようとしても、承認なしには動かない
 - 認可していない外部 Web ページを AI が読みに行こうとしても止まる
 - workspace の外側にファイルを書き込もうとしても OS レベルで止まる
@@ -33,20 +45,20 @@ Google から「Gemini CLI は **2026-06-18** で Pro / Ultra / 無料ティア�
 
 詳しくは [docs/99_known_issues.md](docs/99_known_issues.md) の「Gemini CLI → Antigravity CLI 並立対応」セクション。
 
-## v1.5.0 の防御 4 層（ざっくり）
+## 現行プロファイルの防御 4 層（ざっくり）
 
 このパッケージは、Codex CLI / Claude Code に対して下記 4 層を同時に効かせます。
 
 1. **OS サンドボックス**：macOS Seatbelt / Windows native の `workspace-write` モード（workspace 外への書き込みを OS が拒否）
-2. **ネットワーク遮断**：`network_access = false`（curl / wget / 外部送信を全ブロック）
+2. **送信先・秘密情報ガード**：通常の調査やパッケージ取得は許可し、秘密情報・匿名アップロード・リモートコード実行を止める
 3. **環境変数の除外**：`OPENAI_API_KEY` 等のシークレット環境変数を AI に渡さない
-4. **承認ポリシー untrusted + hook permission lockdown**：Codex の trusted list（`cat` / `ls` / `sed` 等の安全コマンド）以外が来たときに承認ダイアログを出し、加えて Claude Code 側は hook と `permissions.deny` で危険コマンドを事前ブロック（v1.1.0 の Security Hardening Release で強化）
+4. **承認ポリシー on-request + hook permission lockdown**：モデルが確認を必要と判断した操作だけ承認画面へ回し、Claude Code / Codex のhookが秘密情報・破壊操作を独立して止める
 
 特に 4 の `approval_policy = "untrusted"` は v1.0.9 で導入した中核の防御で、v1.1.0 で hook permission lockdown と doctor drill が加わりました。これは「全部止まる」スイッチではありません。`python -c "open('.env')..."`、`curl https://attacker/`、`rm -rf`、`git push --force` のような **trusted list 外**のコマンドが来たときに確認ダイアログを出します。一方、`cat ~/.ssh/id_rsa` のように trusted コマンド（`cat`）+ 危険な引数の組合せでは approval は出ず、2 層目（hook / policy.json）や 1 層目（OS サンドボックス）が止めます。**4 層のどこかで止まれば安全**というモデルです。
 
 > 詳細は [docs/90_守れる-守れない.md](docs/90_守れる-守れない.md) の「なぜ『安全』は 4 層で成り立つのか」を参照してください。
 
-> 注意：`approval_policy` が効くのは Codex CLI を**対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは自動的に `never` に降格されるため、`launch-codex-safe` スクリプトから起動する運用を徹底してください。
+> 統合版では `launch-integrated.sh <workspace> codex standard` から起動してください。内部で `launch-codex-safe` を呼び、見守りUIも同時に起動します。`approval_policy` が効くのは Codex CLI を**対話モード（TUI）で起動した時だけ**です。
 
 ## あなたが守るべき 3 つのこと
 
@@ -121,6 +133,7 @@ Day3 の実機検証で「AI が内部 WebFetch / Write を選ぶとシェル経
 v1.2.0 から、AI が承認を求めてくる **瞬間** に、横の画面で日本語の解説カードが自動で切り替わる **agent-monitor** が同梱されました。
 
 - 「許可しますか？」のたびに、その操作が何をするか、何をチェックすべきかが **隣のターミナルで読める**
+- ブラウザ版では、AI不要の **承認判断票** が「いま押すなら／何が変わる／元に戻せる／外部送信／確認する2点」を先に表示する
 - ガードがブロックした時の理由もリアルタイムで分かる
 - すべての出来事は監査ログ（`~/.ai-safety/logs/events-YYYY-MM-DD.jsonl`）に残る
 
@@ -134,6 +147,7 @@ OS ごとに `docs/` の中の手順を読んでください。
 - 自宅 Windows → [docs/02_自宅Windowsで使う.md](docs/02_自宅Windowsで使う.md)
 - 自宅 Mac → [docs/03_自宅Macで使う.md](docs/03_自宅Macで使う.md)
 - AI の動きを横で見たい → [docs/07_AIの動きをモニターする.md](docs/07_AIの動きをモニターする.md)
+- OpenCode + DeepSeekを使いたい → [docs/10_OpenCode_DeepSeekを安全に使う.md](docs/10_OpenCode_DeepSeekを安全に使う.md)
 
 ## 何が守れて、何が守れないか
 

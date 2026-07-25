@@ -69,6 +69,7 @@ ACTIVE_FILES=(
   "docs/06_環境変数とAPIキーって何.md"
   "docs/07_AIの動きをモニターする.md"
   "docs/08_外部LLMを安全に使う.md"
+  "docs/10_OpenCode_DeepSeekを安全に使う.md"
   "docs/90_守れる-守れない.md"
   "docs/92_AIの仕組みと隔離技術.md"
   "docs/99_known_issues.md"

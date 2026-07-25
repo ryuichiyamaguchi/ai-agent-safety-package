@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  launch-integrated.sh [workspace] [codex|claude|opencode] [standard|assisted|maximum] [--websearch]
+
+Profiles:
+  standard  Safety hooks + approval monitor. No local LLM is required.
+  assisted  Claude only. Standard profile plus two-key AI review for gray commands.
+  maximum   Claude only. Adds the local Gemma Bouncer gateway and full response review.
+
+OpenCode:
+  standard only. DeepSeek V4 Pro/Flash is routed through the send inspection gateway.
+  Web search is off by default; --websearch makes it approval-based.
+EOF
+}
+
+workspace="${1:-$(pwd)}"
+agent="${2:-codex}"
+profile="${3:-standard}"
+extra="${4:-}"
+
+case "$agent" in
+  codex|claude|opencode) ;;
+  -h|--help) usage; exit 0 ;;
+  *) echo "agent must be codex, claude, or opencode" >&2; usage >&2; exit 2 ;;
+esac
+
+case "$profile" in
+  standard|assisted|maximum) ;;
+  -h|--help) usage; exit 0 ;;
+  *) echo "profile must be standard, assisted, or maximum" >&2; usage >&2; exit 2 ;;
+esac
+
+if [ "$agent" = "codex" ] && [ "$profile" != "standard" ]; then
+  echo "Codex は standard モードで起動してください。" >&2
+  echo "Codex 自身の on-request + auto_review が承認要求を確認します。" >&2
+  exit 2
+fi
+if [ "$agent" = "opencode" ] && [ "$profile" != "standard" ]; then
+  echo "OpenCode は standard モードで起動してください。" >&2
+  exit 2
+fi
+if [ -n "$extra" ] && { [ "$agent" != "opencode" ] || [ "$extra" != "--websearch" ]; }; then
+  echo "第4引数 --websearch は OpenCode だけで指定できます。" >&2
+  exit 2
+fi
+
+if [ ! -d "$workspace" ]; then
+  echo "作業フォルダが見つかりません: $workspace" >&2
+  exit 2
+fi
+
+workspace="$(cd "$workspace" && pwd)"
+root="$workspace/.ai-safety"
+hooks="$root/hooks/macos"
+log_dir="${AI_SAFE_LOG_DIR:-$HOME/.ai-safety/logs}"
+mkdir -p "$log_dir"
+
+[ -x "$hooks/open-monitor.sh" ] || {
+  echo "Bouncer統合版がこの作業フォルダに導入されていません。" >&2
+  echo "先に統合版のインストーラーを実行してください。" >&2
+  exit 2
+}
+
+if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
+  if [ "$profile" = "maximum" ] && [ ! -x "$root/bouncer/scripts/run-local.zsh" ]; then
+    echo "ローカルBouncer Gatewayが見つかりません: $root/bouncer" >&2
+    exit 2
+  fi
+  echo "Bouncer統合版 dry-run"
+  echo "  workspace: $workspace"
+  echo "  agent:     $agent"
+  echo "  profile:   $profile"
+  echo "  monitor:   enabled"
+  if [ "$profile" = "maximum" ]; then
+    echo "  gateway:   http://127.0.0.1:8787 (local only)"
+  elif [ "$agent" = "opencode" ]; then
+    echo "  gateway:   http://127.0.0.1:8788 (send inspection, no local LLM)"
+  else
+    echo "  gateway:   bypassed (AIの応答速度を優先)"
+  fi
+  exit 0
+fi
+
+monitor_pid=""
+gateway_pid=""
+
+cleanup() {
+  if [ -n "$gateway_pid" ]; then kill "$gateway_pid" 2>/dev/null || true; fi
+  if [ -n "$monitor_pid" ]; then kill "$monitor_pid" 2>/dev/null || true; fi
+}
+trap cleanup EXIT INT TERM HUP
+
+AI_SAFE_PROFILE="$profile" AI_SAFE_AGENT="$agent" \
+  bash "$hooks/open-monitor.sh" >"$log_dir/integrated-monitor.log" 2>&1 &
+monitor_pid=$!
+
+if [ "$profile" = "maximum" ]; then
+  bouncer="$root/bouncer"
+  [ -x "$bouncer/scripts/run-local.zsh" ] || {
+    echo "ローカルBouncer Gatewayが見つかりません: $bouncer" >&2
+    exit 2
+  }
+
+  echo "ローカルGemmaとBouncer Gatewayを準備しています。"
+  BOUNCER_REVIEW_MODE=block \
+  BOUNCER_AI_FAILURE_MODE=block \
+    zsh "$bouncer/scripts/run-local.zsh" >"$log_dir/bouncer-gateway.log" 2>&1 &
+  gateway_pid=$!
+
+  ready=0
+  for _i in $(seq 1 180); do
+    if curl -fsS --max-time 1 http://127.0.0.1:8787/bouncer/health >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    if ! kill -0 "$gateway_pid" 2>/dev/null; then break; fi
+    sleep 1
+  done
+  if [ "$ready" -ne 1 ]; then
+    echo "Bouncer Gatewayを起動できませんでした。" >&2
+    echo "確認先: $log_dir/bouncer-gateway.log" >&2
+    exit 1
+  fi
+fi
+
+case "$agent:$profile" in
+  codex:standard)
+    bash "$hooks/launch-codex-safe.sh" "$workspace"
+    ;;
+  claude:standard)
+    bash "$hooks/launch-claude-safe.sh" "$workspace"
+    ;;
+  claude:assisted)
+    bash "$hooks/launch-claude-safe.sh" --assisted "$workspace"
+    ;;
+  claude:maximum)
+    export BOUNCER_INTEGRATED_MODE=1
+    export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
+    bash "$hooks/launch-claude-safe.sh" "$workspace"
+    ;;
+  opencode:standard)
+    bash "$hooks/opencode/launch-opencode-deepseek.sh" "$workspace" "$extra"
+    ;;
+esac

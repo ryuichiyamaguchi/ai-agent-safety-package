@@ -12,17 +12,38 @@ const { loadDenylistResult } = require('./denylist.js');
 
 const DEFAULT_PORT = Number(process.env.DS_GATEWAY_PORT || 8788);
 const DEFAULT_UPSTREAM = process.env.DS_GATEWAY_UPSTREAM || 'https://api.deepseek.com/anthropic';
+const DEFAULT_AUTH_FILE = process.env.DS_GATEWAY_AUTH_FILE || '';
 const DEFAULT_MAX_BODY = Number(process.env.DS_GATEWAY_MAX_BODY || 10 * 1024 * 1024); // 10MB（M2: ReDoS/メモリ枯渇の上限）
 
 function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT,
                         tokenMap = createTokenMap(), denylistTerms = loadDenylistResult(),
-                        maxBody = DEFAULT_MAX_BODY } = {}) {
+                        maxBody = DEFAULT_MAX_BODY,
+                        upstreamAuthFile = DEFAULT_AUTH_FILE } = {}) {
   const upstreamUrl = new URL(upstream);
+  let upstreamAuthorization = '';
+  if (upstreamAuthFile) {
+    let key;
+    try {
+      key = fs.readFileSync(upstreamAuthFile, 'utf8').trim();
+    } catch (_) {
+      throw new Error('ds-gateway: upstream auth file is unreadable (fail-closed)');
+    }
+    if (!key || /[\r\n]/.test(key)) {
+      throw new Error('ds-gateway: upstream auth file is empty or invalid (fail-closed)');
+    }
+    upstreamAuthorization = `Bearer ${key}`;
+  }
   // F-4: denylist が「設定あり×読込失敗」なら fail-closed sentinel が来る。
   // その場合 denylist 語句が漏れ得るため、当該 gateway は全リクエストを転送拒否する。
   const denylistFailClosed = !!(denylistTerms && denylistTerms.failClosed === true);
   const terms = Array.isArray(denylistTerms) ? denylistTerms : [];
-  const session = { tokenMap, denylistTerms: terms, denylistFailClosed, maxBody };
+  const session = {
+    tokenMap,
+    denylistTerms: terms,
+    denylistFailClosed,
+    maxBody,
+    upstreamAuthorization,
+  };
   const server = http.createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -349,6 +370,11 @@ function forward(req, res, upstreamUrl, body, session, allocated, outUrl) {
   const isHttps = upstreamUrl.protocol === 'https:';
   const lib = isHttps ? https : http;
   const headers = maskHeaders(req.headers, session);
+  if (session.upstreamAuthorization) {
+    headers.authorization = session.upstreamAuthorization;
+    delete headers['x-api-key'];
+    delete headers['api-key'];
+  }
   headers.host = upstreamUrl.host;
   headers['content-length'] = Buffer.byteLength(body);
   delete headers['accept-encoding'];
@@ -385,7 +411,7 @@ function forward(req, res, upstreamUrl, body, session, allocated, outUrl) {
   upReq.end(body);
 }
 
-module.exports = { createGateway, DEFAULT_PORT, DEFAULT_UPSTREAM };
+module.exports = { createGateway, DEFAULT_PORT, DEFAULT_UPSTREAM, DEFAULT_AUTH_FILE };
 
 if (require.main === module) {
   createGateway().listen().then((s) => {

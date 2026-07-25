@@ -1,4 +1,4 @@
-# 環境変数と API キーって何（v1.13.0）
+# 環境変数と API キーって何（v1.14.0）
 
 このドキュメントは、他の docs に頻出する「環境変数」「API キー」「.env ファイル」の意味がわからない方向けです。
 
@@ -350,4 +350,3 @@ git rm -r --cached .codex .claude .gemini .ai-safety/logs
 git commit -m "remove leaked AI credentials"
 # 既に push 済みなら auth.json を必ずローテーション
 ```
-

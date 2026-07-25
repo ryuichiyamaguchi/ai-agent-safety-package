@@ -160,64 +160,65 @@ if ($outOk -match 'on-failure') {
     Ng "win codex green -> on-failure (got: $outOk)"
 }
 
-# 赤: doctor が exit 1 → untrusted にフォールバック
+# 赤: doctor が exit 1 → 未実証を開示しつつ on-failure で自走を継続。
+# 決定的な危険操作は approval 非依存の guard-bash が止める。
 $env:AI_SAFE_DOCTOR = $stubNg
 $outNg = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launchC $ws.FullName '' '--auto' 2>$null
-if ($outNg -match 'untrusted') {
-    Ok 'win codex red -> untrusted'
+if ($outNg -match 'on-failure') {
+    Ok 'win codex red -> on-failure with hooks'
 } else {
-    Ng "win codex red -> untrusted (got: $outNg)"
+    Ng "win codex red -> on-failure with hooks (got: $outNg)"
 }
 
 # 赤のとき stderr に理由が出る
 $errNg = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launchC $ws.FullName '' '--auto' 2>&1
 $errNgText = ($errNg -join ' ')
-if ($errNgText -match 'オートを有効にできません') {
-    Ok 'win codex red shows reason'
+if ($errNgText -match 'OSで未実証') {
+    Ok 'win codex red discloses isolation status'
 } else {
-    Ng "win codex red shows reason (got: $errNgText)"
+    Ng "win codex red discloses isolation status (got: $errNgText)"
 }
 
-# --auto 無し: 従来どおり untrusted(回帰)
+# --auto 無し: 教室プロファイル既定の on-request。
 Remove-Item Env:\AI_SAFE_DOCTOR -ErrorAction SilentlyContinue
 $env:AI_SAFE_DRY_RUN = '1'
 $outDef = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launchC $ws.FullName '' 2>$null
-if ($outDef -match 'untrusted') {
-    Ok 'win codex no-auto stays untrusted'
+if ($outDef -match 'on-request') {
+    Ok 'win codex no-auto stays on-request'
 } else {
-    Ng "win codex no-auto stays untrusted (got: $outDef)"
+    Ng "win codex no-auto stays on-request (got: $outDef)"
 }
 
-# doctor 不在 → フェイルクローズ(untrusted)
+# doctor 不在 → 未実証扱いで on-failure。guard-bash の決定的 deny は維持。
 $env:AI_SAFE_DOCTOR = 'C:\nonexistent\doctor.ps1'
 $outMiss = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launchC $ws.FullName '' '--auto' 2>$null
-if ($outMiss -match 'untrusted') {
-    Ok 'win codex missing-doctor -> untrusted (fail-closed)'
+if ($outMiss -match 'on-failure') {
+    Ok 'win codex missing-doctor -> on-failure with hooks'
 } else {
-    Ng "win codex missing-doctor LEAKS to on-failure (got: $outMiss)"
+    Ng "win codex missing-doctor changed auto policy (got: $outMiss)"
 }
 
-# doctor が cmd だが存在しない → フェイルクローズ
+# doctor が cmd だが存在しない場合も未実証扱い。
 $env:AI_SAFE_DOCTOR = 'C:\nonexistent\doctor.cmd'
 $outMissCmd = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launchC $ws.FullName '' '--auto' 2>$null
-if ($outMissCmd -match 'untrusted') {
-    Ok 'win codex missing-doctor-cmd -> untrusted (fail-closed)'
+if ($outMissCmd -match 'on-failure') {
+    Ok 'win codex missing-doctor-cmd -> on-failure with hooks'
 } else {
-    Ng "win codex missing-doctor-cmd LEAKS to on-failure (got: $outMissCmd)"
+    Ng "win codex missing-doctor-cmd changed auto policy (got: $outMissCmd)"
 }
 
 # 存在するが実行できない doctor(.txt の中身は実行不能)→ フェイルクローズ。
 # Windows には実行ビットの概念が無いので、mac の chmod -x 相当として
 # powershell.exe -File が起動できない(=非0終了する)ファイルを指定する。
-# launcher は Start-Job 内で powershell.exe -File <.txt> を呼ぶ → 非0 → untrusted。
+# launcher は Start-Job 内で powershell.exe -File <.txt> を呼ぶ → 非0 → 未実証扱い。
 $notRunnable = Join-Path ([System.IO.Path]::GetTempPath()) ("doctor-notrunnable-" + [guid]::NewGuid().ToString("N") + ".txt")
 'this is not a runnable script' | Set-Content -LiteralPath $notRunnable
 $env:AI_SAFE_DOCTOR = $notRunnable
 $outNotRunC = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launchC $ws.FullName '' '--auto' 2>$null
-if ($outNotRunC -match 'untrusted') {
-    Ok 'win codex not-runnable doctor -> untrusted (fail-closed)'
+if ($outNotRunC -match 'on-failure') {
+    Ok 'win codex not-runnable doctor -> on-failure with hooks'
 } else {
-    Ng "win codex not-runnable doctor LEAKS to on-failure (got: $outNotRunC)"
+    Ng "win codex not-runnable doctor changed auto policy (got: $outNotRunC)"
 }
 
 Remove-Item Env:\AI_SAFE_DRY_RUN, Env:\AI_SAFE_DOCTOR -ErrorAction SilentlyContinue

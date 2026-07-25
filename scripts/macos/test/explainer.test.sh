@@ -119,9 +119,9 @@ fi
 
 # --- T6b: マルチバイト(日本語) 900文字で切っても文字化けしない（F-J/F-M確認）---
 rm -f "$html" "$act"
-python3 - << 'PYEOF' > "$TD/t6b.result" 2>&1
+python3 - "$REPO" << 'PYEOF' > "$TD/t6b.result" 2>&1
 import subprocess, sys
-repo = "/Users/ryuichi/書類/yamaguchi-hub/10_AIエージェント安全パッケージ/ai-agent-safety-package-v1"
+repo = sys.argv[1]
 ja900 = 'あ' * 900
 with open('/tmp/expltest_ja.tmp', 'w', encoding='utf-8') as f:
     f.write(ja900)

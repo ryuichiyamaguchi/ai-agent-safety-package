@@ -55,24 +55,25 @@ trap 'rm -rf "$WS" "$STUB_OK" "$STUB_NG" "$NOEXEC" 2>/dev/null' EXIT
 out_ok="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_OK" bash "$LAUNCH_C" "$WS" "" --auto 2>/dev/null)"
 printf '%s' "$out_ok" | grep -q -- "--ask-for-approval on-failure" && ok "codex --auto green -> on-failure" || ng "codex --auto green -> on-failure"
 
-# 赤: doctor が exit 1 → untrusted にフォールバック
+# 赤: doctor が exit 1 → 未実証を開示しつつ on-failure で自走を継続。
+# 決定的な危険操作は approval 非依存の guard-bash が止める。
 out_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_C" "$WS" "" --auto 2>/dev/null)"
-printf '%s' "$out_ng" | grep -q -- "--ask-for-approval untrusted" && ok "codex --auto red -> untrusted fallback" || ng "codex --auto red -> untrusted fallback"
+printf '%s' "$out_ng" | grep -q -- "--ask-for-approval on-failure" && ok "codex --auto red -> on-failure with hooks" || ng "codex --auto red -> on-failure with hooks"
 # 赤のとき理由が stderr に出る
 err_ng="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$STUB_NG" bash "$LAUNCH_C" "$WS" "" --auto 2>&1 1>/dev/null)"
-printf '%s' "$err_ng" | grep -qi "オートを有効にできません" && ok "codex red shows reason" || ng "codex red shows reason"
+printf '%s' "$err_ng" | grep -qi "OSで未実証" && ok "codex red discloses isolation status" || ng "codex red discloses isolation status"
 
-# --auto 無し: 従来どおり untrusted(回帰)
+# --auto 無し: 教室プロファイル既定の on-request。
 out_def="$(AI_SAFE_DRY_RUN=1 bash "$LAUNCH_C" "$WS" "" 2>/dev/null)"
-printf '%s' "$out_def" | grep -q -- "--ask-for-approval untrusted" && ok "codex no-auto stays untrusted" || ng "codex no-auto stays untrusted"
+printf '%s' "$out_def" | grep -q -- "--ask-for-approval on-request" && ok "codex no-auto stays on-request" || ng "codex no-auto stays on-request"
 
-# codex: doctor 不在 → exec 失敗してもフェイルクローズ(untrusted)。perl exec 失敗が green に漏れないこと。
+# codex: doctor 不在 → 未実証扱いで on-failure。guard-bash の決定的 deny は維持。
 out_miss_c="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR=/nonexistent/doctor.sh bash "$LAUNCH_C" "$WS" "" --auto 2>/dev/null)"
-printf '%s' "$out_miss_c" | grep -q -- "--ask-for-approval untrusted" && ok "codex missing-doctor -> untrusted (fail-closed)" || ng "codex missing-doctor LEAKS to on-failure"
-# codex: 実行ビット無しの doctor(zip 配布/chmod 漏れ相当)→ フェイルクローズ。
+printf '%s' "$out_miss_c" | grep -q -- "--ask-for-approval on-failure" && ok "codex missing-doctor -> on-failure with hooks" || ng "codex missing-doctor changed auto policy"
+# codex: 実行ビット無しの doctor(zip 配布/chmod 漏れ相当)も同じく未実証扱い。
 NOEXEC="$(mktemp)"; printf '#!/bin/sh\nexit 0\n' > "$NOEXEC"; chmod -x "$NOEXEC"
 out_noexec_c="$(AI_SAFE_DRY_RUN=1 AI_SAFE_DOCTOR="$NOEXEC" bash "$LAUNCH_C" "$WS" "" --auto 2>/dev/null)"
-printf '%s' "$out_noexec_c" | grep -q -- "--ask-for-approval untrusted" && ok "codex noexec-doctor -> untrusted (fail-closed)" || ng "codex noexec-doctor LEAKS to on-failure"
+printf '%s' "$out_noexec_c" | grep -q -- "--ask-for-approval on-failure" && ok "codex noexec-doctor -> on-failure with hooks" || ng "codex noexec-doctor changed auto policy"
 
 # --- Task 5: launch-agy-safe.sh --auto branch ---
 # AGY="$STUB_OK" は agy バイナリ検出を満たすためのダミー(実行はされない=DRY_RUN)。

@@ -1,7 +1,7 @@
 ﻿param(
     [string]$Workspace = (Get-Location).Path,
     [string]$Prompt = "",
-    [string]$AutoFlag = ""   # "--auto" を受け取る位置引数。Safe Auto Mode を有効化する。
+    [switch]$Auto   # "--auto" / "-Auto" で Safe Auto Mode を有効化する。
 )
 
 # launch-agy-safe.ps1
@@ -12,7 +12,7 @@
 # 強制する防御:
 #   --sandbox          : agy のターミナル制限サンドボックスを必須化
 #   --add-dir <ws>     : 作業ディレクトリを明示
-# Safe Auto Mode (--auto / $AutoFlag):
+# Safe Auto Mode (--auto / $Auto):
 #   doctor green かつ agy 存在 → --dangerously-skip-permissions を付与(--sandbox は維持)
 #   実証はしていない旨を起動時に必ず表示(overclaim 回避)。
 # 渡さないフラグ:
@@ -91,7 +91,7 @@ allow_auto_run_commands は OFF 推奨）。
 #   (c) doctor がハング → Start-Job + Wait-Job -Timeout 60 → skip-permissions 付与しない
 #   (d) doctor が非0終了 → skip-permissions 付与しない
 $autoArgs = @()
-if ($AutoFlag -eq '--auto') {
+if ($Auto) {
     $doctorPath = if ($env:AI_SAFE_DOCTOR) { $env:AI_SAFE_DOCTOR } else { Join-Path $PSScriptRoot 'doctor.ps1' }
     $isolationOk = $false
     if (-not (Test-Path -LiteralPath $doctorPath -ErrorAction SilentlyContinue)) {

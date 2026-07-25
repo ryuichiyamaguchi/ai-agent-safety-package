@@ -73,7 +73,8 @@ if [ "$workspace" = "$package_root" ]; then
 fi
 
 stamp="$(date +%Y%m%d-%H%M%S)"
-backup_dir="$HOME/.ai-safety/backups/$stamp"
+backup_root="${AI_SAFE_BACKUP_ROOT:-$HOME/.ai-safety/backups}"
+backup_dir="$backup_root/$stamp"
 mkdir -p "$backup_dir" "$workspace/.ai-safety/hooks" "$workspace/.ai-safety/policy" "$workspace/.ai-safety/cards"
 
 echo "Installing for platform: $PLATFORM"
@@ -162,7 +163,9 @@ fi
 
 if [[ "$PLATFORM" == "mac" || "$PLATFORM" == "both" ]]; then
   cp -R "$package_root/scripts/macos" "$workspace/.ai-safety/hooks/"
-  chmod +x "$workspace/.ai-safety/hooks/macos/"*.sh "$workspace/.ai-safety/hooks/macos/lib/"*.sh
+  chmod +x "$workspace/.ai-safety/hooks/macos/"*.sh \
+    "$workspace/.ai-safety/hooks/macos/lib/"*.sh \
+    "$workspace/.ai-safety/hooks/macos/opencode/"*.sh
 fi
 
 if [[ "$PLATFORM" == "win" || "$PLATFORM" == "both" ]]; then
@@ -173,6 +176,19 @@ fi
 
 # DeepSeek 送信検査 Gateway（クロスプラットフォーム・Node 実装）を配置
 cp -R "$package_root/scripts/common" "$workspace/.ai-safety/hooks/"
+
+# Bouncer最大保護モード用のローカルGateway。標準モードでは起動しないため、
+# ローカルLLMを動かせないPCでもCodex/Claude/OpenCodeの標準モードを利用できる。
+if [ -d "$package_root/bouncer-gateway" ]; then
+  bouncer_dest="$workspace/.ai-safety/bouncer"
+  if [ -e "$bouncer_dest" ]; then
+    safe_name="$(printf '%s' "$bouncer_dest" | sed 's#[/:]#_#g')"
+    cp -R "$bouncer_dest" "$backup_dir/$safe_name"
+    rm -rf "$bouncer_dest"
+  fi
+  cp -R "$package_root/bouncer-gateway" "$bouncer_dest"
+  chmod +x "$bouncer_dest/scripts/"*.zsh 2>/dev/null || true
+fi
 
 # Remove stale foreign-OS hook directories when single-platform install
 # is requested (defensive cleanup on re-install).
@@ -191,6 +207,13 @@ copy_with_backup "$package_root/configs/gemini/settings.mac.json" "$workspace/.g
 copy_with_backup "$package_root/configs/gemini/policies/safety.toml" "$workspace/.gemini/policies/safety.toml"
 copy_with_backup "$package_root/workspace-template/aiexclude.template" "$workspace/.aiexclude"
 
+# 各agentのプロジェクト指示。利用者が既に編集している場合は上書きしない。
+for guide in AGENTS.md CLAUDE.md GEMINI.md; do
+  if [ -f "$package_root/workspace-template/$guide" ] && [ ! -e "$workspace/$guide" ]; then
+    cp "$package_root/workspace-template/$guide" "$workspace/$guide"
+  fi
+done
+
 # 配布スキルを workspace の .claude/skills/ に配置。d-claude / claude が起動時に
 # ${workspace}/.claude/skills 配下を読み込むので、ここに置けば受講者もそのまま使える。
 # リポジトリ側は dist-skills/ に置く（.gitignore が .claude/ を除外するため）。
@@ -198,7 +221,7 @@ copy_with_backup "$package_root/workspace-template/aiexclude.template" "$workspa
 # ディレクトリごと入れ替える（copy_with_backup と同じ思想＝上書き前に必ず控えを取る／古い
 # support ファイルが残らない）。同梱していない他スキルには触れない。
 if [ -d "$package_root/workspace-template/dist-skills" ]; then
-  mkdir -p "$workspace/.claude/skills"
+  mkdir -p "$workspace/.claude/skills" "$workspace/.opencode/skills"
   for skill_src in "$package_root/workspace-template/dist-skills"/*/; do
     [ -d "$skill_src" ] || continue
     skill_name="$(basename "$skill_src")"
@@ -209,8 +232,17 @@ if [ -d "$package_root/workspace-template/dist-skills" ]; then
       rm -rf "$skill_dest"
     fi
     cp -R "$skill_src" "$skill_dest"
+
+    # OpenCode の互換スキル探索先にも同梱スキルを配置する。
+    opencode_skill_dest="$workspace/.opencode/skills/$skill_name"
+    if [ -e "$opencode_skill_dest" ]; then
+      safe_name="$(printf '%s' "$opencode_skill_dest" | sed 's#[/:]#_#g')"
+      cp -R "$opencode_skill_dest" "$backup_dir/$safe_name"
+      rm -rf "$opencode_skill_dest"
+    fi
+    cp -R "$skill_src" "$opencode_skill_dest"
   done
-  echo "配布スキルを配置しました: $workspace/.claude/skills"
+  echo "配布スキルを配置しました: $workspace/.claude/skills / $workspace/.opencode/skills"
 fi
 
 # 受講者向けスタートフォルダ（番号ラッパー + 案内 HTML）を workspace に配置。
