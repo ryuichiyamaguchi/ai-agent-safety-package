@@ -91,16 +91,16 @@ mismatch が出た場合、配布 URL すり替えや手動改変・破損の可
 > | [v1.0.x] configs/gemini/policies/safety.toml | d63830fc7548c9987a1d84b7ec0212b6527f639a6af808ee29d00427ceb87f3c |
 > | [v1.0.x] workspace-template/aiexclude.template | 9fee69aa1fa5dc7253ebb1419bc1f28b4ca24c8c794f5c6fcc011a1c4a2e444b |
 
-### v1.4.4（現行 HEAD、Version SSOT 統一 + release-version-check.sh 新規）
+### v1.14.0（現行 HEAD、Version SSOT 統一 + release-version-check.sh 新規）
 
 > 実測日: 2026-05-28。`shasum -a 256 <file>` (macOS) で計測。
-> v1.4.3 からの変更: `policy/safety-policy.json` の packageVersion を 1.4.4 に bump。
-> 全 active docs / installer / workspace-template の version 表記を v1.4.4 に統一。
+> v1.13.0 からの変更: Bouncer/OpenCode統合に伴い packageVersion を 1.14.0 に bump。
+> 全 active docs / installer / workspace-template の version 表記を v1.14.0 に統一。
 > `scripts/release-version-check.sh` 新規作成（SSOT drift 検出スクリプト）。
 
 | ファイル | SHA-256 | 備考 |
 |---------|---------|------|
-| policy/safety-policy.json | 40fabc3f79eb7e559a869114aa723934688ec8b718c9cc8ba8440180c7632667 | 2026-07-07 (C): `testedClaudeCodeVersion` キー (=2.1.201) を追加。Claude Code 動作確認済み版の SSOT。install が本ハッシュと照合するため更新必須。旧 hash=2276db83…（内容は下記 v1.12.1 の deny floor と同一）。v1.12.1 deny floor 網羅性修正（レビュー RED-A/B ＋ Codex 追補対応）: `cat${IFS}.env`・`.envrc`・`-execdir rm`・PowerShell alias(`del -Recurse`/`ls -r\|rm`)・`rd/s`・`diskutil eraseDisk`/`Remove-Partition`・`--output`系2段DL も追加捕捉。旧 v1.12.1 中間 hash=a932cb93…。 再帰削除を長オプション前置(`rm --force -r`)・split flags・`find -delete`/`-exec rm`・PowerShell 省略形(`-rec`/`-re`)・`gci -r \| rm` まで捕捉／`.env` 読取を head/tail/grep/sed/awk/cp/strings 等に拡大＋引用符・`@`前置・pathlib・curl 流出も捕捉／`format` を drive/slash 必須化し `git format-patch` 過剰ブロック解消＋`Clear-Disk`/`Format-Volume` 追加／`dd of="/dev/"` 引用符・backtick `\`curl\``・2段DL実行・空白 fork bomb・`pnpm/yarn/npm --workspace publish` を追加／`del /q` 単独の過剰ブロック撤廃。mac grep・.NET -match 両エンジンで 83 ケース(BLOCK 57/PASS 26)一致・本物 guard-bash 実機立証。packageVersion 1.12.1。旧 v1.12.0 hash=8acb93c5… |
+| policy/safety-policy.json | 81dd4925417b305f64fcf02b6a6555b6f08c9bcd22e665fcfbc16ffcdb9ba36c | 2026-07-07 (C): `testedClaudeCodeVersion` キー (=2.1.201) を追加。Claude Code 動作確認済み版の SSOT。install が本ハッシュと照合するため更新必須。旧 hash=2276db83…（内容は下記 v1.12.1 の deny floor と同一）。v1.12.1 deny floor 網羅性修正（レビュー RED-A/B ＋ Codex 追補対応）: `cat${IFS}.env`・`.envrc`・`-execdir rm`・PowerShell alias(`del -Recurse`/`ls -r\|rm`)・`rd/s`・`diskutil eraseDisk`/`Remove-Partition`・`--output`系2段DL も追加捕捉。旧 v1.12.1 中間 hash=a932cb93…。 再帰削除を長オプション前置(`rm --force -r`)・split flags・`find -delete`/`-exec rm`・PowerShell 省略形(`-rec`/`-re`)・`gci -r \| rm` まで捕捉／`.env` 読取を head/tail/grep/sed/awk/cp/strings 等に拡大＋引用符・`@`前置・pathlib・curl 流出も捕捉／`format` を drive/slash 必須化し `git format-patch` 過剰ブロック解消＋`Clear-Disk`/`Format-Volume` 追加／`dd of="/dev/"` 引用符・backtick `\`curl\``・2段DL実行・空白 fork bomb・`pnpm/yarn/npm --workspace publish` を追加／`del /q` 単独の過剰ブロック撤廃。mac grep・.NET -match 両エンジンで 83 ケース(BLOCK 57/PASS 26)一致・本物 guard-bash 実機立証。packageVersion 1.12.1。旧 v1.12.0 hash=8acb93c5… |
 | configs/codex/hooks.mac.json | 6f03deee71871c40dd81d098867a4860284700f98135fbb05730936738a729ca | v1.0.x から変更なし |
 | configs/codex/hooks.windows.json | 4e55cf8fbffbe44f1023455c902934f00d4a81d2637ba54c495cfaded18ca97c | v1.7.2 で Codex 二重包み対策に -File 形式へ変更 |
 | configs/claude/settings.mac.json | accffeaa1887f397635a291bd9d4d846974baf0861c1c2be1b661d8de7b9a486 | v1.12.0 教室プロファイル: defaultMode acceptEdits + allow 大幅拡大（読取/ビルド/install/git 定型/curl/wget）+ ask（git push/reset/checkout/rebase/sudo）。hooks は不変。初回体験修正で allow に低ストレス系 sed/awk/tar/unzip を追加（deny/ask は不変）。※`make*` はレシピ内で任意コマンドを hook 不可視に実行しうるため allow から除外し ask 層に戻した（Codex 指摘）。旧 hash=ac3a7b72…/76cfddc8… |

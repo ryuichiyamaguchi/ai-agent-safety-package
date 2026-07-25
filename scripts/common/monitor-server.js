@@ -33,6 +33,9 @@ const HOST = '127.0.0.1';
 const MAX_BODY = 16 * 1024;            // POST 本文上限（相談文）
 const AI_TIMEOUT_MS = Number(process.env.AI_SAFE_COACH_TIMEOUT || 60000);
 const REFRESH_MS = Number(process.env.AI_SAFE_MONITOR_INTERVAL || 1) * 1000;
+const COMPANION_FILE = path.join(__dirname, 'assets', 'bouncer-companion.png');
+const BOUNCER_PORT = Number(process.env.BOUNCER_PORT || 8787);
+const DS_GATEWAY_PORT = Number(process.env.DS_GATEWAY_PORT || 8788);
 
 // トークン付き URL やログを他ユーザーに読まれないよう、本プロセスが作るファイルは所有者のみ。
 try { process.umask(0o077); } catch { /* 一部環境で未サポート */ }
@@ -189,11 +192,144 @@ function readState() {
     hasCard: html.indexOf('class="action-cmd"') !== -1,
     redact: coachRedact(),
     answer: readAnswer(),
+    profile: profileInfo(),
   };
   state.coachable = hasCoachContext(state);
+  state.approval = approvalGuide(state);
   // コーチ（本体）が使えるかは無料キー登録が前提。UI が未登録時に登録パネルを出せるよう真偽だけ渡す（キー本文は出さない）。
   state.keyPresent = !!resolveApiKey();
   return state;
+}
+
+function profileInfo() {
+  const id = ['standard', 'assisted', 'maximum'].includes(process.env.AI_SAFE_PROFILE)
+    ? process.env.AI_SAFE_PROFILE
+    : 'standard';
+  const profiles = {
+    standard: {
+      label: '標準モード',
+      short: '推奨・軽快',
+      summary: '固定ルールと実行フックで守ります。ローカルLLMは通信経路に入りません。',
+      speed: '応答速度を優先',
+      gatewayRequired: false,
+    },
+    assisted: {
+      label: 'AI補助モード',
+      short: 'グレー操作だけ追加確認',
+      summary: '通常操作はそのまま通し、判断が難しいコマンドだけ2つのAIで確認します。',
+      speed: '一部の操作で待ち時間あり',
+      gatewayRequired: false,
+    },
+    maximum: {
+      label: '最大保護モード',
+      short: 'ローカルGemma検査',
+      summary: 'Claudeの応答をローカルGemmaで検査してから表示します。速度より保護を優先します。',
+      speed: '表示開始が遅くなります',
+      gatewayRequired: true,
+    },
+  };
+  return { id, agent: process.env.AI_SAFE_AGENT || 'unknown', ...profiles[id] };
+}
+
+function readGatewayState() {
+  const profile = profileInfo();
+  if (profile.agent === 'opencode') {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => {
+        if (!settled) {
+          settled = true;
+          resolve({
+            required: true,
+            kind: 'send-inspection',
+            localAiAvailable: false,
+            ...value,
+          });
+        }
+      };
+      const req = http.get({
+        hostname: HOST,
+        port: DS_GATEWAY_PORT,
+        path: '/healthz',
+        timeout: 700,
+        headers: { Accept: 'application/json' },
+      }, (upstream) => {
+        let body = '';
+        upstream.setEncoding('utf8');
+        upstream.on('data', (chunk) => {
+          if (body.length < 4096) body += chunk;
+        });
+        upstream.on('end', () => {
+          let healthy = false;
+          try {
+            const value = JSON.parse(body);
+            healthy = upstream.statusCode === 200 && value.status === 'ok';
+          } catch { /* fail closed */ }
+          finish({
+            available: healthy,
+            label: healthy ? 'DeepSeek送信検査 稼働中' : '送信検査を確認できません',
+          });
+        });
+      });
+      req.on('timeout', () => {
+        req.destroy();
+        finish({ available: false, label: '送信検査へ接続待ち' });
+      });
+      req.on('error', () => finish({ available: false, label: '送信検査は停止中' }));
+    });
+  }
+  if (!profile.gatewayRequired) {
+    return Promise.resolve({
+      required: false,
+      available: false,
+      localAiAvailable: false,
+      label: '標準では使用しません',
+    });
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (!settled) {
+        settled = true;
+        resolve({ required: true, ...value });
+      }
+    };
+    const req = http.get({
+      hostname: HOST,
+      port: BOUNCER_PORT,
+      path: '/bouncer/status',
+      timeout: 700,
+      headers: { Accept: 'application/json' },
+    }, (upstream) => {
+      let size = 0;
+      const chunks = [];
+      upstream.on('data', (chunk) => {
+        size += chunk.length;
+        if (size <= 64 * 1024) chunks.push(chunk);
+      });
+      upstream.on('end', () => {
+        if (upstream.statusCode !== 200 || size > 64 * 1024) {
+          return finish({ available: false, localAiAvailable: false, label: '応答を確認できません' });
+        }
+        try {
+          const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          finish({
+            available: value && value.server && value.server.state === 'running',
+            localAiAvailable: !!(value && value.local_ai && value.local_ai.available),
+            activeRequests: Number(value && value.activity && value.activity.active_requests) || 0,
+            label: 'Bouncer Gateway 稼働中',
+          });
+        } catch {
+          finish({ available: false, localAiAvailable: false, label: '状態を読み取れません' });
+        }
+      });
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      finish({ available: false, localAiAvailable: false, label: '接続待ち' });
+    });
+    req.on('error', () => finish({ available: false, localAiAvailable: false, label: '停止中' }));
+  });
 }
 
 function readAnswer() {
@@ -241,6 +377,139 @@ function hasCoachContext(st) {
   //   「この質問はなぜ止まった？」をコーチに聞ける導線を残す（空文脈は上の cmd 判定で弾く）。
   // post-output（AI 応答後カード）は「AI回答」タブ側で相談する専用経路があるため、ここでは対象外のまま。
   return tool !== 'post-output';
+}
+
+// ---- 承認判断票（LLM不要・オフライン・決定的） ----------------------------
+// 承認ダイアログを前にした初心者が、コマンドを読めなくても「何が変わるか」を
+// 10秒で確認できるようにする。これは自動承認器ではなく、人間向けの判断材料。
+// 高リスクを安全側へ誤分類しないことを優先し、証明できない操作は review に倒す。
+function approvalGuide(st) {
+  if (!st || !st.hasCard) {
+    return {
+      status: 'wait',
+      eyebrow: '承認判断票',
+      headline: 'AIの操作を待っています',
+      action: '承認画面が出たら、この場所を見てください',
+      summary: '操作を検知すると、許可する前に見るポイントをここへまとめます。',
+      impact: 'まだ操作はありません',
+      reversible: '—',
+      outbound: '—',
+      checks: ['AIに頼んだ内容と一致しているか', '対象のファイルや送信先に心当たりがあるか'],
+      why: 'この画面は判断を助けます。実際の許可・拒否はAIツール側で選びます。',
+    };
+  }
+
+  const meta = String(st.meta || '');
+  const title = String(st.title || '');
+  const label = String(st.label || '');
+  const cmd = String(st.cmd || '').trim();
+  const text = [title, label, cmd, ...(st.dangers || [])].join(' ');
+  const lower = text.toLowerCase();
+  const metaTool = toolFromMeta(meta);
+  const labelTool = (label.match(/^([A-Za-z0-9_-]+)/) || [])[1];
+  const tool = (metaTool === 'observe' && labelTool ? labelTool.toLowerCase() : metaTool) || label.toLowerCase();
+  const risk = /risk=high/.test(meta) ? 'high' : (/risk=medium/.test(meta) ? 'medium' : 'low');
+
+  const generatedCleanup = /^\s*rm\s+(?:-[A-Za-z]*r[A-Za-z]*|--recursive)(?:\s+(?:-f|--force))?\s+(?:\.\/)?(?:node_modules|build|dist|coverage|target|\.next|\.turbo)(?:\s+(?:\.\/)?(?:node_modules|build|dist|coverage|target|\.next|\.turbo))*\s*$/i.test(cmd);
+  const destructive = !generatedCleanup && (/\brm\b[^\n;&|]*(?:-[a-z]*r|--recursive)|\bremove-item\b[^\n;|]*-rec|\b(?:del|erase|rd|rmdir)\b[^\n;&|]*\/s\b|\b(?:format|diskpart|clear-disk|format-volume|initialize-disk|mkfs|shred)\b|\bdd\b[^\n]*\bof=\s*["']?\/dev\//i.test(text));
+  const remoteExec = /\b(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b[^\n]*(?:\||;|&&)[^\n]*\b(?:sh|bash|zsh|python|node|pwsh|powershell|iex|invoke-expression)\b/i.test(text);
+  const publishes = /\bgit\s+push\b[^\n]*(?:--force|-f\b)|\b(?:npm|pnpm|yarn)\b[^\n]*\bpublish\b|\btwine\s+upload\b|\bgem\s+push\b/i.test(text);
+  const protectedData = /(?:^|[\s\\/])\.(?:env|ssh|aws|azure|gnupg|kube)(?:[\\/\s.]|$)|private[ _-]?key|api[ _-]?key|password|credential/i.test(text);
+  const privilege = /\bsudo\b|\brunas\b|\bset-executionpolicy\b|\bchmod\s+777\b/i.test(text);
+  const network = /web\s*access|webfetch|websearch|https?:\/\/|\b(?:curl|wget|iwr|irm|ssh|scp|sftp|rsync|nc|ncat|netcat)\b|\bgit\s+push\b/i.test(lower);
+  const writeTool = /^(write|edit|multiedit)$/.test(tool) || /ファイル書き込み|書き込|上書き|作成/.test(text);
+  const readTool = /^(read|notebookread|fileread|glob|grep|search|ls)$/.test(tool);
+  const readCommand = /^\s*(?:pwd|ls|dir|find|rg|grep|egrep|fgrep|cat|tac|head|tail|wc|stat|file|git\s+(?:status|diff|log|show|branch))\b/i.test(cmd)
+    && !/[;]|&&|\|\||(?:^|[^|])\|(?!\|)|>|\$\(|`/.test(cmd);
+  const blocked = /ブロック|遮断|拒否/.test(title) || /(?:^|\s)block(?:ed)?(?:\s|$)/i.test(meta);
+  const hasDanger = Array.isArray(st.dangers) && st.dangers.some((x) => String(x).trim());
+
+  let status = 'review';
+  if (generatedCleanup) status = 'review';
+  else if (risk === 'high' || destructive || remoteExec || publishes || protectedData || blocked) status = 'deny';
+  else if (risk === 'low' && !hasDanger && (readTool || readCommand) && !network) status = 'allow';
+
+  let impact = '影響範囲を自動では特定できません';
+  let reversible = '分からないため、変更前の確認が必要';
+  let outbound = network ? 'あり：表示された送信先へ通信します' : '検出なし';
+  let summary = st.whatdo || '';
+  let checks = [];
+  let why = 'AIがPCやファイルに触るため、実行前の確認が求められています。';
+
+  if (generatedCleanup) {
+    impact = 'プロジェクト内の生成物・キャッシュが削除されます';
+    reversible = '再生成できますが、処理には時間がかかる場合があります';
+    summary = 'ビルド結果や依存パッケージなど、作り直せるフォルダを整理する操作です。';
+    checks = ['対象が生成物だけで、作成したファイルを含まないか', '再インストールや再ビルドができる状態か'];
+    why = '日常的な整理操作ですが、対象を間違えると作業内容も消えるため今回だけ確認します。';
+  } else if (destructive) {
+    impact = '表示されたファイルやフォルダが削除されます';
+    reversible = '戻せない可能性が高い（ゴミ箱を通らない場合があります）';
+    summary = summary || '削除対象とその中身をまとめて消す操作です。';
+    checks = ['削除対象を自分で開いて、中身を確認したか', 'バックアップがあり、消す理由を説明できるか'];
+  } else if (remoteExec) {
+    impact = 'インターネットから取得したプログラムがPC上で動きます';
+    reversible = '実行内容によっては戻せません';
+    summary = summary || '外部から取得した内容を、そのまま実行しようとしています。';
+    checks = ['配布元が公式で、URLに間違いがないか', 'ダウンロード内容を実行前に確認できるか'];
+  } else if (publishes) {
+    impact = 'コードやパッケージが外部へ公開・上書きされます';
+    reversible = '公開後の完全な取り消しは難しい場合があります';
+    outbound = 'あり：外部サービスへ送信します';
+    summary = summary || '外部リポジトリや配布先へ内容を送る操作です。';
+    checks = ['公開先・ブランチ・パッケージ名が正しいか', '秘密情報と未確認の変更が含まれていないか'];
+  } else if (protectedData) {
+    impact = '認証情報や秘密ファイルに触れる可能性があります';
+    reversible = writeTool ? '漏洩・上書き後は完全には戻せません' : '読み取りでも外部送信につながる可能性があります';
+    summary = summary || '秘密情報として扱うべき場所や文字列が含まれています。';
+    checks = ['この操作に秘密情報が本当に必要か', '内容がAIや外部サービスへ送られないか'];
+  } else if (privilege) {
+    impact = 'PC全体の設定や通常は触れない場所を変更できます';
+    reversible = '変更内容によっては復旧作業が必要';
+    summary = summary || '管理者に近い強い権限を使う操作です。';
+    checks = ['なぜ強い権限が必要か説明できるか', '一般ユーザー権限で代用できないか'];
+  } else if (writeTool) {
+    impact = '表示されたファイルが作成・変更されます';
+    reversible = 'Gitやバックアップがあれば戻せる可能性があります';
+    summary = summary || 'プロジェクト内のファイルへ内容を書き込みます。';
+    checks = ['書き込み先が依頼したプロジェクト内か', '既存ファイルなら差分またはバックアップを確認したか'];
+  } else if (network) {
+    impact = '検索語・URL・リクエスト内容がPCの外へ送られます';
+    reversible = '送信後に取り消すことはできません';
+    summary = summary || '表示されたサイトやサービスへ通信します。';
+    checks = ['送信先のドメインに心当たりがあるか', '顧客情報・鍵・パスワードが含まれていないか'];
+    why = 'PCの外へ情報を送る可能性があるため、送信前の確認が求められています。';
+  } else if (readTool || readCommand) {
+    impact = '表示されたファイルや状態を読み取ります';
+    reversible = '変更しないため、元に戻す必要はありません';
+    summary = summary || '内容や現在の状態を確認するだけの操作です。';
+    checks = ['表示されたパスや検索対象が依頼内容と一致しているか', '秘密情報の場所を読もうとしていないか'];
+    why = 'AIがローカルの情報を読むため、対象が正しいか確認できます。';
+  } else {
+    checks = ['AIに「何を、どこへ、なぜ行うか」を1文で説明させたか', '対象と結果を自分で確認できるか'];
+  }
+
+  if (!summary) summary = '表示中の操作について、影響範囲を確認してから判断してください。';
+
+  const copy = {
+    allow: {
+      eyebrow: 'いま押すなら',
+      headline: '依頼内容と一致すれば、今回だけ許可',
+      action: '「今回だけ許可」を選び、常時許可にはしない',
+    },
+    review: {
+      eyebrow: 'いま押すなら',
+      headline: '2点を確認できるまで、許可しない',
+      action: '下の確認項目が両方OKなら、今回だけ許可',
+    },
+    deny: {
+      eyebrow: 'いま押すなら',
+      headline: '許可しない',
+      action: 'AIツール側で「許可しない／Deny」を選ぶ',
+    },
+  }[status];
+
+  return { status, ...copy, summary, impact, reversible, outbound, checks: checks.slice(0, 2), why };
 }
 
 const NO_COACH_CONTEXT_MSG =
@@ -396,6 +665,11 @@ function readBody(req) {
 const server = http.createServer(async (req, res) => {
   let url;
   try { url = new URL(req.url, 'http://' + HOST); } catch { return sendJson(res, 400, { error: 'bad url' }); }
+  // ブラウザーの自動 favicon 要求は機密データを返さず終了し、コンソールの不要な 401 を避ける。
+  if (req.method === 'GET' && url.pathname === '/favicon.ico') {
+    res.writeHead(204, { 'Cache-Control': 'public, max-age=86400' });
+    return res.end();
+  }
   // セッショントークン必須（CSRF/他ローカルプロセス対策）
   if (url.searchParams.get('t') !== TOKEN) { return sendJson(res, 401, { error: 'unauthorized' }); }
 
@@ -404,8 +678,25 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': body.length });
     return res.end(body);
   }
+  if (req.method === 'GET' && url.pathname === '/companion.png') {
+    try {
+      const body = fs.readFileSync(COMPANION_FILE);
+      res.writeHead(200, {
+        'Content-Type': 'image/png',
+        'Content-Length': body.length,
+        'Cache-Control': 'private, max-age=3600',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      return res.end(body);
+    } catch {
+      return sendJson(res, 404, { error: 'companion asset not found' });
+    }
+  }
   if (req.method === 'GET' && url.pathname === '/state') {
     return sendJson(res, 200, readState());
+  }
+  if (req.method === 'GET' && url.pathname === '/gateway-state') {
+    return sendJson(res, 200, await readGatewayState());
   }
   if (req.method === 'POST' && (url.pathname === '/explain' || url.pathname === '/ask')) {
     let payload = {};
@@ -469,135 +760,364 @@ if (require.main === module) {
 }
 
 // テスト用に純関数を公開（require.main === module の起動経路には影響しない）。
-module.exports = { contextBlock, answerContextBlock, maskSecrets, hasCoachContext, coachRedact, saveApiKey };
+module.exports = {
+  contextBlock,
+  answerContextBlock,
+  maskSecrets,
+  hasCoachContext,
+  approvalGuide,
+  coachRedact,
+  saveApiKey,
+  profileInfo,
+  readGatewayState,
+};
 
 // ---- コーチ UI（1ファイル完結。AI 出力は textContent で表示=XSS安全） -----
 function renderPage() {
   return `<!DOCTYPE html>
 <html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>安全イベント / AI回答モニター</title>
-<style>
-*{box-sizing:border-box}
-body{margin:0;padding:16px;font-family:'Yu Gothic','Meiryo',sans-serif;background:#0f1115;color:#e6e6e6;word-break:keep-all;line-height:1.7}
-.wrap{max-width:880px;margin:0 auto}
-h1.hdr{font-size:18px;margin:0 0 14px;color:#9ad}
-.tabs{display:flex;gap:8px;margin:0 0 12px}
-.tab{font-family:inherit;font-size:14px;padding:8px 12px;border-radius:8px;border:1px solid #3a4150;background:#151922;color:#e6e6e6;cursor:pointer}
-.tab.active{background:#263449;border-color:#79c0ff;color:#fff}
-.panel[hidden]{display:none}
-.card{border-radius:12px;padding:18px 20px;margin-bottom:16px;border-left:8px solid #3fb950;background:#15241a}
-.card.high{border-left-color:#e5534b;background:#2a1718}
-.card.medium{border-left-color:#e0b341;background:#2a2417}
-.card.wait{border-left-color:#6e7681;background:#1a1d24}
-.ctitle{font-size:22px;font-weight:700;margin:0 0 6px}
-.cmeta{font-size:12px;opacity:.7;margin-bottom:10px}
-.action-cmd{margin:0;font-family:monospace,'Courier New';font-size:14px;color:#f0c080;white-space:pre-wrap;word-break:break-all;overflow-wrap:anywhere;background:#0d0f13;border-radius:8px;padding:10px}
-.answer-text{margin:0;font-family:inherit;font-size:14px;color:#e6e6e6;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;background:#0d0f13;border-radius:8px;padding:12px;border:1px solid #222}
-.whatdo{margin-top:10px}
-.whatdo .lab{font-weight:700;color:#cfd;font-size:14px}
-.danger{color:#ffb3ad}
-.coach{border-radius:12px;padding:16px 18px;background:#14171d;border:1px solid #2a2f3a}
-.coach h2{font-size:15px;margin:0 0 10px;color:#9ad}
-.btns{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-button{font-family:inherit;font-size:14px;padding:8px 14px;border-radius:8px;border:1px solid #3a4150;background:#222834;color:#e6e6e6;cursor:pointer}
-button:hover{background:#2c3543}
-button:disabled{opacity:.5;cursor:default}
-.qrow{display:flex;gap:8px}
-.qrow input{flex:1;font-family:inherit;font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid #3a4150;background:#0d0f13;color:#e6e6e6}
-.answer{margin-top:12px;white-space:pre-wrap;background:#0d0f13;border-radius:8px;padding:12px;min-height:1.5em;border:1px solid #222}
-.disclaim{font-size:12px;color:#e0b341;margin-top:10px}
-.hibanner{background:#3a1715;border:1px solid #e5534b;color:#ffb3ad;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-weight:700}
-.events{margin:0 0 16px}
-.events h2{font-size:16px;margin:0 0 8px;color:#9ad}
-.events .sub{font-size:12px;opacity:.6;margin:0 0 8px}
-.events table{border-collapse:collapse;width:100%;font-size:13px}
-.events th{text-align:left;color:#9ad;border-bottom:1px solid #333;padding:6px;font-size:12px;opacity:.85}
-.events td{border-top:1px solid #222;padding:6px;vertical-align:top}
-.events tr.block td,.events tr.high td{background:#2a1718}
-.events tr.allow td{background:#13201a}
-.events .ev-time{white-space:nowrap;opacity:.6;font-size:11px}
-.events .ev-dec{white-space:nowrap;font-weight:700}
-.events .ev-cmd{font-family:monospace,'Courier New';color:#f0c080;word-break:break-all;overflow-wrap:anywhere}
-.events .ev-reason{opacity:.7;font-size:12px}
-.muted{opacity:.6}
-.keysetup{border:2px solid #e0b341;background:#241f12;border-radius:10px;padding:14px 16px;margin-bottom:14px}
-.keysetup .ks-title{font-size:15px;font-weight:700;color:#ffd979;margin:0 0 8px}
-.ks-steps{margin:0 0 10px;padding-left:1.3em;font-size:13px;line-height:1.9}
-.ks-steps a.ks-open{color:#79c0ff;font-weight:700}
-.ks-row{display:flex;gap:8px;margin-bottom:6px}
-.ks-row input{flex:1;font-family:inherit;font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid #6a5a2a;background:#0d0f13;color:#e6e6e6}
-.ks-row button{white-space:nowrap;background:#2f6a2a;border-color:#4c8f37;color:#fff;font-weight:700}
-.ks-row button:hover{background:#3a8034}
-.ks-msg{font-size:12px;margin:0 0 4px}
-.ks-msg.ok{color:#7ee787;opacity:1}
-.ks-msg.danger{color:#ffb3ad;opacity:1}
-.ks-fallback{font-size:12px}
-.linkbtn{background:none;border:none;color:#9ad;text-decoration:underline;padding:6px 0;font-size:13px;cursor:pointer}
-.linkbtn:hover{background:none;color:#bfe0ff}
-</style></head>
-<body><div class="wrap">
-<h1 class="hdr">🛡️ 安全イベント / AI回答モニター</h1>
-<div class="tabs" role="tablist" aria-label="相談対象">
-  <button id="tab-event" class="tab active" type="button">安全イベント</button>
-  <button id="tab-answer" class="tab" type="button">AI回答</button>
-</div>
-<div id="event-panel" class="panel">
-  <div id="card" class="card wait"><div class="ctitle">待機中…</div><div class="cmeta">危険操作や確認が必要な安全イベントが出ると、ここに内容が出ます。</div></div>
-</div>
-<div id="answer-panel" class="panel" hidden>
-  <div id="answer-card" class="card wait"><div class="ctitle">AI回答は未取得です</div><div class="cmeta">回答本文を hook から取得できた時だけ、ここに表示されます。</div></div>
-</div>
+	<title>安全イベント / AI回答モニター</title>
+	<style>
+	:root{--ink:#edf3ef;--muted:#97a59d;--paper:#111816;--paper-2:#151e1b;--sky:#090d0c;--line:#2a3631;--line-strong:#3b4b43;--green:#a9dd7d;--green-deep:#6ea855;--mint:#bdf6c7;--amber:#e1b94a;--red:#ed6b58;--blue:#91c6ba;--shadow:0 18px 50px rgba(0,0,0,.34)}
+	*{box-sizing:border-box}
+	html{color-scheme:dark}
+	body{margin:0;padding:14px;font-family:"BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;background:radial-gradient(circle at 50% -30%,#1b2823 0,transparent 45%),var(--sky);color:var(--ink);line-height:1.6;overflow-wrap:anywhere;-webkit-font-smoothing:antialiased}
+	body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.15;background-image:linear-gradient(rgba(169,221,125,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(169,221,125,.07) 1px,transparent 1px);background-size:34px 34px;mask-image:linear-gradient(to bottom,black,transparent 72%)}
+	.wrap{position:relative;max-width:1580px;margin:0 auto}
+	.dashboard{display:grid;grid-template-columns:minmax(220px,.72fr) minmax(540px,1.7fr) minmax(300px,1fr);gap:14px;align-items:start}
+	.shell{border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,rgba(21,30,27,.98),rgba(12,18,16,.98));box-shadow:var(--shadow)}
+	.brand-rail{position:sticky;top:14px;min-height:calc(100vh - 28px);padding:22px;display:flex;flex-direction:column;overflow:hidden}
+	.brand{display:flex;align-items:center;gap:12px}
+	.brand-shield{width:44px;height:48px;flex:none;color:var(--green);filter:drop-shadow(0 0 12px rgba(169,221,125,.16))}
+	.brand-name{font-size:clamp(25px,2.2vw,34px);font-weight:850;line-height:1;letter-spacing:-.025em}
+	.brand-kicker{margin:8px 0 0 57px;font:700 9px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.2em;color:var(--green);text-transform:uppercase}
+	.companion-message{position:relative;margin:28px 0 2px;padding:13px 15px;border:1px solid #52644f;border-radius:15px;background:rgba(255,255,255,.025);font-size:12px;color:#d9e1dc}
+	.companion-message:after{content:"";position:absolute;left:44px;bottom:-10px;width:18px;height:18px;border-right:1px solid #52644f;border-bottom:1px solid #52644f;background:#121a17;transform:rotate(45deg)}
+	.companion{display:block;width:min(100%,300px);margin:2px auto 0;aspect-ratio:1;object-fit:cover;object-position:center;border-radius:20px;mix-blend-mode:screen}
+	.guard-overview{margin-top:auto;padding:16px;border:1px solid #44533e;border-radius:14px;background:rgba(169,221,125,.035)}
+	.guard-overview h2,.rail-panel h2{font-size:14px;margin:0 0 11px}
+	.guard-row{display:grid;grid-template-columns:26px 1fr auto;align-items:center;gap:8px;padding:8px 0;border-top:1px solid rgba(255,255,255,.055);font-size:12px}
+	.guard-row:first-of-type{border-top:0}
+	.guard-icon{display:grid;place-items:center;width:24px;height:24px;border:1px solid #587149;border-radius:50%;color:var(--green)}
+	.guard-state{color:var(--green);font:700 10px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.05em}
+	.center-shell{min-width:0;padding:18px}
+	.topbar{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:0 0 13px}
+	h1.hdr{font-size:clamp(18px,2vw,25px);line-height:1.25;margin:0;letter-spacing:.005em}
+	.topbar-copy{margin:3px 0 0;color:var(--muted);font-size:11px}
+		.live{display:inline-flex;align-items:center;gap:8px;flex:none;padding:8px 11px;border:1px solid #40533e;border-radius:999px;background:#152019;color:#bddba8;font-size:11px;font-weight:700}
+		.live-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(169,221,125,.09);animation:pulse 2s ease-out infinite}
+		@keyframes pulse{50%{box-shadow:0 0 0 8px rgba(169,221,125,0)}}
+		.profile-strip{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:12px;align-items:center;margin:0 0 12px;padding:13px 14px;border:1px solid #40533e;border-radius:13px;background:linear-gradient(90deg,rgba(169,221,125,.08),rgba(255,255,255,.015))}
+		.profile-mark{display:grid;place-items:center;width:40px;height:40px;border:1px solid #587149;border-radius:12px;color:var(--green);font-size:19px}
+		.profile-label{font-size:14px;font-weight:850}
+		.profile-summary{display:block;color:var(--muted);font-size:10px;font-weight:550}
+		.profile-speed{padding:6px 9px;border:1px solid #4c6149;border-radius:999px;color:var(--green);font:750 9px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:nowrap}
+		body[data-profile="assisted"] .profile-strip{border-color:#6c5b2e;background:linear-gradient(90deg,rgba(225,185,74,.09),rgba(255,255,255,.015))}
+		body[data-profile="assisted"] .profile-mark,body[data-profile="assisted"] .profile-speed{color:var(--amber);border-color:#79652e}
+		body[data-profile="maximum"] .profile-strip{border-color:#6b493d;background:linear-gradient(90deg,rgba(237,107,88,.08),rgba(255,255,255,.015))}
+		body[data-profile="maximum"] .profile-mark,body[data-profile="maximum"] .profile-speed{color:#ff9a8a;border-color:#78483f}
+	.tabs{display:flex;gap:4px;margin:0 0 12px;padding:4px;border:1px solid var(--line);border-radius:11px;background:#0c1210;width:max-content;max-width:100%}
+	.tab,button{font:700 13px/1.4 inherit;cursor:pointer}
+	.tab{padding:8px 14px;border-radius:7px;border:0;background:transparent;color:var(--muted)}
+	.tab.active{background:#202c27;color:var(--ink);box-shadow:inset 0 0 0 1px #34453d}
+	button:focus-visible,input:focus-visible,summary:focus-visible,.check-item:focus-within{outline:3px solid rgba(169,221,125,.34);outline-offset:2px}
+	button:disabled{opacity:.45;cursor:default}
+	.panel[hidden]{display:none}
+	.decision{--signal:var(--blue);position:relative;overflow:hidden;border:1px solid var(--line-strong);border-radius:16px;background:rgba(8,13,11,.42);margin:0 0 14px}
+	.decision.allow{--signal:var(--green)}
+	.decision.review{--signal:var(--amber)}
+	.decision.deny{--signal:var(--red)}
+	.decision.wait{--signal:var(--blue)}
+	.decision-signal{display:grid;grid-template-columns:45px 1fr;gap:13px;align-items:start;padding:20px 20px 17px;border-bottom:1px solid var(--line);background:linear-gradient(90deg,color-mix(in srgb,var(--signal) 12%,transparent),transparent 66%)}
+	.decision-symbol{display:grid;place-items:center;width:42px;height:42px;border:1px solid color-mix(in srgb,var(--signal) 70%,#fff 6%);border-radius:12px;color:var(--signal);font-size:24px;font-weight:900;box-shadow:inset 0 0 18px color-mix(in srgb,var(--signal) 10%,transparent)}
+	.decision-eyebrow{font:750 10px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.16em;color:var(--signal);margin-bottom:4px}
+	.decision-headline{font-size:clamp(22px,2.7vw,34px);font-weight:850;line-height:1.22;letter-spacing:.005em;word-break:keep-all;overflow-wrap:normal}
+	.decision-action{grid-column:2;margin-top:3px;color:#d6dfda;font-size:12px;font-weight:650}
+	.decision-body{padding:18px 20px 20px}
+	.decision-summary{font-size:15px;font-weight:700;margin:0 0 13px}
+	.command-box{margin-bottom:12px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:#0b100f}
+	.command-label{display:block;margin-bottom:5px;color:var(--muted);font-size:10px}
+	.command-value{margin:0;color:var(--green);font:600 13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-all}
+	.fact-grid{display:grid;gap:8px;margin-bottom:13px}
+	.fact{display:grid;grid-template-columns:32px minmax(105px,.42fr) 1fr;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:#141c19}
+	.fact-icon{display:grid;place-items:center;width:30px;height:30px;border:1px solid #4c6149;border-radius:9px;color:var(--green);font-size:15px}
+	.fact-label{display:block;color:#dfe7e2;font-size:13px;font-weight:750}
+	.fact-value{display:block;color:var(--muted);font-size:12px;font-weight:600}
+	.checks{padding:15px;border:1px solid #4a5c45;border-radius:12px;background:linear-gradient(120deg,rgba(169,221,125,.055),rgba(255,255,255,.015))}
+	.checks-title{font-size:14px;font-weight:800;margin-bottom:9px}
+	.check-list{display:grid;gap:8px}
+	.check-item{display:grid;grid-template-columns:22px 1fr;gap:9px;align-items:start;padding:10px 11px;border:1px solid var(--line);border-radius:9px;background:#111815;cursor:pointer}
+	.check-item input{appearance:none;width:18px;height:18px;margin:1px 0 0;border:1px solid #718078;border-radius:4px;background:#0b100f;display:grid;place-items:center}
+	.check-item input:checked{border-color:var(--green);background:var(--green)}
+	.check-item input:checked:after{content:"✓";color:#0b100f;font-size:13px;font-weight:900}
+	.check-item span{font-size:12px;font-weight:650}
+	.why{margin:10px 0 0;color:var(--muted);font-size:11px}
+	.technical{margin:0 0 14px;border:1px solid var(--line);border-radius:12px;background:#0e1412;overflow:hidden}
+	.technical summary{padding:12px 14px;cursor:pointer;font-size:12px;font-weight:750;color:#dbe4df}
+	.technical[open] summary{border-bottom:1px solid var(--line)}
+	.card{border:0;border-radius:0;padding:15px;margin:0;background:#111816}
+	.card.high{box-shadow:inset 4px 0 var(--red)}
+	.card.medium{box-shadow:inset 4px 0 var(--amber)}
+	.card.wait{color:var(--muted)}
+	.ctitle{font-size:16px;font-weight:800;margin:0 0 5px}
+	.cmeta{font:500 10px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted);margin-bottom:9px}
+	.action-cmd{margin:0;font:500 12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--green);white-space:pre-wrap;word-break:break-all;background:#0b100f;border:1px solid var(--line);border-radius:8px;padding:10px 11px}
+	.answer-text{margin:0;font-size:13px;white-space:pre-wrap;word-break:break-word;background:#0b100f;border-radius:8px;padding:11px;border:1px solid var(--line)}
+	.whatdo{margin-top:10px;padding:10px 11px;background:#17211c;border-radius:8px}
+	.whatdo .lab{font-weight:800;color:var(--green);font-size:12px}
+	.danger{margin-top:8px;color:#ff9a8a;font-weight:700}
+	.coach{border-radius:14px;padding:16px;background:#101715;border:1px solid var(--line)}
+	.coach h2{font-size:15px;margin:0 0 8px}
+	.btns{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:9px}
+	button{padding:8px 12px;border-radius:8px;border:1px solid #405149;background:#19231f;color:var(--ink)}
+	button:hover:not(:disabled){background:#223029;border-color:#667b70}
+	.qrow{display:flex;gap:7px}
+	.qrow input,.ks-row input{flex:1;min-width:0;font:500 13px/1.5 inherit;padding:9px 10px;border-radius:8px;border:1px solid #405149;background:#0b100f;color:var(--ink)}
+	.answer{margin-top:10px;white-space:pre-wrap;background:#0b100f;border-radius:8px;padding:11px;min-height:1.5em;border:1px solid var(--line);font-size:12px}
+	.disclaim{font-size:11px;color:#b4a36f;margin-top:9px}
+	.hibanner{background:#2a1715;border:1px solid #6d342c;color:#ffb1a5;border-radius:8px;padding:9px 11px;margin-bottom:9px;font-weight:800}
+	.keysetup{border:1px solid #6c5b2e;background:#211d12;border-radius:9px;padding:13px;margin-bottom:12px}
+	.keysetup .ks-title{font-size:13px;font-weight:800;color:#f0d57f;margin:0 0 7px}
+	.ks-steps{margin:0 0 9px;padding-left:1.3em;font-size:12px;line-height:1.8}
+	.ks-steps a.ks-open{color:var(--green);font-weight:800}
+	.ks-row{display:flex;gap:7px;margin-bottom:6px}
+	.ks-row button{white-space:nowrap;background:#354a2c;border-color:#658852;color:#eef8e6;font-weight:800}
+	.ks-msg{font-size:11px;margin:0 0 4px}
+	.ks-msg.ok{color:var(--green)}
+	.ks-msg.danger{color:var(--red)}
+	.ks-fallback{font-size:11px}
+	.linkbtn{background:none;border:none;color:var(--green);text-decoration:underline;padding:6px 0;font-size:12px}
+	.muted{color:var(--muted)}
+	.right-rail{display:grid;gap:14px}
+	.rail-panel{padding:16px}
+	.rail-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px}
+	.rail-heading h2{margin:0}
+	.rail-kicker{color:var(--green);font:700 9px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.08em}
+	.choice-grid{display:grid;gap:9px}
+	.choice-card{display:grid;grid-template-columns:36px 1fr;gap:10px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:11px;background:#101614;opacity:.58;transition:opacity .18s,border-color .18s,transform .18s}
+	.choice-card.recommended{opacity:1;border-color:var(--choice);background:color-mix(in srgb,var(--choice) 15%,#101614);transform:translateX(-3px);box-shadow:inset 3px 0 var(--choice)}
+	.choice-card.allow{--choice:var(--green)}
+	.choice-card.review{--choice:var(--amber)}
+	.choice-card.deny{--choice:var(--red)}
+	.choice-icon{display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--choice);border-radius:50%;color:var(--choice);font-size:18px;font-weight:900}
+	.choice-title{font-size:13px;font-weight:800}
+	.choice-copy{font-size:10px;color:var(--muted)}
+	.judgement-note{margin:10px 0 0;color:var(--muted);font-size:10px}
+	.events{margin:0;padding:16px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,rgba(21,30,27,.98),rgba(12,18,16,.98));box-shadow:var(--shadow)}
+	.events h2{font-size:14px;margin:0}
+	.events .sub{font-size:10px;color:var(--muted);margin:0 0 8px}
+	.events-scroll{overflow:auto;max-height:350px}
+	.events table{border-collapse:collapse;width:100%;font-size:11px}
+	.events th{text-align:left;color:var(--muted);border-bottom:1px solid var(--line);padding:6px;font-size:9px;letter-spacing:.04em}
+	.events td{border-top:1px solid #202b27;padding:8px 6px;vertical-align:top}
+	.events tr.block td,.events tr.high td{background:rgba(237,107,88,.06)}
+	.events tr.allow td{background:rgba(169,221,125,.035)}
+	.events .ev-time{width:58px;white-space:nowrap;color:var(--muted);font:500 9px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}
+	.events .ev-top{display:flex;align-items:center;justify-content:space-between;gap:5px;margin-bottom:2px}
+	.events .ev-dec{white-space:nowrap;font-weight:800}
+	.events .ev-tool{color:#c8d2cc;font-size:10px}
+	.events .ev-cmd{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#d5ded9;word-break:break-all}
+	.events .ev-reason{color:var(--muted);font-size:9px}
+	.protection-list{display:grid;gap:2px}
+	.protection-item{display:grid;grid-template-columns:32px 1fr auto;align-items:center;gap:9px;padding:10px 0;border-top:1px solid rgba(255,255,255,.055)}
+	.protection-item:first-child{border-top:0}
+	.protection-icon{display:grid;place-items:center;width:30px;height:30px;border:1px solid #4d6845;border-radius:9px;color:var(--green)}
+	.protection-title{font-size:12px;font-weight:750}
+	.protection-copy{font-size:9px;color:var(--muted)}
+	.protection-state{font-size:10px;font-weight:800;color:var(--green)}
+	.footer-note{grid-column:1/-1;margin:0;padding:10px 14px;color:var(--muted);font-size:10px;text-align:center;border:1px solid var(--line);border-radius:12px;background:#0d1311}
+	@media(max-width:1220px){.dashboard{grid-template-columns:220px minmax(0,1fr)}.right-rail{grid-column:1/-1;grid-template-columns:repeat(3,minmax(0,1fr))}.events{border-radius:18px}.brand-rail{min-height:720px}}
+	@media(max-width:900px){body{padding:10px}.dashboard{grid-template-columns:minmax(0,1fr)}.brand-rail{position:static;min-height:0;display:grid;grid-template-columns:1fr 170px;align-items:center}.brand,.brand-kicker,.companion-message,.guard-overview{grid-column:1}.companion{grid-column:2;grid-row:1/5;max-width:170px}.right-rail{grid-column:auto;grid-template-columns:minmax(0,1fr)}}
+		@media(max-width:620px){body{padding:7px}.shell,.events{border-radius:14px}.brand-rail,.center-shell,.rail-panel,.events{padding:13px}.brand-rail{grid-template-columns:minmax(0,1fr) 92px}.brand-rail>*{min-width:0}.brand-shield{width:35px;height:38px}.brand-name{font-size:26px}.brand-kicker{margin-left:47px;font-size:8px}.companion-message{margin-top:18px}.companion{max-width:92px}.topbar{align-items:flex-start;flex-wrap:wrap}.topbar>div:first-child{min-width:0}.topbar-copy{display:none}.live{font-size:9px;padding:6px 8px}.profile-strip{grid-template-columns:36px minmax(0,1fr)}.profile-mark{width:34px;height:34px}.profile-speed{grid-column:1/-1;width:max-content;max-width:100%;white-space:normal}.tabs{width:100%}.tab{flex:1;min-width:0}.decision-signal{grid-template-columns:36px minmax(0,1fr);padding:16px 14px 14px}.decision-symbol{width:34px;height:34px;border-radius:9px}.decision-headline{font-size:22px;word-break:normal;overflow-wrap:anywhere}.decision-action{grid-column:1/-1}.decision-body{padding:14px}.fact{grid-template-columns:30px minmax(0,1fr)}.fact-value{grid-column:2}.qrow,.ks-row{flex-direction:column}.qrow button,.ks-row button{width:100%}.btns button{flex:1;min-width:130px}.footer-note{font-size:9px}}
+	@media(prefers-reduced-motion:reduce){.live-dot{animation:none}.choice-card{transition:none}}
+	</style></head>
+	<body><div class="wrap">
+	<main class="dashboard">
+	  <aside class="brand-rail shell" aria-label="Bouncerの状態">
+	    <div class="brand">
+	      <svg class="brand-shield" viewBox="0 0 48 54" aria-hidden="true"><path d="M24 2 43 10v13c0 13-7.8 22.7-19 29C12.8 45.7 5 36 5 23V10L24 2Z" fill="none" stroke="currentColor" stroke-width="3"/><path d="M15 22c2-4 5-6 9-6s7 2 9 6v8c-3 3-6 4-9 4s-6-1-9-4v-8Z" fill="currentColor" opacity=".18"/><circle cx="19" cy="25" r="2" fill="currentColor"/><circle cx="29" cy="25" r="2" fill="currentColor"/><path d="M21 31c2 1.5 4 1.5 6 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+	      <div class="brand-name">Bouncer</div>
+	    </div>
+	    <p class="brand-kicker">AI safety monitoring<br>&amp; approval assistant</p>
+	    <div class="companion-message">いつも見守っています。<br>分からないまま、許可しなくて大丈夫です。</div>
+	    <img id="companion" class="companion" alt="Bouncerの見守りロボット犬" />
+	    <section class="guard-overview">
+	      <h2>いま働いている見守り</h2>
+		      <div class="guard-row"><span class="guard-icon">⌁</span><span>保護モード</span><span id="side-profile-state" class="guard-state">確認中</span></div>
+		      <div class="guard-row"><span class="guard-icon">✓</span><span>承認判断票</span><span class="guard-state">常時オン</span></div>
+	      <div class="guard-row"><span class="guard-icon">◎</span><span>イベント表示</span><span class="guard-state">監視中</span></div>
+	      <div class="guard-row"><span class="guard-icon">◇</span><span>AIコーチ</span><span id="side-coach-state" class="guard-state">確認中</span></div>
+	    </section>
+	  </aside>
 
-<div class="events">
-  <h2>🔔 直近の安全イベント</h2>
-  <p class="sub">新しい順・消えません。連続しても全部ここに残ります（最大40件）。危険＝赤／許可＝緑。</p>
-  <table><thead><tr><th>時刻</th><th>判定</th><th>種別</th><th>内容・理由</th></tr></thead><tbody id="events-body"></tbody></table>
-</div>
+	  <section class="center-shell shell">
+		    <header class="topbar">
+		      <div><h1 class="hdr">安全イベント / AI回答モニター</h1><p class="topbar-copy">承認する前に、何が起きるかを一緒に確認します。</p></div>
+		      <div class="live"><span class="live-dot" aria-hidden="true"></span><span id="live-label">このPCで見守り中</span></div>
+		    </header>
+		    <section class="profile-strip" aria-label="現在の保護モード">
+		      <span class="profile-mark" aria-hidden="true">⌁</span>
+		      <span><span id="profile-label" class="profile-label">標準モード</span><span id="profile-summary" class="profile-summary">固定ルールと実行フックで守ります。</span></span>
+		      <span id="profile-speed" class="profile-speed">応答速度を優先</span>
+		    </section>
+	    <div class="tabs" role="tablist" aria-label="相談対象">
+	      <button id="tab-event" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="event-panel">安全イベント</button>
+	      <button id="tab-answer" class="tab" type="button" role="tab" aria-selected="false" aria-controls="answer-panel">AI回答</button>
+	    </div>
 
-<div class="coach">
-  <h2 id="coach-title">🧑‍🏫 安全イベントが出た時だけ相談する</h2>
-  <div id="keysetup" class="keysetup" hidden>
-    <div class="ks-title">🔑 AIコーチを使うには「無料キー」の登録が必要です（初回だけ・約1分）</div>
-    <ol class="ks-steps">
-      <li><a class="ks-open" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">① Google AI Studio を開く（ここをクリック）</a> → Google でログイン</li>
-      <li>「Create API key（APIキーを作成）」を押して、出てきた <b>AIza… で始まる文字列</b>をコピー</li>
-      <li>コピーしたキーを下の欄に貼り付けて「登録して有効化」を押す</li>
-    </ol>
-    <div class="ks-row">
-      <input id="keyinput" type="text" inputmode="latin" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="ここに AIza… のキーを貼り付け" />
-      <button id="b-savekey" type="button">登録して有効化</button>
-    </div>
-    <div id="ks-msg" class="ks-msg muted">キーはこのパソコンの中だけに保存されます（外部には送りません・権限600）。</div>
-    <div class="ks-fallback muted">うまくいかない時は <b>「6_AIコーチのキーを登録」</b> をダブルクリックしても登録できます。</div>
-  </div>
-  <div id="target-note" class="disclaim">検索や会話の中身は表示されない場合があります。この画面は、危険なコマンド実行・ファイル書き込み・外部アクセスなどの安全イベントを確認するためのものです。</div>
-  <div id="hi" class="hibanner" style="display:none">⚠️ 自動判定は「高リスク」です。AI が何と言っても、基本は「許可しない」のが安全です。</div>
-  <div id="dredact" class="disclaim" style="display:none">ℹ️ これは d-claude（DeepSeek 版）のセッションです。AI コーチに相談すると、表示中のコマンド本文も Google(Gemini) に送られます（API キーなどの秘密の形だけ自動で伏字）。機微情報を含むコマンドは相談しないでください。</div>
-  <div class="btns">
-    <button id="b-explain">このコマンドをやさしく説明して</button>
-    <button id="b-ok">これ、許可して大丈夫？</button>
-  </div>
-  <div class="qrow">
-    <input id="q" type="text" placeholder="自由に質問（例: これを実行すると何が消える？）" />
-    <button id="b-ask">聞く</button>
-  </div>
-  <div id="answer" class="answer muted">安全イベントが出た時だけ、AI（Gemini）に相談できます。</div>
-  <div class="disclaim">⚠️ Gemini の回答は「参考」です。安全イベントや AI回答の本文を外部の Gemini に送って相談します。あやしい時は実行・採用しないのが安全です。</div>
-  <button id="b-keytoggle" type="button" class="linkbtn" hidden>🔑 キーを登録／変更する</button>
-</div>
+	    <div id="event-panel" class="panel" role="tabpanel" aria-labelledby="tab-event">
+	      <section id="decision" class="decision wait" aria-live="polite" aria-label="承認判断票">
+	        <div class="decision-signal">
+	          <div id="decision-symbol" class="decision-symbol" aria-hidden="true">•</div>
+	          <div>
+	            <div id="decision-eyebrow" class="decision-eyebrow">承認判断票</div>
+	            <div id="decision-headline" class="decision-headline">AIの操作を待っています</div>
+	          </div>
+	          <div id="decision-action" class="decision-action">承認画面が出たら、この場所を見てください</div>
+	        </div>
+	        <div class="decision-body">
+	          <p id="decision-summary" class="decision-summary">操作を検知すると、許可する前に見るポイントをここへまとめます。</p>
+	          <div class="command-box">
+	            <span class="command-label">AIが実行しようとしている内容</span>
+	            <pre id="decision-command" class="command-value">操作を待っています</pre>
+	          </div>
+	          <div class="fact-grid">
+	            <div class="fact"><span class="fact-icon" aria-hidden="true">◇</span><span class="fact-label">何が変わる？</span><span id="decision-impact" class="fact-value">まだ操作はありません</span></div>
+	            <div class="fact"><span class="fact-icon" aria-hidden="true">↶</span><span class="fact-label">元に戻せる？</span><span id="decision-reversible" class="fact-value">—</span></div>
+	            <div class="fact"><span class="fact-icon" aria-hidden="true">◎</span><span class="fact-label">PCの外へ送る？</span><span id="decision-outbound" class="fact-value">—</span></div>
+	          </div>
+	          <div class="checks">
+	            <div class="checks-title">確認するのは、この2点だけ</div>
+	            <div id="decision-checks" class="check-list">
+	              <label class="check-item"><input type="checkbox"><span>AIに頼んだ内容と一致しているか</span></label>
+	              <label class="check-item"><input type="checkbox"><span>対象のファイルや送信先に心当たりがあるか</span></label>
+	            </div>
+	          </div>
+	          <p id="decision-why" class="why">ここでチェックしても操作は実行されません。実際の許可・拒否はAIツール側で選びます。</p>
+	        </div>
+	      </section>
+	      <details class="technical">
+	        <summary>技術的な詳細を見る</summary>
+	        <div id="card" class="card wait"><div class="ctitle">待機中…</div><div class="cmeta">危険操作や確認が必要な安全イベントが出ると、ここに内容が出ます。</div></div>
+	      </details>
+	    </div>
 
-</div>
+	    <div id="answer-panel" class="panel" role="tabpanel" aria-labelledby="tab-answer" hidden>
+	      <div id="answer-card" class="card wait"><div class="ctitle">AI回答は未取得です</div><div class="cmeta">回答本文を hook から取得できた時だけ、ここに表示されます。</div></div>
+	    </div>
+
+	    <div class="coach">
+	      <h2 id="coach-title">AIコーチに相談する</h2>
+	      <div id="keysetup" class="keysetup" hidden>
+	        <div class="ks-title">AIコーチを使うには「無料キー」の登録が必要です（初回だけ・約1分）</div>
+	        <ol class="ks-steps">
+	          <li><a class="ks-open" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio を開く</a> → Google でログイン</li>
+	          <li>「Create API key」を押し、表示された AIza… で始まる文字列をコピー</li>
+	          <li>下の欄に貼り付けて「登録して有効化」を押す</li>
+	        </ol>
+	        <div class="ks-row">
+	          <input id="keyinput" type="text" inputmode="latin" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="ここに AIza… のキーを貼り付け" />
+	          <button id="b-savekey" type="button">登録して有効化</button>
+	        </div>
+	        <div id="ks-msg" class="ks-msg muted">キーはこのパソコンの中だけに保存されます（外部には送りません・権限600）。</div>
+	        <div class="ks-fallback muted">うまくいかない時は「6_AIコーチのキーを登録」をダブルクリックしても登録できます。</div>
+	      </div>
+	      <div id="target-note" class="disclaim">検索や会話の中身は表示されない場合があります。この画面は、危険なコマンド実行・ファイル書き込み・外部アクセスなどの安全イベントを確認するためのものです。</div>
+	      <div id="hi" class="hibanner" style="display:none">自動判定は「高リスク」です。AI が何と言っても、基本は「許可しない」のが安全です。</div>
+	      <div id="dredact" class="disclaim" style="display:none">これは d-claude（DeepSeek 版）のセッションです。AIコーチへ相談すると、表示中のコマンド本文も Google（Gemini）へ送られます。APIキーなどの秘密の形だけ自動で伏字します。</div>
+	      <div class="btns">
+	        <button id="b-explain">このコマンドをやさしく説明して</button>
+	        <button id="b-ok">これ、許可して大丈夫？</button>
+	      </div>
+	      <div class="qrow">
+	        <input id="q" type="text" placeholder="自由に質問（例: これを実行すると何が消える？）" />
+	        <button id="b-ask">聞く</button>
+	      </div>
+	      <div id="answer" class="answer muted">安全イベントが出た時だけ、AI（Gemini）に相談できます。</div>
+	      <div class="disclaim">Geminiの回答は参考です。あやしい時は実行・採用しないのが安全です。</div>
+	      <button id="b-keytoggle" type="button" class="linkbtn" hidden>キーを登録／変更する</button>
+	    </div>
+	  </section>
+
+	  <aside class="right-rail" aria-label="判断と履歴">
+	    <section class="rail-panel shell">
+	      <div class="rail-heading"><h2>あなたの判断</h2><span id="judgement-kicker" class="rail-kicker">待機中</span></div>
+	      <div class="choice-grid">
+	        <div id="choice-allow" class="choice-card allow" aria-current="false"><span class="choice-icon">✓</span><span><span class="choice-title">今回だけ許可</span><span class="choice-copy">この操作だけを1回許可します</span></span></div>
+	        <div id="choice-review" class="choice-card review" aria-current="false"><span class="choice-icon">!</span><span><span class="choice-title">確認できるまで許可しない</span><span class="choice-copy">2点を確認してから判断します</span></span></div>
+	        <div id="choice-deny" class="choice-card deny" aria-current="false"><span class="choice-icon">×</span><span><span class="choice-title">許可しない</span><span class="choice-copy">この操作を実行させません</span></span></div>
+	      </div>
+	      <p class="judgement-note">強調表示はBouncerの目安です。実際の選択はAIツール側で行います。</p>
+	    </section>
+
+	    <section class="events">
+	      <div class="rail-heading"><h2>直近の安全イベント</h2><span id="event-count" class="rail-kicker">0件</span></div>
+	      <p class="sub">新しい順・最大40件。秘密値や会話本文は表示しません。</p>
+	      <div class="events-scroll"><table><thead><tr><th>時刻</th><th>操作と結果</th></tr></thead><tbody id="events-body"></tbody></table></div>
+	    </section>
+
+	    <section class="rail-panel shell">
+	      <div class="rail-heading"><h2>リアルタイム保護</h2><span class="rail-kicker">この画面の状態</span></div>
+		      <div class="protection-list">
+		        <div class="protection-item"><span class="protection-icon">⌁</span><span><span class="protection-title">現在の保護モード</span><span id="profile-copy" class="protection-copy">標準・軽快</span></span><span id="profile-state" class="protection-state">有効</span></div>
+		        <div class="protection-item"><span class="protection-icon">◇</span><span><span class="protection-title">ローカルGateway</span><span id="gateway-copy" class="protection-copy">標準では通信経路に入りません</span></span><span id="gateway-state" class="protection-state">未使用</span></div>
+		        <div class="protection-item"><span class="protection-icon">✓</span><span><span class="protection-title">承認判断票</span><span class="protection-copy">オフライン固定ルール</span></span><span class="protection-state">有効</span></div>
+	        <div class="protection-item"><span class="protection-icon">◎</span><span><span class="protection-title">イベントモニター</span><span class="protection-copy">定期的に安全ログを確認</span></span><span class="protection-state">稼働中</span></div>
+	        <div class="protection-item"><span class="protection-icon">◇</span><span><span class="protection-title">AIコーチ</span><span class="protection-copy">追加の説明と相談</span></span><span id="coach-state" class="protection-state">確認中</span></div>
+	      </div>
+	    </section>
+	  </aside>
+
+	  <p class="footer-note">判断票はオフラインの固定ルールで作ります。AIコーチを使わなくても表示されます。Bouncerは判断を助けますが、安全を保証したり自動承認したりはしません。</p>
+	</main>
+	</div>
 <script>
 const T = new URLSearchParams(location.search).get('t');
 const $ = (id) => document.getElementById(id);
+$('companion').src = '/companion.png?t=' + encodeURIComponent(T);
 let lastCmd = null;
 let lastAnswerText = null;
+let lastCheckSignature = '';
 let activeTarget = 'event';
 let currentState = null;
 let keyPanelOpen = false; // 登録済みでもユーザーが「変更する」を押したら開く
 
 function riskClass(meta){ if(/risk=high/.test(meta))return'high'; if(/risk=medium/.test(meta))return'medium'; return ''; }
+
+function renderProfile(s,g){
+  const p=(s&&s.profile)||{id:'standard',label:'標準モード',short:'推奨・軽快',summary:'固定ルールと実行フックで守ります。',speed:'応答速度を優先',agent:'unknown'};
+  document.body.dataset.profile=p.id||'standard';
+  $('profile-label').textContent=p.label||'標準モード';
+  $('profile-summary').textContent=p.summary||'';
+  $('profile-speed').textContent=p.speed||'';
+  $('profile-copy').textContent=(p.short||'')+' ・ '+(p.agent||'AI');
+  $('profile-state').textContent='有効';
+  $('side-profile-state').textContent=p.id==='maximum'?'最大':(p.id==='assisted'?'AI補助':'標準');
+  $('live-label').textContent=(p.agent&&p.agent!=='unknown'?p.agent.toUpperCase()+'を':'このPCで')+'見守り中';
+  if(!g||!g.required){
+    $('gateway-state').textContent='未使用';
+    $('gateway-copy').textContent='標準では通信経路に入らないため、応答を遅らせません';
+    return;
+  }
+  if(g.kind==='send-inspection'){
+    $('gateway-state').textContent=g.available?'稼働中':'停止中';
+    $('gateway-copy').textContent=g.available
+      ?'DeepSeekへ送る前に秘密情報を検査・マスクしています（ローカルLLM不要）'
+      :'送信検査を確認できない間はOpenCodeを起動しません';
+    return;
+  }
+  if(g.available&&g.localAiAvailable){
+    $('gateway-state').textContent='稼働中';
+    $('gateway-copy').textContent=(g.activeRequests?g.activeRequests+'件を検査中':'Gemmaが応答を検査できます');
+  }else if(g.available){
+    $('gateway-state').textContent='AI待ち';
+    $('gateway-copy').textContent='Gatewayは稼働中ですが、ローカルGemmaを確認できません';
+  }else{
+    $('gateway-state').textContent='停止中';
+    $('gateway-copy').textContent='最大保護モードに必要なGatewayへ接続できません';
+  }
+}
 
 function summarizeObserved(observed){
   if(!observed) return {tool:'', detail:''};
@@ -613,10 +1133,12 @@ function summarizeObserved(observed){
   }catch(e){ return {tool:'', detail:String(observed).slice(0,300)}; }
 }
 
-function setTarget(target){
-  activeTarget = target === 'answer' ? 'answer' : 'event';
-  $('tab-event').classList.toggle('active', activeTarget === 'event');
-  $('tab-answer').classList.toggle('active', activeTarget === 'answer');
+	function setTarget(target){
+	  activeTarget = target === 'answer' ? 'answer' : 'event';
+	  $('tab-event').classList.toggle('active', activeTarget === 'event');
+	  $('tab-answer').classList.toggle('active', activeTarget === 'answer');
+	  $('tab-event').setAttribute('aria-selected', activeTarget === 'event' ? 'true' : 'false');
+	  $('tab-answer').setAttribute('aria-selected', activeTarget === 'answer' ? 'true' : 'false');
   $('event-panel').hidden = activeTarget !== 'event';
   $('answer-panel').hidden = activeTarget !== 'answer';
   updateCoachControls(currentState, true);
@@ -662,6 +1184,8 @@ function updateKeySetup(s){
   $('keysetup').hidden = !show;
   $('b-keytoggle').hidden = !has;
   $('b-keytoggle').textContent = keyPanelOpen ? '🔑 とじる' : '🔑 キーを登録／変更する';
+  $('side-coach-state').textContent = has ? '利用可' : '任意';
+  $('coach-state').textContent = has ? '利用可' : '未設定';
 }
 
 async function saveKey(){
@@ -681,10 +1205,48 @@ async function saveKey(){
       msg.className='ks-msg danger'; msg.textContent=j.text||'登録に失敗しました。';
     }
   }catch(e){ msg.className='ks-msg danger'; msg.textContent='登録に失敗しました。ネットワークや権限を確認してください。'; }
-  finally{ $('b-savekey').disabled=false; }
-}
+	  finally{ $('b-savekey').disabled=false; }
+	}
 
-function renderEventCard(s){
+	function renderDecision(s){
+	  const g = (s && s.approval) || {};
+	  const allowed = ['allow','review','deny','wait'];
+	  const status = allowed.includes(g.status) ? g.status : 'review';
+	  const box = $('decision');
+	  box.className = 'decision ' + status;
+	  $('decision-symbol').textContent = ({allow:'✓',review:'!',deny:'×',wait:'•'})[status];
+	  $('decision-eyebrow').textContent = g.eyebrow || 'いま押すなら';
+	  $('decision-headline').textContent = g.headline || '内容を確認してください';
+	  $('decision-action').textContent = g.action || '分からない時は「許可しない」を選ぶ';
+	  $('decision-summary').textContent = g.summary || '表示中の操作について、影響範囲を確認してから判断してください。';
+	  $('decision-command').textContent = (s && s.cmd) ? s.cmd : '操作を待っています';
+	  $('decision-impact').textContent = g.impact || '分かりません';
+	  $('decision-reversible').textContent = g.reversible || '分かりません';
+	  $('decision-outbound').textContent = g.outbound || '分かりません';
+	  $('decision-why').textContent = g.why || '';
+	  const checks = Array.isArray(g.checks) && g.checks.length ? g.checks.slice(0,2) : ['依頼内容と一致しているか','対象に心当たりがあるか'];
+	  const signature = status + '|' + checks.join('|');
+	  if(signature !== lastCheckSignature){
+	    lastCheckSignature = signature;
+	    const list = $('decision-checks'); list.innerHTML='';
+	    checks.forEach((v)=>{
+	      const label=document.createElement('label'); label.className='check-item';
+	      const input=document.createElement('input'); input.type='checkbox';
+	      const span=document.createElement('span'); span.textContent=String(v);
+	      label.append(input,span); list.append(label);
+	    });
+	  }
+	  const choiceStatus = status === 'wait' ? '' : status;
+	  ['allow','review','deny'].forEach((name)=>{
+	    const el=$('choice-'+name);
+	    const active=name===choiceStatus;
+	    el.classList.toggle('recommended',active);
+	    el.setAttribute('aria-current',active?'true':'false');
+	  });
+	  $('judgement-kicker').textContent = ({allow:'推奨: 今回だけ',review:'推奨: 追加確認',deny:'推奨: 拒否',wait:'待機中'})[status];
+	}
+
+	function renderEventCard(s){
   const card = $('card');
   if(!s.hasCard){
     card.className='card wait'; card.innerHTML='';
@@ -730,12 +1292,18 @@ function renderAnswerCard(s){
 
 async function poll(){
   try{
-    const r = await fetch('/state?t='+encodeURIComponent(T));
+    const [r,gr] = await Promise.all([
+      fetch('/state?t='+encodeURIComponent(T)),
+      fetch('/gateway-state?t='+encodeURIComponent(T))
+    ]);
     if(!r.ok) return;
     const s = await r.json();
-    currentState = s;
-    updateKeySetup(s);
-    renderEventCard(s);
+    const gateway = gr.ok ? await gr.json() : {required:false,available:false};
+		    currentState = s;
+		    renderProfile(s,gateway);
+	    updateKeySetup(s);
+	    renderDecision(s);
+	    renderEventCard(s);
     renderAnswerCard(s);
     // 高リスク時は固定警告（AI が何と言おうと許可しない目安）を出す
     $('hi').style.display = (activeTarget === 'event' && s.hasCard && riskClass(s.meta||'')==='high') ? 'block' : 'none';
@@ -747,17 +1315,21 @@ async function poll(){
     else { updateCoachControls(s, false); }
     // events
     const tb=$('events-body'); tb.innerHTML='';
+    $('event-count').textContent=String((s.events||[]).length)+'件';
     (s.events||[]).forEach(e=>{
       const tr=document.createElement('tr');
       const dec=e.decision||'';
       const high=/risk=high/.test((e.reason||'')+' '+(e.mode||''));
       tr.className = dec==='block'?'block':(high?'high':(dec==='allow'?'allow':''));
-      const icon=dec==='block'?'⛔':(dec==='allow'?'✅':'•');
+      const icon=dec==='block'?'⛔':(dec==='allow'?'✓':'•');
       const sm=summarizeObserved(e.observed);
-      const tdTime=document.createElement('td'); tdTime.className='ev-time'; tdTime.textContent=(e.ts||'').replace('T',' ').replace('Z',''); tr.append(tdTime);
-      const tdDec=document.createElement('td'); tdDec.className='ev-dec'; tdDec.textContent=icon+' '+dec; tr.append(tdDec);
-      const tdTool=document.createElement('td'); tdTool.textContent=sm.tool||e.mode||''; tr.append(tdTool);
+      const rawTime=(e.ts||'').replace('Z','');
+      const tdTime=document.createElement('td'); tdTime.className='ev-time'; tdTime.textContent=rawTime.includes('T')?rawTime.split('T')[1].slice(0,8):rawTime; tr.append(tdTime);
       const tdBody=document.createElement('td');
+      const top=document.createElement('div'); top.className='ev-top';
+      const tool=document.createElement('span'); tool.className='ev-tool'; tool.textContent=sm.tool||e.mode||'操作';
+      const verdict=document.createElement('span'); verdict.className='ev-dec'; verdict.textContent=icon+' '+(dec==='block'?'ブロック':(dec==='allow'?'許可':'確認'));
+      top.append(tool,verdict); tdBody.append(top);
       const cmd=document.createElement('div'); cmd.className='ev-cmd'; cmd.textContent=sm.detail||'(内容なし)'; tdBody.append(cmd);
       if(e.reason){ const rs=document.createElement('div'); rs.className='ev-reason'; rs.textContent=e.reason; tdBody.append(rs); }
       tr.append(tdBody);

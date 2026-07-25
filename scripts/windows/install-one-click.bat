@@ -9,7 +9,7 @@ setlocal EnableDelayedExpansion
 
 echo.
 echo ============================================================
-echo   AI エージェント安全パッケージ  インストーラー v1.13.0
+echo   AI エージェント安全パッケージ  インストーラー v1.14.0
 echo ============================================================
 echo.
 echo 【Windows の警告が出た場合】
@@ -106,7 +106,7 @@ echo   1. ターミナルで workspace フォルダに移動:
 echo      cd %USERPROFILE%\Documents\my-ai-workspace
 echo.
 echo   2. 安全起動コマンドを実行:
-echo      powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1
+echo      powershell -File .ai-safety\hooks\windows\launch-integrated.ps1 -Agent codex -Profile standard
 echo.
 echo   ★ 重要: 素の "codex" コマンドを直接打たないでください。
 echo      launch-codex-safe を使わない場合、このパッケージの

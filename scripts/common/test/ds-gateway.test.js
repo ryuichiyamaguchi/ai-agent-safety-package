@@ -143,6 +143,53 @@ test('masks secrets in messages before forwarding to upstream', async () => {
   assert.strictEqual(fwd.messages[1].content[0].type, 'text');
 });
 
+test('OpenCode mode injects the upstream key from a local file and never forwards its placeholder', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-gateway-auth-'));
+  const authFile = path.join(tempDir, 'auth');
+  fs.writeFileSync(authFile, 'ds-test-key-from-file\n', { mode: 0o600 });
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+  const { server: up, cap } = await startCaptureUpstream();
+  t.after(() => up.close());
+  const gw = createGateway({
+    upstream: `http://127.0.0.1:${up.address().port}`,
+    upstreamAuthFile: authFile,
+    port: 0,
+  });
+  const server = await gw.listen();
+  t.after(() => server.close());
+
+  const res = await request(server.address().port, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: 'Bearer bouncer-local-only',
+      'x-api-key': 'bouncer-local-only',
+    },
+    body: {
+      model: 'deepseek-v4-pro',
+      messages: [{ role: 'user', content: 'hello' }],
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(cap.headers.authorization, 'Bearer ds-test-key-from-file');
+  assert.ok(!JSON.stringify(cap.headers).includes('bouncer-local-only'));
+  assert.strictEqual(cap.headers['x-api-key'], undefined);
+});
+
+test('configured upstream auth file is mandatory and unreadable files fail closed before listen', () => {
+  assert.throws(
+    () => createGateway({
+      upstream: 'http://127.0.0.1:1',
+      upstreamAuthFile: path.join(os.tmpdir(), 'definitely-missing-deepseek-auth'),
+      port: 0,
+    }),
+    /auth file/i,
+  );
+});
+
 test('passes through JSON without messages/system unchanged', async () => {
   let received = null;
   const up = await startUpstream((req,res)=>{ let b=''; req.on('data',c=>b+=c); req.on('end',()=>{received=b; res.writeHead(200); res.end('{}');}); });

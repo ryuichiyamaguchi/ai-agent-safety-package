@@ -32,7 +32,7 @@ if ($Workspace -eq $packageRoot) {
 # B-2: workspace の親ディレクトリが存在しない場合でも自動作成する。
 New-Item -ItemType Directory -Force -Path $Workspace | Out-Null
 
-$homeSafety = Join-Path $HOME ".ai-safety"
+$homeSafety = if ($env:AI_SAFE_HOME_ROOT) { $env:AI_SAFE_HOME_ROOT } else { Join-Path $HOME ".ai-safety" }
 $backupDir = Join-Path $homeSafety ("backups\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 
 Write-Host ("Installing for platform: " + $Platform)
@@ -179,6 +179,20 @@ if (Test-Path -LiteralPath $commonDest) {
 New-Item -ItemType Directory -Force -Path $commonDest | Out-Null
 Copy-Item -Path (Join-Path $packageRoot "scripts\common\*") -Destination $commonDest -Recurse -Force
 
+# Bouncer最大保護モード用のローカルGateway。標準モードでは起動しないため、
+# ローカルLLMを動かせないPCでも標準モードはそのまま利用できる。
+$bouncerSrc = Join-Path $packageRoot "bouncer-gateway"
+if (Test-Path -LiteralPath $bouncerSrc) {
+    $bouncerDest = Join-Path $Workspace ".ai-safety\bouncer"
+    if (Test-Path -LiteralPath $bouncerDest) {
+        $relativeName = ($bouncerDest -replace "[:\\\/]+", "_")
+        New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+        Copy-Item -LiteralPath $bouncerDest -Destination (Join-Path $backupDir $relativeName) -Recurse -Force
+        Remove-Item -LiteralPath $bouncerDest -Recurse -Force
+    }
+    Copy-Item -LiteralPath $bouncerSrc -Destination $bouncerDest -Recurse -Force
+}
+
 # Defensive cleanup: remove stale foreign-OS hook dirs on single-platform install.
 if ($Platform -eq 'win') {
     $staleMac = Join-Path $Workspace ".ai-safety\hooks\macos"
@@ -202,6 +216,15 @@ Copy-WithBackup (Join-Path $packageRoot "configs\gemini\settings.windows.json") 
 Copy-WithBackup (Join-Path $packageRoot "configs\gemini\policies\safety.toml") (Join-Path $Workspace ".gemini\policies\safety.toml")
 Copy-WithBackup (Join-Path $packageRoot "workspace-template\aiexclude.template") (Join-Path $Workspace ".aiexclude")
 
+# 各agentのプロジェクト指示。利用者が既に編集している場合は上書きしない。
+foreach ($guide in @("AGENTS.md", "CLAUDE.md", "GEMINI.md")) {
+    $guideSrc = Join-Path $packageRoot ("workspace-template\" + $guide)
+    $guideDest = Join-Path $Workspace $guide
+    if ((Test-Path -LiteralPath $guideSrc) -and -not (Test-Path -LiteralPath $guideDest)) {
+        Copy-Item -LiteralPath $guideSrc -Destination $guideDest -Force
+    }
+}
+
 # 配布スキルを workspace の .claude\skills\ に配置。d-claude / claude が起動時に
 # ${workspace}\.claude\skills 配下を読み込むので、ここに置けば受講者もそのまま使える。
 # リポジトリ側は dist-skills\ に置く（.gitignore が .claude/ を除外するため）。
@@ -210,7 +233,9 @@ Copy-WithBackup (Join-Path $packageRoot "workspace-template\aiexclude.template")
 $skillsSrc = Join-Path $packageRoot "workspace-template\dist-skills"
 if (Test-Path -LiteralPath $skillsSrc) {
     $skillsDest = Join-Path $Workspace ".claude\skills"
+    $openCodeSkillsDest = Join-Path $Workspace ".opencode\skills"
     New-Item -ItemType Directory -Force -Path $skillsDest | Out-Null
+    New-Item -ItemType Directory -Force -Path $openCodeSkillsDest | Out-Null
     Get-ChildItem -LiteralPath $skillsSrc -Directory -Force | ForEach-Object {
         $skillDestDir = Join-Path $skillsDest $_.Name
         if (Test-Path -LiteralPath $skillDestDir) {
@@ -220,8 +245,17 @@ if (Test-Path -LiteralPath $skillsSrc) {
             Remove-Item -LiteralPath $skillDestDir -Recurse -Force
         }
         Copy-Item -LiteralPath $_.FullName -Destination $skillDestDir -Recurse -Force
+
+        $openCodeSkillDestDir = Join-Path $openCodeSkillsDest $_.Name
+        if (Test-Path -LiteralPath $openCodeSkillDestDir) {
+            $relativeName = ($openCodeSkillDestDir -replace "[:\\\/]+", "_")
+            New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+            Copy-Item -LiteralPath $openCodeSkillDestDir -Destination (Join-Path $backupDir $relativeName) -Recurse -Force
+            Remove-Item -LiteralPath $openCodeSkillDestDir -Recurse -Force
+        }
+        Copy-Item -LiteralPath $_.FullName -Destination $openCodeSkillDestDir -Recurse -Force
     }
-    Write-Host "配布スキルを配置しました: $skillsDest"
+    Write-Host "配布スキルを配置しました: $skillsDest / $openCodeSkillsDest"
 }
 
 # A-1: .gitignore.template を workspace ルートに .gitignore としてコピーする。
@@ -285,27 +319,31 @@ if ($Platform -eq 'win') {
 
     # さらに PATH 登録して `codex-safe` / `monitor` を `.\` 無し・どのフォルダからでも使えるようにする。
     # 失敗してもインストール本体は止めない(PATH 登録は付加価値)。
-    $setupCmds = Join-Path $packageRoot "scripts\windows\setup-commands.ps1"
-    if (Test-Path -LiteralPath $setupCmds) {
-        try {
-            & $setupCmds -Workspace $Workspace
-        } catch {
-            Write-Warning ("ターミナルコマンドの PATH 登録に失敗しました(スキップ): " + $_.Exception.Message)
-            Write-Host "  後で手動登録するには: powershell -ExecutionPolicy Bypass -File `"$Workspace\.ai-safety\hooks\windows\setup-commands.ps1`" -Workspace `"$Workspace`""
+    if ($env:AI_SAFE_TEST_MODE -ne '1') {
+        $setupCmds = Join-Path $packageRoot "scripts\windows\setup-commands.ps1"
+        if (Test-Path -LiteralPath $setupCmds) {
+            try {
+                & $setupCmds -Workspace $Workspace
+            } catch {
+                Write-Warning ("ターミナルコマンドの PATH 登録に失敗しました(スキップ): " + $_.Exception.Message)
+                Write-Host "  後で手動登録するには: powershell -ExecutionPolicy Bypass -File `"$Workspace\.ai-safety\hooks\windows\setup-commands.ps1`" -Workspace `"$Workspace`""
+            }
         }
-    }
 
-    # 既存PCに残った npm グローバル版や PowerShell プロファイル関数の d-claude は
-    # 正規シムより優先されることがある。更新ボタンだけで直せるよう、削除ではなく
-    # バックアップ退避/コメントアウトを自動実行する（失敗してもインストール本体は継続）。
-    $cleanupDClaude = Join-Path $packageRoot "scripts\windows\野良d-claudeを退治.ps1"
-    if (Test-Path -LiteralPath $cleanupDClaude) {
-        try {
-            & $cleanupDClaude -Workspace $Workspace -Yes
-        } catch {
-            Write-Warning ("野良 d-claude の自動退避に失敗しました(スキップ): " + $_.Exception.Message)
-            Write-Host "  必要なら後で スタート\7_野良d-claudeを退治.bat を実行してください。"
+        # 既存PCに残った npm グローバル版や PowerShell プロファイル関数の d-claude は
+        # 正規シムより優先されることがある。更新ボタンだけで直せるよう、削除ではなく
+        # バックアップ退避/コメントアウトを自動実行する。
+        $cleanupDClaude = Join-Path $packageRoot "scripts\windows\野良d-claudeを退治.ps1"
+        if (Test-Path -LiteralPath $cleanupDClaude) {
+            try {
+                & $cleanupDClaude -Workspace $Workspace -Yes
+            } catch {
+                Write-Warning ("野良 d-claude の自動退避に失敗しました(スキップ): " + $_.Exception.Message)
+                Write-Host "  必要なら後で スタート\7_野良d-claudeを退治.bat を実行してください。"
+            }
         }
+    } else {
+        Write-Host "TEST MODE: PATH登録と既存d-claudeの整理をスキップしました。"
     }
 }
 

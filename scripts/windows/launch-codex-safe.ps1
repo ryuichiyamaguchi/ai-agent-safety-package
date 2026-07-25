@@ -1,7 +1,7 @@
 ﻿param(
     [string]$Workspace = (Get-Location).Path,
     [string]$Prompt = "",
-    [string]$AutoFlag = ""   # "--auto" を受け取る位置引数。Safe Auto Mode を有効化する。
+    [switch]$Auto   # "--auto" / "-Auto" で Safe Auto Mode を有効化する。
 )
 
 $ErrorActionPreference = "Stop"
@@ -136,7 +136,7 @@ if ($env:AI_SAFE_DRY_RUN -ne '1' -and -not (Test-Path -LiteralPath $safeCodexAut
 # した時だけ確認）。config/safe.config.toml 側の approvals_reviewer=auto_review が承認要求を
 # 二次レビューする。決定的 deny は guard-bash が approval 非依存で担う。
 $approval = 'on-request'
-if ($AutoFlag -eq '--auto') {
+if ($Auto) {
     # --auto は隔離結果に関わらず on-failure(自走)。危険は hook(guard-bash) が止める。
     $approval = 'on-failure'
     $doctorPath = if ($env:AI_SAFE_DOCTOR) { $env:AI_SAFE_DOCTOR } else { Join-Path $PSScriptRoot 'doctor.ps1' }

@@ -161,6 +161,16 @@ function Test-IsSafeLoopbackFetch([string]$Command) {
     return $false
 }
 
+function Test-IsScopedGeneratedCleanup([string]$Command) {
+    if ([string]::IsNullOrWhiteSpace($Command)) { return $false }
+    $targets = '(node_modules|build|dist|coverage|target|\.next|\.turbo)'
+    $unix = '^rm\s+(-[A-Za-z]*r[A-Za-z]*|--recursive)(\s+(-f|--force))?\s+(\.\\|\.\/)?' +
+             $targets + '(\s+(\.\\|\.\/)?' + $targets + ')*\s*$'
+    $powerShell = '^Remove-Item\s+(-Recurse\s+(-Force\s+)?|-Force\s+-Recurse\s+)(\.\\|\.\/)?' +
+                  $targets + '(\s*,?\s*(\.\\|\.\/)?' + $targets + ')*\s*$'
+    return ($Command -match $unix -or $Command -match $powerShell)
+}
+
 try {
     . (Join-Path $PSScriptRoot "lib\SafetyPolicy.ps1")
     . (Join-Path $PSScriptRoot "lib\Explainer.ps1")
@@ -186,6 +196,9 @@ try {
     # loopback（localhost/127.0.0.1/::1）宛ての単純 fetch は許可。外部宛ては下の decisive deny に落とす。
     if (Test-IsSafeLoopbackFetch $cmd) {
         Allow-Action $inputObj "bash" "loopback fetch to localhost permitted" $cmd $policy
+    }
+    if (Test-IsScopedGeneratedCleanup $cmd) {
+        Ask-Action $inputObj "bash" "プロジェクト内の生成物をまとめて削除します。対象を確認できた場合だけ、今回だけ許可してください" $cmd $policy
     }
 
     $danger = Find-RegexMatch $cmd $policy.dangerousCommandRegex "dangerous command"

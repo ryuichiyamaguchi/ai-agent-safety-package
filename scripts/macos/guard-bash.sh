@@ -23,11 +23,22 @@ is_safe_loopback_fetch() {
   return 0
 }
 
+is_scoped_generated_cleanup() {
+  local cmd
+  cmd="$(_extract_json_field "command")"
+  [ -n "$cmd" ] || return 1
+  printf '%s' "$cmd" | LC_ALL=C grep -qE \
+    '^rm[[:space:]]+(-[A-Za-z]*r[A-Za-z]*|--recursive)([[:space:]]+(-f|--force))?[[:space:]]+(\./)?(node_modules|build|dist|coverage|target|\.next|\.turbo)([[:space:]]+(\./)?(node_modules|build|dist|coverage|target|\.next|\.turbo))*[[:space:]]*$'
+}
+
 has_sensitive_text && block "sensitive pattern in shell command"
 has_protected_path && block "protected path referenced in shell command"
 # loopback（localhost/127.0.0.1/::1）宛ての単純 fetch は許可。外部宛ては下の decisive deny に落とす。
 if is_safe_loopback_fetch; then
   allow "loopback fetch to localhost permitted"
+fi
+if is_scoped_generated_cleanup; then
+  ask "プロジェクト内の生成物をまとめて削除します。対象を確認できた場合だけ、今回だけ許可してください"
 fi
 has_dangerous_command && block "dangerous shell command matched"
 

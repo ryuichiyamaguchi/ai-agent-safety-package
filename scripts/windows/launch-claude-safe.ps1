@@ -28,8 +28,12 @@ $env:AI_SAFE_LOG_DIR = Join-Path $HOME ".ai-safety\logs"
 # ただし d-claude (DeepSeek 駆動) は gateway 経由でこのスクリプトを呼び、DeepSeek キーと
 # Gateway の BASE_URL/MODEL を「使う」ために渡してくる。その経路では gateway が
 # DS_CLAUDE_MODE=1 を立てるので Remove をスキップする (消すと "not logged in" になる)。
-if ($env:DS_CLAUDE_MODE -ne '1') {
+if ($env:DS_CLAUDE_MODE -ne '1' -and $env:BOUNCER_INTEGRATED_MODE -ne '1') {
     foreach ($v in @('ANTHROPIC_AUTH_TOKEN','ANTHROPIC_BASE_URL','ANTHROPIC_MODEL','ANTHROPIC_DEFAULT_HAIKU_MODEL','ANTHROPIC_CUSTOM_MODEL_OPTION')) {
+        if (Test-Path "Env:\$v") { Remove-Item "Env:\$v" -ErrorAction SilentlyContinue }
+    }
+} elseif ($env:BOUNCER_INTEGRATED_MODE -eq '1') {
+    foreach ($v in @('ANTHROPIC_AUTH_TOKEN','ANTHROPIC_MODEL','ANTHROPIC_DEFAULT_HAIKU_MODEL','ANTHROPIC_CUSTOM_MODEL_OPTION')) {
         if (Test-Path "Env:\$v") { Remove-Item "Env:\$v" -ErrorAction SilentlyContinue }
     }
 }
