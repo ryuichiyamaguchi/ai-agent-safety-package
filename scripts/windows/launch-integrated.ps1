@@ -1,6 +1,6 @@
 ﻿param(
     [string]$Workspace = "$env:USERPROFILE\Documents\my-ai-workspace",
-    [ValidateSet('codex','claude','opencode')]
+    [ValidateSet('codex','claude','opencode','d-claude')]
     [string]$Agent = 'codex',
     [ValidateSet('standard','assisted','maximum')]
     [string]$Profile = 'standard',
@@ -15,6 +15,7 @@ $logDir = if ($env:AI_SAFE_LOG_DIR) { $env:AI_SAFE_LOG_DIR } else { Join-Path $e
 
 if ($Agent -eq 'codex' -and $Profile -ne 'standard') { throw 'Codex は standard モードで起動してください。' }
 if ($Agent -eq 'opencode' -and $Profile -ne 'standard') { throw 'OpenCode は standard モードで起動してください。' }
+if ($Agent -eq 'd-claude' -and $Profile -ne 'standard') { throw 'd-claude は standard モードで起動してください。' }
 if ($WebSearch -and $Agent -ne 'opencode') { throw '-WebSearch は OpenCode だけで指定できます。' }
 if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw "作業フォルダが見つかりません: $Workspace" }
 
@@ -29,7 +30,7 @@ if ($env:AI_SAFE_DRY_RUN -eq '1') {
     Write-Output '  monitor:   enabled'
     if ($Profile -eq 'maximum') {
         Write-Output '  gateway:   http://127.0.0.1:8787 (local only)'
-    } elseif ($Agent -eq 'opencode') {
+    } elseif ($Agent -eq 'opencode' -or $Agent -eq 'd-claude') {
         Write-Output '  gateway:   http://127.0.0.1:8788 (send inspection, no local LLM)'
     } else {
         Write-Output '  gateway:   bypassed (AIの応答速度を優先)'
@@ -109,10 +110,33 @@ try {
             & (Join-Path $hooks 'opencode\launch-opencode-deepseek.ps1') -Workspace $Workspace -WebSearch:$WebSearch
             $exitCode = $LASTEXITCODE
         }
+        'd-claude:standard' {
+            $consent = Join-Path $hooks 'launch-deepseek-safe.ps1'
+            $authFile = Join-Path $env:USERPROFILE '.deepseek-claude\auth'
+            $deepseekGateway = Join-Path $hooks 'deepseek\launch-deepseek-gateway.ps1'
+            if (-not (Test-Path -LiteralPath $consent -PathType Leaf)) {
+                throw "DeepSeek同意ゲートが見つかりません: $consent"
+            }
+            if (-not (Test-Path -LiteralPath $deepseekGateway -PathType Leaf)) {
+                throw "DeepSeek送信検査Gatewayが見つかりません: $deepseekGateway"
+            }
+            if (-not (Test-Path -LiteralPath $authFile -PathType Leaf)) {
+                throw 'DeepSeek APIキーが未登録です。スタート\（上級）1_DeepSeekキーを登録 を先に実行してください。'
+            }
+            & $powerShell.Source -NoProfile -ExecutionPolicy Bypass -File $consent -ConsentOnly
+            if ($LASTEXITCODE -ne 0) { throw 'DeepSeekへの送信をキャンセルしました。' }
+            $deepseekKey = ([System.IO.File]::ReadAllText($authFile)).Trim()
+            if (-not $deepseekKey) { throw 'DeepSeek APIキーの登録ファイルが空です。登録し直してください。' }
+            $env:ANTHROPIC_AUTH_TOKEN = $deepseekKey
+            $env:ANTHROPIC_MODEL = 'deepseek-v4-pro'
+            $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'deepseek-v4-flash'
+            & $powerShell.Source -NoProfile -ExecutionPolicy Bypass -File $deepseekGateway -Workspace $Workspace
+            $exitCode = $LASTEXITCODE
+        }
     }
     exit $exitCode
 } finally {
     if ($gatewayProc -and -not $gatewayProc.HasExited) { Stop-Process -Id $gatewayProc.Id -Force -ErrorAction SilentlyContinue }
     if ($monitorProc -and -not $monitorProc.HasExited) { Stop-Process -Id $monitorProc.Id -Force -ErrorAction SilentlyContinue }
-    Remove-Item Env:\BOUNCER_INTEGRATED_MODE, Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
+    Remove-Item Env:\BOUNCER_INTEGRATED_MODE, Env:\ANTHROPIC_BASE_URL, Env:\ANTHROPIC_AUTH_TOKEN, Env:\ANTHROPIC_MODEL, Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL, Env:\DS_CLAUDE_MODE -ErrorAction SilentlyContinue
 }

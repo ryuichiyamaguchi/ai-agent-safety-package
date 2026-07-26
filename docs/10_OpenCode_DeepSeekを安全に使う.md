@@ -1,6 +1,6 @@
 # OpenCode + DeepSeek を安全に使う
 
-統合版の標準経路は **OpenCode + DeepSeek V4 Pro** です。補助処理・サブエージェントには **DeepSeek V4 Flash** を使います。従来の `d-claude` は比較・互換用の上級経路として残しています。
+統合版の標準経路は **OpenCode + DeepSeek V4 Pro** です。補助処理・サブエージェントには **DeepSeek V4 Flash** を使います。Claude Codeの操作感を使いたい場合は、同じ統合メニューから **d-claude + DeepSeek** を選べます。
 
 ## この経路で何を守るか
 
@@ -52,6 +52,7 @@ OpenCodeとDeepSeekはいずれも第三者サービスです。利用規約、�
 
 - `OpenCode + DeepSeek V4 Pro（Web検索OFF）`：通常はこちら
 - `OpenCode + DeepSeek V4 Pro（Web検索を確認制でON）`：外部検索が必要な時だけ
+- `d-claude + DeepSeek V4 Pro`：Claude Codeの操作感が必要な場合。送信検査とBouncer監視はON
 
 コマンドで起動する場合：
 
@@ -123,9 +124,29 @@ dry-runにはキー本文を表示しません。
 
 その後、DeepSeek管理画面でも使わないキーを失効させてください。OpenCode自体をアンインストールしても、Safety Packageのworkspace、監査ログ、DeepSeek側のキーは自動削除されません。
 
-## 従来の d-claude
+## d-claudeを統合版から起動する
 
-`d-claude` は削除していません。Claude Codeの操作感でDeepSeekを使う互換・比較経路として残しています。ただし新規利用の標準はOpenCode経路です。
+`スタート/0_Bouncer統合版を起動` の `d-claude + DeepSeek V4 Pro` を選びます。統合版は次をまとめて起動します。
+
+- DeepSeekへの送信同意確認
+- 送信前の秘密情報検査・マスキングGateway
+- Claude Codeの安全フック
+- `AI_SAFE_AGENT=d-claude` として識別されるBouncerモニター
+- グレー操作をDeepSeek自身ではなく独立したGeminiで確認する二鍵判定
+
+Macで直接起動する場合:
+
+```bash
+bash .ai-safety/hooks/macos/launch-integrated.sh "$(pwd)" d-claude standard
+```
+
+Windowsで直接起動する場合:
+
+```powershell
+powershell -File .ai-safety\hooks\windows\launch-integrated.ps1 -Workspace . -Agent d-claude -Profile standard
+```
+
+DeepSeek APIキーが未登録の場合は、先に `スタート/（上級）1_DeepSeekキーを登録` を実行します。新規利用の標準は引き続きOpenCode経路ですが、d-claudeも統合版の正式な監視対象です。
 
 ## 限界
 

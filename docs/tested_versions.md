@@ -97,7 +97,8 @@ mismatch が出た場合、配布 URL すり替えや手動改変・破損の可
 > `permission.asked` をBouncerへ表示し、非対話モードの `reject` を監査ログへ反映。
 > 承認対象コマンドは実行されず、プラグインready・承認要求・回答の一連を確認。
 > OpenCodeの複合読み取りコマンドを、検索対象・検索語・件数制限・変更有無・外部送信有無まで固定ルールで説明。右パネルから全コマンドと意味を再展開できることを1580×1100の実ブラウザ表示で確認。
-> Geminiの `finishReason=MAX_TOKENS` は未完成回答として破棄し、出力上限を4096へ拡大。Nodeテスト113件が全件成功。
+> Geminiの `finishReason=MAX_TOKENS` は未完成回答として破棄し、出力上限を4096へ拡大。Nodeテスト118件が全件成功。
+> d-claudeをMac / Windows統合ランチャーの正式な選択肢へ追加。`AI_SAFE_AGENT=d-claude` としてモニターを起動し、送信検査Gateway必須表示、Claude安全フック経由、Mac dry-runを確認。
 
 ### v1.14.0（Bouncer統合版、Version SSOT 統一 + release-version-check.sh 新規）
 

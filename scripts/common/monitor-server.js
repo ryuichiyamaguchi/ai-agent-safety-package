@@ -261,7 +261,7 @@ function profileInfo() {
 
 function readGatewayState() {
   const profile = profileInfo();
-  if (profile.agent === 'opencode') {
+  if (profile.agent === 'opencode' || profile.agent === 'd-claude') {
     return new Promise((resolve) => {
       let settled = false;
       const finish = (value) => {

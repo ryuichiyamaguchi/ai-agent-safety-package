@@ -20,9 +20,11 @@ echo 3 Claude   Assisted
 echo 4 Claude   Maximum ^(local Gemma required^)
 echo 5 OpenCode + DeepSeek V4 Pro ^(web search off^)
 echo 6 OpenCode + DeepSeek V4 Pro ^(web search opt-in^)
+echo 7 d-claude + DeepSeek V4 Pro ^(Claude UX, send inspection, monitored^)
 echo.
-choice /c 123456 /n /m "Select [1-6]: "
+choice /c 1234567 /n /m "Select [1-7]: "
 
+if errorlevel 7 goto d_claude
 if errorlevel 6 goto opencode_web
 if errorlevel 5 goto opencode
 if errorlevel 4 goto claude_max
@@ -30,6 +32,9 @@ if errorlevel 3 goto claude_assisted
 if errorlevel 2 goto claude
 goto codex
 
+:d_claude
+powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent d-claude -Profile standard
+goto done
 :opencode_web
 powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent opencode -Profile standard -WebSearch
 goto done

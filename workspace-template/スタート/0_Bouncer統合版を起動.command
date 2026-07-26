@@ -21,6 +21,7 @@ echo "3) Claude  AI補助モード"
 echo "4) Claude  最大保護モード（ローカルGemmaが必要）"
 echo "5) OpenCode + DeepSeek V4 Pro（送信検査・Web検索OFF）"
 echo "6) OpenCode + DeepSeek V4 Pro（Web検索を確認制でON）"
+echo "7) d-claude + DeepSeek V4 Pro（Claudeの操作感・送信検査・監視ON）"
 echo
 read -r -p "番号を入力してください [1]: " choice
 choice="${choice:-1}"
@@ -32,8 +33,9 @@ case "$choice" in
   4) exec bash "$LAUNCHER" "$WORKSPACE" claude maximum ;;
   5) exec bash "$LAUNCHER" "$WORKSPACE" opencode standard ;;
   6) exec bash "$LAUNCHER" "$WORKSPACE" opencode standard --websearch ;;
+  7) exec bash "$LAUNCHER" "$WORKSPACE" d-claude standard ;;
   *)
-    echo "1〜6の番号を選んでください。"
+    echo "1〜7の番号を選んでください。"
     read -r -p "Enterで閉じます: " _
     exit 2
     ;;

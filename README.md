@@ -11,6 +11,7 @@ Codex CLI、Claude Code、OpenCode、Gemini CLI を「あなたを守る安全�
 - 右パネルのコマンド履歴から、今日の全コマンドと意味・影響を何度でも展開して確認
 - AIコーチがトークン上限で途切れた場合は未完成文を表示せず、固定ルールの解説を案内
 - Bouncer犬が待機・許可目安・要確認・拒否・AI確認中の状態に連動し、吹き出しで次にすべきことを案内
+- `d-claude + DeepSeek` をMac / Windowsの統合メニューへ追加し、送信検査Gateway・Claude安全フック・Bouncerモニターを同時起動
 - 「今回だけ許可／常に許可／許可しない」の回答も監査履歴へ記録
 - APIキー、セッションID、メッセージIDはBouncerの表示・監査ログに保存しない
 
@@ -22,7 +23,7 @@ Codex CLI、Claude Code、OpenCode、Gemini CLI を「あなたを守る安全�
 - DeepSeek送信検査Gatewayが実キーをOpenCodeから隔離し、秘密情報を検査
 - Web検索は既定OFF。明示的に有効化した時も確認制
 - 統合起動時はプロジェクト固有のOpenCode設定と外部プラグインを無効化し、安全設定の迂回を防止
-- 従来の`d-claude`は上級の互換・比較経路として維持
+- `d-claude`も統合メニューから起動でき、モニター上では独立した監視対象として表示
 
 詳しくは [docs/10_OpenCode_DeepSeekを安全に使う.md](docs/10_OpenCode_DeepSeekを安全に使う.md) を参照してください。
 

@@ -82,3 +82,85 @@ test('Windows DeepSeek launcher has same-package stale gateway cleanup before St
   assert.match(ps1, /Win32_Process/);
   assert.ok(ps1.indexOf('Stop-StaleGateway -Port') < ps1.indexOf('Start-Process node'));
 });
+
+test('macOS integrated launcher includes monitored d-claude through the existing safe gateway', () => {
+  const root = path.join(__dirname, '..', '..', '..');
+  const script = fs.readFileSync(path.join(root, 'scripts', 'macos', 'launch-integrated.sh'), 'utf8');
+  assert.match(script, /codex\|claude\|opencode\|d-claude/);
+  assert.match(script, /d-claude:standard/);
+  assert.match(script, /consent=.*launch-deepseek-safe[.]sh/);
+  assert.match(script, /bash "\$consent" --consent-only/);
+  assert.match(script, /deepseek[/]launch-deepseek-gateway[.]sh/);
+  assert.match(script, /ANTHROPIC_AUTH_TOKEN/);
+  assert.doesNotMatch(script, /d-claude:standard[\s\S]{0,500}\bclaude\b(?:\s|$)/, '統合経路から素のclaudeを直接起動しない');
+});
+
+test('macOS integrated d-claude dry-run reports monitor and send inspection', () => {
+  const root = path.join(__dirname, '..', '..', '..');
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'integrated-d-claude-'));
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'integrated-d-claude-home-'));
+  try {
+    const hooks = path.join(workspace, '.ai-safety', 'hooks', 'macos');
+    fs.mkdirSync(hooks, { recursive: true });
+    const launcher = path.join(hooks, 'launch-integrated.sh');
+    const monitor = path.join(hooks, 'open-monitor.sh');
+    fs.copyFileSync(path.join(root, 'scripts', 'macos', 'launch-integrated.sh'), launcher);
+    fs.writeFileSync(monitor, '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+    fs.chmodSync(launcher, 0o755);
+    const result = require('node:child_process').spawnSync('bash', [launcher, workspace, 'd-claude', 'standard'], {
+      env: { ...process.env, HOME: fakeHome, AI_SAFE_DRY_RUN: '1' },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /agent:\s+d-claude/);
+    assert.match(result.stdout, /monitor:\s+enabled/);
+    assert.match(result.stdout, /127[.]0[.]0[.]1:8788.*send inspection/);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+});
+
+test('macOS integrated d-claude starts monitor, consent gate, and safe gateway together', () => {
+  const root = path.join(__dirname, '..', '..', '..');
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'integrated-d-claude-live-'));
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'integrated-d-claude-live-home-'));
+  try {
+    const hooks = path.join(workspace, '.ai-safety', 'hooks', 'macos');
+    fs.mkdirSync(path.join(hooks, 'deepseek'), { recursive: true });
+    fs.mkdirSync(path.join(fakeHome, '.deepseek-claude'), { recursive: true });
+    fs.writeFileSync(path.join(fakeHome, '.deepseek-claude', 'auth'), 'test-key-never-log\n', { mode: 0o600 });
+    fs.copyFileSync(path.join(root, 'scripts', 'macos', 'launch-integrated.sh'), path.join(hooks, 'launch-integrated.sh'));
+    fs.chmodSync(path.join(hooks, 'launch-integrated.sh'), 0o755);
+    fs.writeFileSync(path.join(hooks, 'open-monitor.sh'), [
+      '#!/usr/bin/env bash',
+      `printf '%s' "$AI_SAFE_AGENT" > "${path.join(workspace, 'monitor-agent')}"`,
+    ].join('\n') + '\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(hooks, 'launch-deepseek-safe.sh'), [
+      '#!/usr/bin/env bash',
+      '[ "$1" = "--consent-only" ] || exit 9',
+      `printf consent > "${path.join(workspace, 'consent-called')}"`,
+    ].join('\n') + '\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(hooks, 'deepseek', 'launch-deepseek-gateway.sh'), [
+      '#!/usr/bin/env bash',
+      '[ -n "$ANTHROPIC_AUTH_TOKEN" ] || exit 8',
+      '[ "$ANTHROPIC_MODEL" = "deepseek-v4-pro" ] || exit 7',
+      `printf gateway > "${path.join(workspace, 'gateway-called')}"`,
+    ].join('\n') + '\n', { mode: 0o755 });
+
+    const result = require('node:child_process').spawnSync('bash', [
+      path.join(hooks, 'launch-integrated.sh'), workspace, 'd-claude', 'standard',
+    ], {
+      env: { ...process.env, HOME: fakeHome, AI_SAFE_LOG_DIR: path.join(fakeHome, 'logs') },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.readFileSync(path.join(workspace, 'monitor-agent'), 'utf8'), 'd-claude');
+    assert.equal(fs.readFileSync(path.join(workspace, 'consent-called'), 'utf8'), 'consent');
+    assert.equal(fs.readFileSync(path.join(workspace, 'gateway-called'), 'utf8'), 'gateway');
+    assert.doesNotMatch(result.stdout + result.stderr, /test-key-never-log/, 'キー本文をログへ出さない');
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+});

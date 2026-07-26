@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  launch-integrated.sh [workspace] [codex|claude|opencode] [standard|assisted|maximum] [--websearch]
+  launch-integrated.sh [workspace] [codex|claude|opencode|d-claude] [standard|assisted|maximum] [--websearch]
 
 Profiles:
   standard  Safety hooks + approval monitor. No local LLM is required.
@@ -14,6 +14,10 @@ Profiles:
 OpenCode:
   standard only. DeepSeek V4 Pro/Flash is routed through the send inspection gateway.
   Web search is off by default; --websearch makes it approval-based.
+
+d-claude:
+  standard only. Claude Code UX with DeepSeek, safety hooks, Bouncer monitor,
+  and the same fail-closed send inspection gateway.
 EOF
 }
 
@@ -23,9 +27,9 @@ profile="${3:-standard}"
 extra="${4:-}"
 
 case "$agent" in
-  codex|claude|opencode) ;;
+  codex|claude|opencode|d-claude) ;;
   -h|--help) usage; exit 0 ;;
-  *) echo "agent must be codex, claude, or opencode" >&2; usage >&2; exit 2 ;;
+  *) echo "agent must be codex, claude, opencode, or d-claude" >&2; usage >&2; exit 2 ;;
 esac
 
 case "$profile" in
@@ -41,6 +45,10 @@ if [ "$agent" = "codex" ] && [ "$profile" != "standard" ]; then
 fi
 if [ "$agent" = "opencode" ] && [ "$profile" != "standard" ]; then
   echo "OpenCode は standard モードで起動してください。" >&2
+  exit 2
+fi
+if [ "$agent" = "d-claude" ] && [ "$profile" != "standard" ]; then
+  echo "d-claude は standard モードで起動してください。" >&2
   exit 2
 fi
 if [ -n "$extra" ] && { [ "$agent" != "opencode" ] || [ "$extra" != "--websearch" ]; }; then
@@ -77,7 +85,7 @@ if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
   echo "  monitor:   enabled"
   if [ "$profile" = "maximum" ]; then
     echo "  gateway:   http://127.0.0.1:8787 (local only)"
-  elif [ "$agent" = "opencode" ]; then
+  elif [ "$agent" = "opencode" ] || [ "$agent" = "d-claude" ]; then
     echo "  gateway:   http://127.0.0.1:8788 (send inspection, no local LLM)"
   else
     echo "  gateway:   bypassed (AIの応答速度を優先)"
@@ -144,5 +152,23 @@ case "$agent:$profile" in
     ;;
   opencode:standard)
     bash "$hooks/opencode/launch-opencode-deepseek.sh" "$workspace" "$extra"
+    ;;
+  d-claude:standard)
+    consent="$hooks/launch-deepseek-safe.sh"
+    auth_file="$HOME/.deepseek-claude/auth"
+    gateway="$hooks/deepseek/launch-deepseek-gateway.sh"
+    [ -f "$consent" ] || { echo "DeepSeek同意ゲートが見つかりません: $consent" >&2; exit 2; }
+    [ -f "$gateway" ] || { echo "DeepSeek送信検査Gatewayが見つかりません: $gateway" >&2; exit 2; }
+    [ -s "$auth_file" ] || {
+      echo "DeepSeek APIキーが未登録です。" >&2
+      echo "スタート/（上級）1_DeepSeekキーを登録 を先に実行してください。" >&2
+      exit 2
+    }
+    bash "$consent" --consent-only
+    export ANTHROPIC_AUTH_TOKEN
+    ANTHROPIC_AUTH_TOKEN="$(cat "$auth_file")"
+    export ANTHROPIC_MODEL="deepseek-v4-pro"
+    export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"
+    bash "$gateway" "$workspace"
     ;;
 esac

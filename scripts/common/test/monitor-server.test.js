@@ -245,6 +245,26 @@ async function main() {
     }
   }
 
+  // d-claude も統合モニター上で独立した監視対象となり、DeepSeek送信検査を必須表示する。
+  {
+    const previousAgent = process.env.AI_SAFE_AGENT;
+    const previousProfile = process.env.AI_SAFE_PROFILE;
+    process.env.AI_SAFE_AGENT = 'd-claude';
+    process.env.AI_SAFE_PROFILE = 'standard';
+    try {
+      const state = await srv.readGatewayState();
+      assert.equal(state.required, true, 'd-claude must be a monitored send-inspection agent');
+      assert.equal(state.kind, 'send-inspection');
+      assert.equal(state.localAiAvailable, false);
+      assert.equal(srv.profileInfo().agent, 'd-claude');
+    } finally {
+      if (previousAgent === undefined) delete process.env.AI_SAFE_AGENT;
+      else process.env.AI_SAFE_AGENT = previousAgent;
+      if (previousProfile === undefined) delete process.env.AI_SAFE_PROFILE;
+      else process.env.AI_SAFE_PROFILE = previousProfile;
+    }
+  }
+
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'monitor-server-test-'));
   const env = {
     ...process.env,
