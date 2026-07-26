@@ -105,6 +105,22 @@ async function main() {
 
   // --- 純関数: 承認判断票（AIキー不要・危険側へ保守的に倒す） ---
   {
+    const waitingDog = srv.companionPresentation('wait');
+    assert.equal(waitingDog.state, 'wait');
+    assert.match(waitingDog.text, /検知したら.*知らせ/);
+    assert.doesNotMatch(waitingDog.text, /いつも見守っています|大切/);
+
+    const reviewDog = srv.companionPresentation('review');
+    assert.match(reviewDog.text, /まだ許可しない/);
+    assert.match(reviewDog.text, /何が変わる.*PCの外へ送る/);
+
+    const denyDog = srv.companionPresentation('deny');
+    assert.match(denyDog.text, /許可しない/);
+
+    const thinkingDog = srv.companionPresentation('allow', true);
+    assert.equal(thinkingDog.state, 'thinking');
+    assert.match(thinkingDog.text, /回答が出るまで許可しない/);
+
     const waiting = srv.approvalGuide({ hasCard: false });
     assert.equal(waiting.status, 'wait');
 
@@ -257,6 +273,10 @@ async function main() {
     assert.match(page, /Bouncer/, 'page should expose the Bouncer product identity');
     assert.match(page, /あなたの判断/, 'page should keep the three decision guides separate from AI tool controls');
     assert.match(page, /bouncer-companion|companion/, 'page should include the local companion asset');
+    assert.match(page, /id="companion-stage"/, 'dog should be a stateful motion stage rather than a static image');
+    assert.match(page, /id="companion-copy"/, 'speech bubble copy should update with the current Bouncer state');
+    assert.match(page, /renderCompanion/, 'dog state should be synchronized with approval and coach states');
+    assert.match(page, /prefers-reduced-motion/, 'dog motion should respect reduced-motion preferences');
     assert.match(page, /現在の保護モード/, 'page should make the active convenience profile visible');
     assert.match(page, /ローカルGateway/, 'page should disclose whether the local gateway is in the request path');
 

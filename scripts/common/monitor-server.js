@@ -407,6 +407,45 @@ function hasCoachContext(st) {
   return tool !== 'post-output';
 }
 
+const COMPANION_STATES = {
+  wait: {
+    state: 'wait',
+    label: '待機中',
+    mark: '•',
+    text: '承認が必要な操作を待っています。検知したら、ここで知らせます。',
+  },
+  allow: {
+    state: 'allow',
+    label: '読み取り中心',
+    mark: '✓',
+    text: '変更しない操作です。対象が依頼どおりなら「今回だけ許可」で進められます。',
+  },
+  review: {
+    state: 'review',
+    label: '要確認',
+    mark: '!',
+    text: 'まだ許可しないでください。「何が変わる」と「PCの外へ送る」を確認しましょう。',
+  },
+  deny: {
+    state: 'deny',
+    label: '止める',
+    mark: '×',
+    text: 'この操作は止めるのが安全です。AIツール側で「許可しない」を選んでください。',
+  },
+  thinking: {
+    state: 'thinking',
+    label: '確認中',
+    mark: '…',
+    text: 'いまコマンドの意味を確認しています。回答が出るまで許可しないでください。',
+  },
+};
+
+function companionPresentation(status, thinking = false) {
+  if (thinking) return { ...COMPANION_STATES.thinking };
+  const key = ['allow', 'review', 'deny', 'wait'].includes(status) ? status : 'wait';
+  return { ...COMPANION_STATES[key] };
+}
+
 // コマンドを実行せず、初心者向けの判断材料へ変換する。
 // AIコーチが使えない時も必ず表示できる決定的なローカル解析。
 function explainCommand(command, toolName) {
@@ -890,6 +929,7 @@ module.exports = {
   hasCoachContext,
   approvalGuide,
   explainCommand,
+  companionPresentation,
   coachRedact,
   saveApiKey,
   profileInfo,
@@ -916,9 +956,30 @@ function renderPage() {
 	.brand-shield{width:44px;height:48px;flex:none;color:var(--green);filter:drop-shadow(0 0 12px rgba(169,221,125,.16))}
 	.brand-name{font-size:clamp(25px,2.2vw,34px);font-weight:850;line-height:1;letter-spacing:-.025em}
 	.brand-kicker{margin:8px 0 0 57px;font:700 9px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.2em;color:var(--green);text-transform:uppercase}
-	.companion-message{position:relative;margin:28px 0 2px;padding:13px 15px;border:1px solid #52644f;border-radius:15px;background:rgba(255,255,255,.025);font-size:12px;color:#d9e1dc}
+	.companion-message{position:relative;margin:28px 0 2px;padding:13px 15px;border:1px solid #52644f;border-radius:15px;background:rgba(255,255,255,.025);color:#d9e1dc}
 	.companion-message:after{content:"";position:absolute;left:44px;bottom:-10px;width:18px;height:18px;border-right:1px solid #52644f;border-bottom:1px solid #52644f;background:#121a17;transform:rotate(45deg)}
-	.companion{display:block;width:min(100%,300px);margin:2px auto 0;aspect-ratio:1;object-fit:cover;object-position:center;border-radius:20px;mix-blend-mode:screen}
+	.companion-status{display:block;margin-bottom:3px;color:var(--green);font:800 9px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.13em}
+	.companion-copy{display:block;font-size:12px;font-weight:650;line-height:1.65}
+	.companion-stage{--companion-signal:var(--green);position:relative;display:grid;place-items:center;width:min(100%,300px);margin:2px auto 0;aspect-ratio:1;isolation:isolate}
+	.companion-stage:before{content:"";position:absolute;z-index:-1;width:78%;height:38%;bottom:11%;border-radius:50%;background:radial-gradient(ellipse,color-mix(in srgb,var(--companion-signal) 23%,transparent),transparent 68%);filter:blur(10px);transition:background .35s ease,transform .35s ease}
+	.companion-stage[data-state="review"]{--companion-signal:var(--amber)}
+	.companion-stage[data-state="deny"]{--companion-signal:var(--red)}
+	.companion-stage[data-state="thinking"]{--companion-signal:var(--blue)}
+	.companion{display:block;width:100%;aspect-ratio:1;object-fit:cover;object-position:center;border-radius:20px;mix-blend-mode:screen;transform-origin:52% 78%;will-change:transform,filter}
+	.companion-stage[data-state="wait"] .companion{animation:companion-breathe 4.2s ease-in-out infinite}
+	.companion-stage[data-state="allow"] .companion{animation:companion-nod 3.4s ease-in-out infinite}
+	.companion-stage[data-state="review"] .companion{animation:companion-attend 2.3s ease-in-out infinite;filter:drop-shadow(0 8px 18px rgba(225,185,74,.12))}
+	.companion-stage[data-state="deny"] .companion{animation:companion-guard 1.4s ease-in-out infinite alternate;filter:drop-shadow(0 8px 20px rgba(237,107,88,.16))}
+	.companion-stage[data-state="thinking"] .companion{animation:companion-think 2s ease-in-out infinite;filter:drop-shadow(0 8px 18px rgba(145,198,186,.14))}
+	.companion-mark{position:absolute;right:7%;top:9%;display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--companion-signal);border-radius:50%;background:#111916;color:var(--companion-signal);font-size:17px;font-weight:900;box-shadow:0 0 0 5px color-mix(in srgb,var(--companion-signal) 8%,transparent);transition:color .35s ease,border-color .35s ease}
+	.companion-orbit{position:absolute;inset:12%;border:1px dashed color-mix(in srgb,var(--companion-signal) 45%,transparent);border-radius:50%;opacity:0;transform:scale(.88)}
+	.companion-stage[data-state="thinking"] .companion-orbit{opacity:.65;animation:companion-orbit 7s linear infinite}
+	@keyframes companion-breathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-4px) scale(1.008)}}
+	@keyframes companion-nod{0%,68%,100%{transform:translateY(0) rotate(0)}76%{transform:translateY(3px) rotate(-1.8deg)}84%{transform:translateY(-3px) rotate(1.3deg)}92%{transform:translateY(0) rotate(0)}}
+	@keyframes companion-attend{0%,100%{transform:translateY(0) rotate(-1deg)}50%{transform:translateY(-5px) rotate(1.5deg)}}
+	@keyframes companion-guard{from{transform:translateY(1px) scale(1.01)}to{transform:translateY(-5px) scale(1.035)}}
+	@keyframes companion-think{0%,100%{transform:translateY(0) rotate(-1.8deg)}50%{transform:translateY(-4px) rotate(2.2deg)}}
+	@keyframes companion-orbit{to{transform:scale(.88) rotate(360deg)}}
 	.guard-overview{margin-top:auto;padding:16px;border:1px solid #44533e;border-radius:14px;background:rgba(169,221,125,.035)}
 	.guard-overview h2,.rail-panel h2{font-size:14px;margin:0 0 11px}
 	.guard-row{display:grid;grid-template-columns:26px 1fr auto;align-items:center;gap:8px;padding:8px 0;border-top:1px solid rgba(255,255,255,.055);font-size:12px}
@@ -1059,9 +1120,9 @@ function renderPage() {
 	.protection-state{font-size:10px;font-weight:800;color:var(--green)}
 	.footer-note{grid-column:1/-1;margin:0;padding:10px 14px;color:var(--muted);font-size:10px;text-align:center;border:1px solid var(--line);border-radius:12px;background:#0d1311}
 	@media(max-width:1220px){.dashboard{grid-template-columns:220px minmax(0,1fr)}.right-rail{grid-column:1/-1;grid-template-columns:repeat(3,minmax(0,1fr))}.events{border-radius:18px}.brand-rail{min-height:720px}}
-	@media(max-width:900px){body{padding:10px}.dashboard{grid-template-columns:minmax(0,1fr)}.brand-rail{position:static;min-height:0;display:grid;grid-template-columns:1fr 170px;align-items:center}.brand,.brand-kicker,.companion-message,.guard-overview{grid-column:1}.companion{grid-column:2;grid-row:1/5;max-width:170px}.right-rail{grid-column:auto;grid-template-columns:minmax(0,1fr)}}
-		@media(max-width:620px){body{padding:7px}.shell,.events{border-radius:14px}.brand-rail,.center-shell,.rail-panel,.events{padding:13px}.brand-rail{grid-template-columns:minmax(0,1fr) 92px}.brand-rail>*{min-width:0}.brand-shield{width:35px;height:38px}.brand-name{font-size:26px}.brand-kicker{margin-left:47px;font-size:8px}.companion-message{margin-top:18px}.companion{max-width:92px}.topbar{align-items:flex-start;flex-wrap:wrap}.topbar>div:first-child{min-width:0}.topbar-copy{display:none}.live{font-size:9px;padding:6px 8px}.profile-strip{grid-template-columns:36px minmax(0,1fr)}.profile-mark{width:34px;height:34px}.profile-speed{grid-column:1/-1;width:max-content;max-width:100%;white-space:normal}.tabs{width:100%}.tab{flex:1;min-width:0}.decision-signal{grid-template-columns:36px minmax(0,1fr);padding:16px 14px 14px}.decision-symbol{width:34px;height:34px;border-radius:9px}.decision-headline{font-size:22px;word-break:normal;overflow-wrap:anywhere}.decision-action{grid-column:1/-1}.decision-body{padding:14px}.fact{grid-template-columns:30px minmax(0,1fr)}.fact-value{grid-column:2}.qrow,.ks-row{flex-direction:column}.qrow button,.ks-row button{width:100%}.btns button{flex:1;min-width:130px}.footer-note{font-size:9px}}
-	@media(prefers-reduced-motion:reduce){.live-dot{animation:none}.choice-card{transition:none}}
+	@media(max-width:900px){body{padding:10px}.dashboard{grid-template-columns:minmax(0,1fr)}.brand-rail{position:static;min-height:0;display:grid;grid-template-columns:1fr 170px;align-items:center}.brand,.brand-kicker,.companion-message,.guard-overview{grid-column:1}.companion-stage{grid-column:2;grid-row:1/5;max-width:170px}.right-rail{grid-column:auto;grid-template-columns:minmax(0,1fr)}}
+		@media(max-width:620px){body{padding:7px}.shell,.events{border-radius:14px}.brand-rail,.center-shell,.rail-panel,.events{padding:13px}.brand-rail{grid-template-columns:minmax(0,1fr) 92px}.brand-rail>*{min-width:0}.brand-shield{width:35px;height:38px}.brand-name{font-size:26px}.brand-kicker{margin-left:47px;font-size:8px}.companion-message{margin-top:18px}.companion-stage{max-width:92px}.companion-mark{width:25px;height:25px;font-size:12px}.topbar{align-items:flex-start;flex-wrap:wrap}.topbar>div:first-child{min-width:0}.topbar-copy{display:none}.live{font-size:9px;padding:6px 8px}.profile-strip{grid-template-columns:36px minmax(0,1fr)}.profile-mark{width:34px;height:34px}.profile-speed{grid-column:1/-1;width:max-content;max-width:100%;white-space:normal}.tabs{width:100%}.tab{flex:1;min-width:0}.decision-signal{grid-template-columns:36px minmax(0,1fr);padding:16px 14px 14px}.decision-symbol{width:34px;height:34px;border-radius:9px}.decision-headline{font-size:22px;word-break:normal;overflow-wrap:anywhere}.decision-action{grid-column:1/-1}.decision-body{padding:14px}.fact{grid-template-columns:30px minmax(0,1fr)}.fact-value{grid-column:2}.qrow,.ks-row{flex-direction:column}.qrow button,.ks-row button{width:100%}.btns button{flex:1;min-width:130px}.footer-note{font-size:9px}}
+	@media(prefers-reduced-motion:reduce){.live-dot,.companion,.companion-orbit{animation:none!important}.choice-card{transition:none}}
 	</style></head>
 	<body><div class="wrap">
 	<main class="dashboard">
@@ -1071,8 +1132,15 @@ function renderPage() {
 	      <div class="brand-name">Bouncer</div>
 	    </div>
 	    <p class="brand-kicker">AI safety monitoring<br>&amp; approval assistant</p>
-	    <div class="companion-message">いつも見守っています。<br>分からないまま、許可しなくて大丈夫です。</div>
-	    <img id="companion" class="companion" alt="Bouncerの見守りロボット犬" />
+	    <div class="companion-message" role="status" aria-live="polite">
+	      <span id="companion-status" class="companion-status">待機中</span>
+	      <span id="companion-copy" class="companion-copy">承認が必要な操作を待っています。検知したら、ここで知らせます。</span>
+	    </div>
+	    <div id="companion-stage" class="companion-stage" data-state="wait">
+	      <span class="companion-orbit" aria-hidden="true"></span>
+	      <img id="companion" class="companion" alt="待機中のBouncerロボット犬" />
+	      <span id="companion-mark" class="companion-mark" aria-hidden="true">•</span>
+	    </div>
 	    <section class="guard-overview">
 	      <h2>いま働いている見守り</h2>
 		      <div class="guard-row"><span class="guard-icon">⌁</span><span>保護モード</span><span id="side-profile-state" class="guard-state">確認中</span></div>
@@ -1207,14 +1275,27 @@ function renderPage() {
 const T = new URLSearchParams(location.search).get('t');
 const $ = (id) => document.getElementById(id);
 $('companion').src = '/companion.png?t=' + encodeURIComponent(T);
+const COMPANION_STATES = ${JSON.stringify(COMPANION_STATES)};
 let lastCmd = null;
 let lastAnswerText = null;
 let lastCheckSignature = '';
 let activeTarget = 'event';
 let currentState = null;
 let keyPanelOpen = false; // 登録済みでもユーザーが「変更する」を押したら開く
+let coachBusy = false;
 
 function riskClass(meta){ if(/risk=high/.test(meta))return'high'; if(/risk=medium/.test(meta))return'medium'; return ''; }
+
+function renderCompanion(status, thinking){
+  const key = thinking ? 'thinking' : (COMPANION_STATES[status] ? status : 'wait');
+  const mood = COMPANION_STATES[key] || COMPANION_STATES.wait;
+  const stage = $('companion-stage');
+  if(stage.dataset.state !== mood.state) stage.dataset.state = mood.state;
+  $('companion-status').textContent = mood.label;
+  $('companion-copy').textContent = mood.text;
+  $('companion-mark').textContent = mood.mark;
+  $('companion').alt = mood.label + 'のBouncerロボット犬';
+}
 
 function renderProfile(s,g){
   const p=(s&&s.profile)||{id:'standard',label:'標準モード',short:'推奨・軽快',summary:'固定ルールと実行フックで守ります。',speed:'応答速度を優先',agent:'unknown'};
@@ -1341,6 +1422,7 @@ async function saveKey(){
 	  const g = (s && s.approval) || {};
 	  const allowed = ['allow','review','deny','wait'];
 	  const status = allowed.includes(g.status) ? g.status : 'review';
+	  renderCompanion(status, coachBusy);
 	  const box = $('decision');
 	  box.className = 'decision ' + status;
 	  $('decision-symbol').textContent = ({allow:'✓',review:'!',deny:'×',wait:'•'})[status];
@@ -1491,6 +1573,8 @@ async function callAI(pathname, body){
     const ans=$('answer'); ans.className='answer muted'; ans.textContent=targetEmptyMessage();
     return;
   }
+  coachBusy=true;
+  renderCompanion((currentState&&currentState.approval&&currentState.approval.status)||'wait', true);
   const ans=$('answer'); ans.className='answer'; ans.textContent='🤖 AI に聞いています…';
   [...document.querySelectorAll('button')].forEach(b=>b.disabled=true);
   try{
@@ -1500,7 +1584,11 @@ async function callAI(pathname, body){
     ans.textContent = j.text || '(応答なし)';
     ans.className = 'answer' + (j.ok===false ? ' danger' : '');
   }catch(e){ ans.textContent='AI 呼び出しに失敗しました。'; ans.className='answer danger'; }
-  finally{ updateCoachControls(currentState, false); }
+  finally{
+    coachBusy=false;
+    renderCompanion((currentState&&currentState.approval&&currentState.approval.status)||'wait', false);
+    updateCoachControls(currentState, false);
+  }
 }
 
 $('tab-event').onclick = ()=>setTarget('event');
