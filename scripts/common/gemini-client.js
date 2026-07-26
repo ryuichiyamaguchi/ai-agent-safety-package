@@ -37,6 +37,8 @@ const RATE_MSG = 'いま無料枠の上限に達しているようです（少�
 const MODEL_MSG = 'AI モデルが見つかりませんでした（モデル名の指定を確認してください）。';
 const AI_UNAVAILABLE =
   'AI に今つながりませんでした（オフライン、またはキー/通信の問題）。下の「自動の解説」を見て、不安なら許可しないでください。';
+const TRUNCATED_MSG =
+  'AIコーチの回答が途中で切れたため、未完成の文章は表示しませんでした。上の「自動の解説」で対象・変更・外部送信を確認してください。';
 
 // 検査対象のコマンドは「信頼できないデータ」として区切り、中の指示に従わせない（プロンプトインジェクション防御）。
 // monitor-server.js と two-key-judge.js が同一の前文を共有する（SSOT）。
@@ -71,6 +73,21 @@ function runAI(prompt, opts = {}) {
   });
 }
 
+function parseGeminiResponse(json) {
+  const candidate = json && Array.isArray(json.candidates) ? json.candidates[0] : null;
+  const finishReason = String((candidate && candidate.finishReason) || '');
+  if (finishReason === 'MAX_TOKENS') {
+    return { ok: false, text: TRUNCATED_MSG, truncated: true };
+  }
+  let text = '';
+  try {
+    const parts = candidate && candidate.content && candidate.content.parts;
+    if (Array.isArray(parts)) text = parts.map((p) => (p && p.text) || '').join('').trim();
+  } catch { /* 形が違えば空のまま */ }
+  if (text) return { ok: true, text };
+  return { ok: false, text: AI_UNAVAILABLE };
+}
+
 // 単一モデル・単発の generateContent 呼び出し（フォールバックなしの実体）。
 function _runOnce(prompt, model, timeoutMs) {
   return new Promise((resolve) => {
@@ -78,7 +95,8 @@ function _runOnce(prompt, model, timeoutMs) {
     if (!key) return resolve({ ok: false, text: NO_KEY_MSG });
     const body = JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.4, maxOutputTokens: 800 },
+      // 思考トークンを使うモデルでも短い日本語回答が途中で切れない余裕を持たせる。
+      generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
     });
     const reqOpts = {
       hostname: GEMINI_HOST,
@@ -112,15 +130,7 @@ function _runOnce(prompt, model, timeoutMs) {
           if (res.statusCode === 404 || /is not found|not found for API/i.test(msg)) return finish({ ok: false, text: MODEL_MSG });
           return finish({ ok: false, text: AI_UNAVAILABLE });
         }
-        let text = '';
-        try {
-          const parts = json && json.candidates && json.candidates[0] &&
-            json.candidates[0].content && json.candidates[0].content.parts;
-          if (Array.isArray(parts)) text = parts.map((p) => (p && p.text) || '').join('').trim();
-        } catch { /* 形が違えば空のまま */ }
-        if (text) return finish({ ok: true, text });
-        // candidates 空（安全ブロック等）や空応答は fail-closed。
-        return finish({ ok: false, text: AI_UNAVAILABLE });
+        return finish(parseGeminiResponse(json));
       });
     });
     req.on('error', () => finish({ ok: false, text: AI_UNAVAILABLE }));
@@ -133,6 +143,7 @@ function _runOnce(prompt, model, timeoutMs) {
 module.exports = {
   resolveApiKey,
   runAI,
+  parseGeminiResponse,
   INJECTION_GUARD,
   // 文言・定数も再利用できるよう公開（monitor-server.js が同一値を使う）。
   COACH_MODEL,
@@ -144,4 +155,5 @@ module.exports = {
   RATE_MSG,
   MODEL_MSG,
   AI_UNAVAILABLE,
+  TRUNCATED_MSG,
 };

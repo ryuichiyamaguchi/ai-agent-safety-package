@@ -158,6 +158,28 @@ function htmlUnescape(s) {
 function pickOne(html, re) { const m = html.match(re); return m ? htmlUnescape(m[1]).trim() : ''; }
 function pickAll(html, re) { return [...html.matchAll(re)].map((m) => htmlUnescape(m[1]).trim()).filter(Boolean); }
 
+function readOpenCodeApproval() {
+  try {
+    const file = path.join(LOG_DIR, 'opencode-approval.json');
+    const stat = fs.statSync(file);
+    const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (value.status !== 'pending' || Date.now() - stat.mtimeMs > 2 * 60 * 60 * 1000) return null;
+    const tool = String(value.tool || 'unknown').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'unknown';
+    const detail = String(value.detail || '').trim().slice(0, 12000);
+    return {
+      title: 'OpenCode が承認を求めています',
+      meta: `${String(value.ts || '')} ・ tool=${tool} ・ risk=medium ・ card=opencode-permission`,
+      cmd: detail || '操作内容を取得できませんでした',
+      label: `${tool} を使用`,
+      whatdo: 'OpenCode がこの操作を実行する前に、あなたの許可を待っています。',
+      dangers: [],
+      hasCard: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // d-claude（DeepSeek 駆動 claude）セッションかを判定する。
 // d-claude は会話本文が DeepSeek（中国管轄）に流れる経路で、ここで AI コーチに相談すると
 // コマンド本文が DeepSeek に加えて Google(Gemini) にも届く＝送信先が増える。
@@ -179,21 +201,27 @@ function coachRedact() {
 }
 
 function readState() {
+  const profile = profileInfo();
   let html = '';
-  try { html = fs.readFileSync(path.join(LOG_DIR, 'now.html'), 'utf8'); } catch { /* not yet */ }
-  const state = {
+  if (profile.agent !== 'opencode') {
+    try { html = fs.readFileSync(path.join(LOG_DIR, 'now.html'), 'utf8'); } catch { /* not yet */ }
+  }
+  const openCode = profile.agent === 'opencode' ? readOpenCodeApproval() : null;
+  const state = openCode || {
     title: pickOne(html, /<div class="ctitle">([\s\S]*?)<\/div>/),
     meta: pickOne(html, /<div class="cmeta">([\s\S]*?)<\/div>/),
     cmd: pickOne(html, /<pre class="action-cmd">([\s\S]*?)<\/pre>/),
     label: pickOne(html, /<div class="action-label">([\s\S]*?)<\/div>/),
     whatdo: pickOne(html, /<p class="whatdo-body">([\s\S]*?)<\/p>/),
     dangers: pickAll(html, /<p class="whatdo-danger">([\s\S]*?)<\/p>/g),
-    events: readEvents(40),
     hasCard: html.indexOf('class="action-cmd"') !== -1,
+  };
+  Object.assign(state, {
+    events: readEvents(500),
     redact: coachRedact(),
     answer: readAnswer(),
-    profile: profileInfo(),
-  };
+    profile,
+  });
   state.coachable = hasCoachContext(state);
   state.approval = approvalGuide(state);
   // コーチ（本体）が使えるかは無料キー登録が前提。UI が未登録時に登録パネルを出せるよう真偽だけ渡す（キー本文は出さない）。
@@ -379,6 +407,79 @@ function hasCoachContext(st) {
   return tool !== 'post-output';
 }
 
+// コマンドを実行せず、初心者向けの判断材料へ変換する。
+// AIコーチが使えない時も必ず表示できる決定的なローカル解析。
+function explainCommand(command, toolName) {
+  const cmd = String(command || '').trim();
+  const tool = String(toolName || '').toLowerCase();
+  const fallback = {
+    kind: 'unknown',
+    summary: cmd
+      ? `「${clip(cmd, 180)}」を実行します。内容を自動で細かく分類できないため、対象と目的の確認が必要です。`
+      : '操作内容を取得できませんでした。',
+    impact: '影響範囲を自動では特定できません',
+    reversible: '分からないため、変更前の確認が必要です',
+    outbound: '外部送信の有無を特定できません',
+  };
+  if (!cmd) return fallback;
+
+  const grep = cmd.match(/^\s*(?:grep|egrep|fgrep|rg)\b/i);
+  const onlyReadPipeline = !/[;]|&&|\|\|/.test(cmd)
+    && !/(?:^|[^2])>\s*(?!\/dev\/null\b)|>>|\$\(|`/.test(cmd)
+    && cmd.split(/(?<!\\)\|/).slice(1).every((part) => /^\s*(?:head|tail|sort|uniq|wc|cut|sed\s+-n)\b/i.test(part));
+  if (grep && onlyReadPipeline) {
+    const quoted = cmd.match(/(["'])(.*?)\1/);
+    const words = quoted ? quoted[2].split(/\\\||\|/).map((x) => x.trim()).filter(Boolean) : [];
+    const targetMatch = cmd.match(/(?:^|\s)(~\/[^\s"'|]+|\/[^\s"'|]+|[.]{1,2}\/[^\s"'|]+)/);
+    const includeMatch = cmd.match(/--include(?:=|\s+)(["']?)([^"'\s]+)\1/);
+    const headMatch = cmd.match(/(?<!\\)\|\s*head(?:\s+-n?\s*|\s+-|\s+)(\d+)\b/i);
+    const target = targetMatch ? targetMatch[1] : '指定された場所';
+    const fileType = includeMatch ? `${includeMatch[2].replace(/^\*\./, '').toUpperCase()}ファイル` : 'ファイル';
+    const needle = words.length ? `「${words.join('」「')}」のいずれかを含む` : '指定した文字を含む';
+    const limit = headMatch ? `該当結果を最大${headMatch[1]}件まで表示します` : '該当結果を表示します';
+    const namesOnly = /(?:^|\s)-(?:[A-Za-z]*l[A-Za-z]*)(?:\s|$)|--files-with-matches\b/.test(cmd);
+    return {
+      kind: 'read',
+      summary: `${target}配下の${fileType}を検索し、${needle}${namesOnly ? 'ファイル名を' : '箇所を'}探します。${limit}。`,
+      impact: 'ファイルの内容は読み取りますが、ファイルは変更しません。作成・削除もしません',
+      reversible: '変更しないため、元に戻す必要はありません',
+      outbound: 'PCの外へは送信しません',
+    };
+  }
+
+  if (/^\s*git\s+(?:status|diff|log|show|branch)(?:\s|$)/i.test(cmd)) {
+    return {
+      kind: 'read',
+      summary: 'Gitで、現在の変更状況や履歴を確認して表示します。',
+      impact: 'ファイルやGit履歴は変更しません',
+      reversible: '変更しないため、元に戻す必要はありません',
+      outbound: 'PCの外へは送信しません',
+    };
+  }
+  if (/^\s*(?:pwd|ls|dir|find|cat|tac|head|tail|wc|stat|file)\b/i.test(cmd) && onlyReadPipeline) {
+    return {
+      kind: 'read',
+      summary: '表示された場所やファイルの内容・状態を読み取って表示します。',
+      impact: 'ファイルの作成・変更・削除はしません',
+      reversible: '変更しないため、元に戻す必要はありません',
+      outbound: 'PCの外へは送信しません',
+    };
+  }
+  if (/https?:\/\/|\b(?:curl|wget|iwr|irm|ssh|scp|sftp|rsync)\b/i.test(cmd)) {
+    return { ...fallback, kind: 'network', outbound: 'PCの外へ通信します。URLと送信内容の確認が必要です' };
+  }
+  if (/^(?:read|notebookread|fileread|glob|grep|search|ls)$/i.test(tool)) {
+    return {
+      kind: 'read',
+      summary: `「${clip(cmd, 180)}」を対象に、内容や状態を読み取ります。`,
+      impact: '対象を読み取りますが、作成・変更・削除はしません',
+      reversible: '変更しないため、元に戻す必要はありません',
+      outbound: 'PCの外へは送信しません',
+    };
+  }
+  return fallback;
+}
+
 // ---- 承認判断票（LLM不要・オフライン・決定的） ----------------------------
 // 承認ダイアログを前にした初心者が、コマンドを読めなくても「何が変わるか」を
 // 10秒で確認できるようにする。これは自動承認器ではなく、人間向けの判断材料。
@@ -409,6 +510,7 @@ function approvalGuide(st) {
   const labelTool = (label.match(/^([A-Za-z0-9_-]+)/) || [])[1];
   const tool = (metaTool === 'observe' && labelTool ? labelTool.toLowerCase() : metaTool) || label.toLowerCase();
   const risk = /risk=high/.test(meta) ? 'high' : (/risk=medium/.test(meta) ? 'medium' : 'low');
+  const concrete = explainCommand(cmd, tool);
 
   const generatedCleanup = /^\s*rm\s+(?:-[A-Za-z]*r[A-Za-z]*|--recursive)(?:\s+(?:-f|--force))?\s+(?:\.\/)?(?:node_modules|build|dist|coverage|target|\.next|\.turbo)(?:\s+(?:\.\/)?(?:node_modules|build|dist|coverage|target|\.next|\.turbo))*\s*$/i.test(cmd);
   const destructive = !generatedCleanup && (/\brm\b[^\n;&|]*(?:-[a-z]*r|--recursive)|\bremove-item\b[^\n;|]*-rec|\b(?:del|erase|rd|rmdir)\b[^\n;&|]*\/s\b|\b(?:format|diskpart|clear-disk|format-volume|initialize-disk|mkfs|shred)\b|\bdd\b[^\n]*\bof=\s*["']?\/dev\//i.test(text));
@@ -419,8 +521,7 @@ function approvalGuide(st) {
   const network = /web\s*access|webfetch|websearch|https?:\/\/|\b(?:curl|wget|iwr|irm|ssh|scp|sftp|rsync|nc|ncat|netcat)\b|\bgit\s+push\b/i.test(lower);
   const writeTool = /^(write|edit|multiedit)$/.test(tool) || /ファイル書き込み|書き込|上書き|作成/.test(text);
   const readTool = /^(read|notebookread|fileread|glob|grep|search|ls)$/.test(tool);
-  const readCommand = /^\s*(?:pwd|ls|dir|find|rg|grep|egrep|fgrep|cat|tac|head|tail|wc|stat|file|git\s+(?:status|diff|log|show|branch))\b/i.test(cmd)
-    && !/[;]|&&|\|\||(?:^|[^|])\|(?!\|)|>|\$\(|`/.test(cmd);
+  const readCommand = concrete.kind === 'read';
   const blocked = /ブロック|遮断|拒否/.test(title) || /(?:^|\s)block(?:ed)?(?:\s|$)/i.test(meta);
   const hasDanger = Array.isArray(st.dangers) && st.dangers.some((x) => String(x).trim());
 
@@ -432,7 +533,7 @@ function approvalGuide(st) {
   let impact = '影響範囲を自動では特定できません';
   let reversible = '分からないため、変更前の確認が必要';
   let outbound = network ? 'あり：表示された送信先へ通信します' : '検出なし';
-  let summary = st.whatdo || '';
+  let summary = '';
   let checks = [];
   let why = 'AIがPCやファイルに触るため、実行前の確認が求められています。';
 
@@ -480,9 +581,10 @@ function approvalGuide(st) {
     checks = ['送信先のドメインに心当たりがあるか', '顧客情報・鍵・パスワードが含まれていないか'];
     why = 'PCの外へ情報を送る可能性があるため、送信前の確認が求められています。';
   } else if (readTool || readCommand) {
-    impact = '表示されたファイルや状態を読み取ります';
-    reversible = '変更しないため、元に戻す必要はありません';
-    summary = summary || '内容や現在の状態を確認するだけの操作です。';
+    impact = concrete.impact;
+    reversible = concrete.reversible;
+    outbound = concrete.outbound;
+    summary = concrete.summary;
     checks = ['表示されたパスや検索対象が依頼内容と一致しているか', '秘密情報の場所を読もうとしていないか'];
     why = 'AIがローカルの情報を読むため、対象が正しいか確認できます。';
   } else {
@@ -532,7 +634,28 @@ function readEvents(n) {
     const f = path.join(LOG_DIR, 'events-' + localDate() + '.jsonl');
     const lines = fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean);
     return lines.slice(-n).reverse().map((l) => {
-      try { const o = JSON.parse(l); return { ts: o.ts, mode: o.mode, decision: o.decision, reason: o.reason, observed: o.observed }; }
+      try {
+        const o = JSON.parse(l);
+        let observed = null;
+        try { observed = typeof o.observed === 'string' ? JSON.parse(o.observed) : o.observed; } catch { /* 不正な旧ログ */ }
+        const input = observed && observed.tool_input ? observed.tool_input : {};
+        const command = String(input.command || input.url || input.file_path || input.path || input.query || input.pattern || '').trim();
+        const tool = String((observed && (observed.tool_name || observed.hook_event_name)) || o.mode || '操作');
+        const meaning = explainCommand(command, tool);
+        return {
+          ts: o.ts,
+          mode: o.mode,
+          decision: o.decision,
+          reason: o.reason,
+          observed: o.observed,
+          tool,
+          command,
+          meaning: meaning.summary,
+          impact: meaning.impact,
+          reversible: meaning.reversible,
+          outbound: meaning.outbound,
+        };
+      }
       catch { return null; }
     }).filter(Boolean);
   } catch { return []; }
@@ -580,7 +703,7 @@ const COACH_RULES = [
   '- 「確認するとよい点」は最大2つまで。多くても2つに絞る。',
   '- 分からないことは「安全」と決めつけない。何が分からないか（例: このパスが何のファイルか不明、など）を正直に書く。',
   '- 最後の1行は必ず次のどれかで締める: 「許可してよい」「追加確認」「許可しない」。',
-  '- 全体で短く。専門用語は避け、初心者にも分かる日本語で。',
+  '- 全体を450文字以内で完結させる。専門用語は避け、初心者にも分かる日本語で。',
 ].join('\n');
 
 function explainPrompt(st) {
@@ -766,6 +889,7 @@ module.exports = {
   maskSecrets,
   hasCoachContext,
   approvalGuide,
+  explainCommand,
   coachRedact,
   saveApiKey,
   profileInfo,
@@ -919,6 +1043,13 @@ function renderPage() {
 	.events .ev-tool{color:#c8d2cc;font-size:10px}
 	.events .ev-cmd{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#d5ded9;word-break:break-all}
 	.events .ev-reason{color:var(--muted);font-size:9px}
+	.events .history-detail{margin-top:5px;border:1px solid #34423c;border-radius:9px;background:rgba(4,8,7,.32)}
+	.events .history-detail>summary{cursor:pointer;padding:6px 8px;color:var(--green);font-size:10px;font-weight:800;list-style-position:inside}
+	.events .history-body{display:grid;gap:7px;padding:2px 9px 10px}
+	.events .history-command{margin:0;padding:7px;border-radius:7px;background:#090e0c;color:#dce8e1;white-space:pre-wrap;word-break:break-all;font:500 10px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}
+	.events .history-meaning{color:var(--ink);font-size:10px}
+	.events .history-fact{display:grid;grid-template-columns:68px 1fr;gap:6px;color:var(--muted);font-size:9px}
+	.events .history-fact strong{color:#b9c7bf}
 	.protection-list{display:grid;gap:2px}
 	.protection-item{display:grid;grid-template-columns:32px 1fr auto;align-items:center;gap:9px;padding:10px 0;border-top:1px solid rgba(255,255,255,.055)}
 	.protection-item:first-child{border-top:0}
@@ -1052,8 +1183,8 @@ function renderPage() {
 	    </section>
 
 	    <section class="events">
-	      <div class="rail-heading"><h2>直近の安全イベント</h2><span id="event-count" class="rail-kicker">0件</span></div>
-	      <p class="sub">新しい順・最大40件。秘密値や会話本文は表示しません。</p>
+	      <div class="rail-heading"><h2>コマンド履歴</h2><span id="event-count" class="rail-kicker">0件</span></div>
+	      <p class="sub">今日の新しい順・最大500件。各項目を押すと、全コマンドを開いて見返せます。意味と影響も何度でも確認できます。秘密値や会話本文は表示しません。</p>
 	      <div class="events-scroll"><table><thead><tr><th>時刻</th><th>操作と結果</th></tr></thead><tbody id="events-body"></tbody></table></div>
 	    </section>
 
@@ -1127,10 +1258,8 @@ function summarizeObserved(observed){
     const ti=o.tool_input||{};
     // 受講者の中心操作（検索・Grep）が履歴に具体的に映るよう query(WebSearch)/pattern(Grep) も拾う。
     const detail=ti.command||ti.url||ti.file_path||ti.path||ti.query||ti.pattern||o.prompt||ti.prompt||'';
-    // Agent/Task 等の長いプロンプト全文を履歴に出さない（catch 側と同じ 300 字上限でクリップ）。
-    const d=String(detail);
-    return {tool:String(tool), detail: d.length>300 ? d.slice(0,300)+'…' : d};
-  }catch(e){ return {tool:'', detail:String(observed).slice(0,300)}; }
+    return {tool:String(tool), detail:String(detail)};
+  }catch(e){ return {tool:'', detail:String(observed)}; }
 }
 
 	function setTarget(target){
@@ -1322,7 +1451,12 @@ async function poll(){
       const high=/risk=high/.test((e.reason||'')+' '+(e.mode||''));
       tr.className = dec==='block'?'block':(high?'high':(dec==='allow'?'allow':''));
       const icon=dec==='block'?'⛔':(dec==='allow'?'✓':'•');
-      const sm=summarizeObserved(e.observed);
+      const sm={tool:e.tool||'',detail:e.command||''};
+      if(!sm.tool||!sm.detail){
+        const legacy=summarizeObserved(e.observed);
+        if(!sm.tool) sm.tool=legacy.tool;
+        if(!sm.detail) sm.detail=legacy.detail;
+      }
       const rawTime=(e.ts||'').replace('Z','');
       const tdTime=document.createElement('td'); tdTime.className='ev-time'; tdTime.textContent=rawTime.includes('T')?rawTime.split('T')[1].slice(0,8):rawTime; tr.append(tdTime);
       const tdBody=document.createElement('td');
@@ -1331,6 +1465,20 @@ async function poll(){
       const verdict=document.createElement('span'); verdict.className='ev-dec'; verdict.textContent=icon+' '+(dec==='block'?'ブロック':(dec==='allow'?'許可':'確認'));
       top.append(tool,verdict); tdBody.append(top);
       const cmd=document.createElement('div'); cmd.className='ev-cmd'; cmd.textContent=sm.detail||'(内容なし)'; tdBody.append(cmd);
+      if(sm.detail){
+        const details=document.createElement('details'); details.className='history-detail';
+        const summary=document.createElement('summary'); summary.textContent='コマンド全体と意味を見る';
+        const body=document.createElement('div'); body.className='history-body';
+        const full=document.createElement('pre'); full.className='history-command'; full.textContent=sm.detail; body.append(full);
+        const meaning=document.createElement('div'); meaning.className='history-meaning'; meaning.textContent=e.meaning||'この操作の意味を自動では特定できませんでした。'; body.append(meaning);
+        [['何が変わる',e.impact],['元に戻せる',e.reversible],['外部送信',e.outbound]].forEach(pair=>{
+          const fact=document.createElement('div'); fact.className='history-fact';
+          const name=document.createElement('strong'); name.textContent=pair[0];
+          const value=document.createElement('span'); value.textContent=pair[1]||'不明';
+          fact.append(name,value); body.append(fact);
+        });
+        details.append(summary,body); tdBody.append(details);
+      }
       if(e.reason){ const rs=document.createElement('div'); rs.className='ev-reason'; rs.textContent=e.reason; tdBody.append(rs); }
       tr.append(tdBody);
       tb.append(tr);

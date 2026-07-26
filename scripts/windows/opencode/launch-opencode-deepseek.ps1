@@ -8,6 +8,7 @@ $Workspace = [System.IO.Path]::GetFullPath($Workspace)
 $hooks = Join-Path $Workspace '.ai-safety\hooks'
 $gatewayJs = Join-Path $hooks 'common\ds-gateway.js'
 $configJs = Join-Path $hooks 'common\opencode-config.js'
+$monitorPlugin = Join-Path $hooks 'common\opencode-bouncer-monitor.mjs'
 $port = if ($env:DS_GATEWAY_PORT) { $env:DS_GATEWAY_PORT } else { '8788' }
 $keyDir = Join-Path $env:USERPROFILE '.deepseek-claude'
 $keyFile = Join-Path $keyDir 'auth'
@@ -17,6 +18,7 @@ $coachMarker = Join-Path $logDir 'coach-engine'
 if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw "作業フォルダが見つかりません: $Workspace" }
 if (-not (Test-Path -LiteralPath $gatewayJs -PathType Leaf)) { throw "送信検査 Gateway が見つかりません: $gatewayJs" }
 if (-not (Test-Path -LiteralPath $configJs -PathType Leaf)) { throw "OpenCode 安全設定が見つかりません: $configJs" }
+if (-not (Test-Path -LiteralPath $monitorPlugin -PathType Leaf)) { throw "OpenCode承認モニターが見つかりません: $monitorPlugin" }
 
 if ($env:AI_SAFE_DRY_RUN -eq '1') {
     Write-Output 'OpenCode + DeepSeek dry-run'
@@ -82,10 +84,13 @@ try {
         throw "送信検査 Gateway を確認できないため、OpenCode は起動しません（fail-closed）。確認先: $gatewayErr"
     }
 
-    # プロジェクト固有の opencode.json と外部プラグインによる保護設定の上書きを防ぐ。
+    # プロジェクト固有の設定は無効化し、隔離した設定ディレクトリからBouncerプラグインだけを読む。
     $env:OPENCODE_DISABLE_PROJECT_CONFIG = '1'
-    $env:OPENCODE_PURE = '1'
-    $configArgs = @($configJs, '--port', $port)
+    Remove-Item Env:\OPENCODE_PURE -ErrorAction SilentlyContinue
+    $env:XDG_CONFIG_HOME = Join-Path $Workspace '.ai-safety\opencode-runtime\xdg-config'
+    $env:AI_SAFE_LOG_DIR = $logDir
+    New-Item -ItemType Directory -Force -Path $env:XDG_CONFIG_HOME | Out-Null
+    $configArgs = @($configJs, '--port', $port, '--monitor-plugin', $monitorPlugin)
     if ($WebSearch) {
         $env:OPENCODE_ENABLE_EXA = '1'
         $configArgs += '--websearch'
@@ -107,5 +112,5 @@ try {
 } finally {
     if ($gw -and -not $gw.HasExited) { Stop-Process -Id $gw.Id -Force -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $coachMarker -Force -ErrorAction SilentlyContinue
-    Remove-Item Env:\OPENCODE_CONFIG_CONTENT, Env:\OPENCODE_ENABLE_EXA, Env:\OPENCODE_DISABLE_PROJECT_CONFIG, Env:\OPENCODE_PURE -ErrorAction SilentlyContinue
+    Remove-Item Env:\OPENCODE_CONFIG_CONTENT, Env:\OPENCODE_ENABLE_EXA, Env:\OPENCODE_DISABLE_PROJECT_CONFIG, Env:\OPENCODE_PURE, Env:\XDG_CONFIG_HOME -ErrorAction SilentlyContinue
 }

@@ -2,6 +2,8 @@
 'use strict';
 
 const MINIMUM_VERSION = [1, 14, 24];
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
 function isSupportedVersion(value) {
   const match = String(value || '').trim().match(/^(\d+)\.(\d+)\.(\d+)/);
@@ -14,7 +16,7 @@ function isSupportedVersion(value) {
   return true;
 }
 
-function buildOpenCodeConfig({ port = 8788, enableWebSearch = false } = {}) {
+function buildOpenCodeConfig({ port = 8788, enableWebSearch = false, monitorPlugin = '' } = {}) {
   const safePort = Number(port);
   if (!Number.isInteger(safePort) || safePort < 1 || safePort > 65535) {
     throw new Error('OpenCode gateway port must be an integer between 1 and 65535');
@@ -30,7 +32,10 @@ function buildOpenCodeConfig({ port = 8788, enableWebSearch = false } = {}) {
     [`**/${dot}env${dot}example`]: 'allow',
   };
   const removeCommand = ['r', 'm *'].join('');
-  return {
+  if (monitorPlugin && !path.isAbsolute(monitorPlugin)) {
+    throw new Error('OpenCode monitor plugin path must be absolute');
+  }
+  const config = {
     $schema: 'https://opencode.ai/config.json',
     model: 'bouncer-deepseek/deepseek-v4-pro',
     small_model: 'bouncer-deepseek/deepseek-v4-flash',
@@ -115,11 +120,14 @@ function buildOpenCodeConfig({ port = 8788, enableWebSearch = false } = {}) {
       doom_loop: 'ask',
     },
   };
+  if (monitorPlugin) config.plugin = [pathToFileURL(monitorPlugin).href];
+  return config;
 }
 
 function parseArgs(argv) {
   let port = 8788;
   let enableWebSearch = false;
+  let monitorPlugin = '';
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--port') {
@@ -127,11 +135,14 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === '--websearch') {
       enableWebSearch = true;
+    } else if (arg === '--monitor-plugin') {
+      monitorPlugin = String(argv[index + 1] || '');
+      index += 1;
     } else {
       throw new Error(`unknown option: ${arg}`);
     }
   }
-  return { port, enableWebSearch };
+  return { port, enableWebSearch, monitorPlugin };
 }
 
 module.exports = { MINIMUM_VERSION, buildOpenCodeConfig, isSupportedVersion };

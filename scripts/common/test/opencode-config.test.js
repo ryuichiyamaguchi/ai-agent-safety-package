@@ -7,7 +7,11 @@ const path = require('node:path');
 const { buildOpenCodeConfig, isSupportedVersion } = require('../opencode-config.js');
 
 test('OpenCode runtime config forces DeepSeek through the loopback inspection gateway', () => {
-  const config = buildOpenCodeConfig({ port: 8788, enableWebSearch: false });
+  const config = buildOpenCodeConfig({
+    port: 8788,
+    enableWebSearch: false,
+    monitorPlugin: '/opt/bouncer/opencode-bouncer-monitor.mjs',
+  });
   const provider = config.provider['bouncer-deepseek'];
 
   assert.strictEqual(config.model, 'bouncer-deepseek/deepseek-v4-pro');
@@ -27,6 +31,7 @@ test('OpenCode runtime config forces DeepSeek through the loopback inspection ga
   assert.strictEqual(config.agent['bouncer-helper'].model, 'bouncer-deepseek/deepseek-v4-flash');
   assert.strictEqual(config.agent.bouncer.permission.task['*'], 'deny');
   assert.strictEqual(config.agent.bouncer.permission.task['bouncer-helper'], 'allow');
+  assert.deepStrictEqual(config.plugin, ['file:///opt/bouncer/opencode-bouncer-monitor.mjs']);
 });
 
 test('OpenCode runtime config preserves useful reads while gating mutations and external access', () => {

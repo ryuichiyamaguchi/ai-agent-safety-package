@@ -186,6 +186,28 @@ async function main() {
       dangers: [],
     });
     assert.equal(unknown.status, 'review', '証明できない操作は allow にしない');
+
+    const searched = srv.explainCommand(
+      'grep -r "mcp\\|image\\|MCP\\|generate_image\\|codex-image" ~/.claude/ --include="*.json" -l 2>/dev/null | head -20',
+      'bash',
+    );
+    assert.match(searched.summary, /[.]claude.*JSON.*検索/, '検索場所とファイル種別を具体的に説明する');
+    assert.match(searched.summary, /mcp.*image.*generate_image.*codex-image/i, '実際の検索語を具体的に説明する');
+    assert.match(searched.summary, /最大20件/, 'head による件数制限を説明する');
+    assert.match(searched.impact, /変更しません/, '読み取り専用であることを明示する');
+    assert.match(searched.outbound, /送信しません/, '外部送信しないことを明示する');
+
+    const pipedRead = srv.approvalGuide({
+      hasCard: true,
+      meta: '2026-07-26 18:43:24 ・ tool=bash ・ risk=medium ・ card=opencode-permission',
+      title: 'OpenCode が承認を求めています',
+      label: 'bash を使用',
+      cmd: 'grep -r "mcp\\|image\\|MCP\\|generate_image\\|codex-image" ~/.claude/ --include="*.json" -l 2>/dev/null | head -20',
+      whatdo: 'OpenCode がこの操作を実行する前に、あなたの許可を待っています。',
+      dangers: [],
+    });
+    assert.match(pipedRead.summary, /[.]claude.*JSON.*検索/, '承認待ちの定型文ではなく、具体的な意味を最上段に出す');
+    assert.match(pipedRead.impact, /変更しません/);
   }
 
   // OpenCode standard はローカルLLM不要だが、DeepSeek送信検査Gatewayは必須。

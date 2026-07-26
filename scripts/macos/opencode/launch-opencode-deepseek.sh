@@ -7,6 +7,7 @@ WEBSEARCH="${2:-}"
 HOOKS_DIR="$WORKSPACE/.ai-safety/hooks"
 GATEWAY_JS="$HOOKS_DIR/common/ds-gateway.js"
 CONFIG_JS="$HOOKS_DIR/common/opencode-config.js"
+MONITOR_PLUGIN="$HOOKS_DIR/common/opencode-bouncer-monitor.mjs"
 PORT="${DS_GATEWAY_PORT:-8788}"
 KEY_DIR="$HOME/.deepseek-claude"
 KEY_FILE="$KEY_DIR/auth"
@@ -21,6 +22,7 @@ esac
 [ -d "$WORKSPACE" ] || { echo "作業フォルダが見つかりません: $WORKSPACE" >&2; exit 2; }
 [ -f "$GATEWAY_JS" ] || { echo "送信検査 Gateway が見つかりません: $GATEWAY_JS" >&2; exit 2; }
 [ -f "$CONFIG_JS" ] || { echo "OpenCode 安全設定が見つかりません: $CONFIG_JS" >&2; exit 2; }
+[ -f "$MONITOR_PLUGIN" ] || { echo "OpenCode承認モニターが見つかりません: $MONITOR_PLUGIN" >&2; exit 2; }
 
 if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
   echo "OpenCode + DeepSeek dry-run"
@@ -86,18 +88,21 @@ if [ "$ready" -ne 1 ] || ! kill -0 "$GW_PID" 2>/dev/null; then
   exit 1
 fi
 
-# プロジェクト固有の opencode.json と外部プラグインによる保護設定の上書きを防ぐ。
+# プロジェクト固有の設定は無効化し、隔離した設定ディレクトリからBouncerプラグインだけを読む。
 export OPENCODE_DISABLE_PROJECT_CONFIG=1
-export OPENCODE_PURE=1
+unset OPENCODE_PURE 2>/dev/null || true
+export XDG_CONFIG_HOME="$WORKSPACE/.ai-safety/opencode-runtime/xdg-config"
+export AI_SAFE_LOG_DIR="$LOG_DIR"
+mkdir -p "$XDG_CONFIG_HOME"
 if [ "$WEBSEARCH" = "--websearch" ]; then
   export OPENCODE_ENABLE_EXA=1
   export OPENCODE_CONFIG_CONTENT
-  OPENCODE_CONFIG_CONTENT="$(node "$CONFIG_JS" --port "$PORT" --websearch)"
+  OPENCODE_CONFIG_CONTENT="$(node "$CONFIG_JS" --port "$PORT" --monitor-plugin "$MONITOR_PLUGIN" --websearch)"
   echo "Web検索を有効にしました。検索語は外部サービスへ送信され、実行前に確認が出ます。"
 else
   unset OPENCODE_ENABLE_EXA 2>/dev/null || true
   export OPENCODE_CONFIG_CONTENT
-  OPENCODE_CONFIG_CONTENT="$(node "$CONFIG_JS" --port "$PORT")"
+  OPENCODE_CONFIG_CONTENT="$(node "$CONFIG_JS" --port "$PORT" --monitor-plugin "$MONITOR_PLUGIN")"
 fi
 
 # 実キーは Gateway 子プロセスだけが読み、OpenCode の環境には渡さない。
