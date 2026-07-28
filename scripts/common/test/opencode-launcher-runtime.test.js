@@ -248,6 +248,9 @@ test('配布物に無い綴り（単数形 agent/ など）へ仕込まれた定
     path.join(configDir, 'mode', 'sneaky.md'),
     path.join(configDir, 'skill', 'evil', 'SKILL.md'),
     path.join(configDir, 'themes', 'evil.json'),
+    // 1.18.4 は設定ディレクトリ直下の config.json も設定として読む（実機確認）。
+    // ここにプラグインや MCP を書かれると起動時に実行されるので、消す一覧に入っていること。
+    path.join(configDir, 'config.json'),
   ];
   for (const file of others) {
     fs.mkdirSync(path.dirname(file), { recursive: true });

@@ -105,6 +105,19 @@ test('both launchers keep the resolved-config check, the ready gate and the watc
   }
 });
 
+// 「毎回消して置き直す」方式が消すファイル名の一覧。opencode 1.18.4 は設定ディレクトリ直下の
+// config.json も設定として読む（実機確認）ので、ここに任意のプラグインや MCP を書かれると
+// 起動時に実行される。opencode.json5 / .opencoderc / config.jsonc は読まないので対象外。
+test('both launchers wipe config.json as well as the opencode.json family', () => {
+  const mac = read('scripts/macos/opencode/launch-opencode-deepseek.sh');
+  const win = read('scripts/windows/opencode/launch-opencode-deepseek.ps1');
+
+  for (const name of ['AGENTS.md', 'opencode.json', 'opencode.jsonc', 'config.json']) {
+    assert.ok(mac.includes(`"$OC_CONFIG_DIR/${name}"`), `mac のランチャーが ${name} を消していない`);
+    assert.ok(win.includes(`'${name}'`), `Windows のランチャーが ${name} を消していない`);
+  }
+});
+
 test('both launchers reject an empty generated config', () => {
   const mac = read('scripts/macos/opencode/launch-opencode-deepseek.sh');
   const win = read('scripts/windows/opencode/launch-opencode-deepseek.ps1');

@@ -444,13 +444,20 @@ test('the read tool cannot reach the safety package itself', () => {
 test('read-only commands are allowed while write-capable ones stay behind a prompt', () => {
   const bash = buildOpenCodeConfig().permission.bash;
 
-  for (const pattern of ['wc *', 'head *', 'tail *', 'git branch', 'node -v', 'npm -v', 'python --version']) {
+  for (const pattern of ['wc *', 'git branch', 'node -v', 'npm -v', 'python --version']) {
     assert.strictEqual(bash[pattern], 'allow', `${pattern} が allow になっていない`);
   }
   // `git show HEAD:.env` は protectedPathRegex（パス区切り前提）に当たらず床をすり抜けるので
   // allow に入れない。deny 床の正規表現を強めない限り ask のまま。
   assert.strictEqual(bash['git show*'], undefined, 'git show* は .env をコロン参照で読み出せる');
   assert.strictEqual(bash['cat*'], undefined);
+  // head * / tail * は `head -n 200 .*` のようにグロブで書かれると床から読み取り先が見えない
+  // （3 エンジンとも pass = tri-engine/cases.json の head-glob-dotfiles で実測）。確認ダイアログ
+  // すら出ないまま .env の中身がモデルへ渡るので allow から外し、'*': 'ask' に落とす。
+  // grep* / rg* を外したのと同じ理由。
+  for (const pattern of ['head *', 'tail *']) {
+    assert.strictEqual(bash[pattern], undefined, `${pattern} はグロブで .env を読み出せるので allow にしない`);
+  }
 });
 
 // --- 回帰: 読み取り専用エージェントだけは許し、緩める上書きは弾く ----------------

@@ -171,7 +171,9 @@ try {
         $knownPath = Join-Path $ocConfigDir $known
         if (Test-Path -LiteralPath $knownPath) { Remove-Item -LiteralPath $knownPath -Recurse -Force -ErrorAction SilentlyContinue }
     }
-    foreach ($knownFile in @('AGENTS.md', 'opencode.json', 'opencode.jsonc')) {
+    # config.json も消す (1.18.4 実測: 設定ディレクトリ直下の config.json も設定として読む。
+    # opencode.json5 / .opencoderc / config.jsonc は読まないので、増やすのはこの 1 本だけ)。
+    foreach ($knownFile in @('AGENTS.md', 'opencode.json', 'opencode.jsonc', 'config.json')) {
         $knownFilePath = Join-Path $ocConfigDir $knownFile
         if (Test-Path -LiteralPath $knownFilePath) { Remove-Item -LiteralPath $knownFilePath -Force -ErrorAction SilentlyContinue }
     }

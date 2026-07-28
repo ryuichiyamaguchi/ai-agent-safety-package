@@ -178,7 +178,10 @@ mkdir -p "$OC_CONFIG_DIR"
 for _known in agent agents command commands mode modes plugin plugins skill skills themes; do
   rm -rf "$OC_CONFIG_DIR/$_known"
 done
-rm -f "$OC_CONFIG_DIR/AGENTS.md" "$OC_CONFIG_DIR/opencode.json" "$OC_CONFIG_DIR/opencode.jsonc"
+# config.json も消す（1.18.4 実測: 設定ディレクトリ直下の config.json も設定として読む。
+# opencode.json5 / .opencoderc / config.jsonc は読まないので、増やすのはこの 1 本だけ）。
+rm -f "$OC_CONFIG_DIR/AGENTS.md" "$OC_CONFIG_DIR/opencode.json" "$OC_CONFIG_DIR/opencode.jsonc" \
+  "$OC_CONFIG_DIR/config.json"
 
 if [ -d "$HARNESS_SRC" ]; then
   for _entry in "$HARNESS_SRC"/*; do

@@ -299,11 +299,102 @@
       "why": "インタプリタ経由"
     },
     {
-      "id": "env-example-overblock",
+      "id": "env-example",
       "group": ".env の各形",
       "command": "cat .env.example",
+      "expect": "pass",
+      "why": "見本ファイル。教材（docs/06・docs/90）が『値を空にした .env.example を使う』と案内しているので、教材どおりに操作した受講者が止められないこと。cycle2/cycle3 まで block で固定していた過剰検知を 2026-07-28 に 3 エンジン同時に外した"
+    },
+    {
+      "id": "env-sample",
+      "group": ".env の各形",
+      "command": "cat .env.sample",
+      "expect": "pass",
+      "why": "同じ慣習の別名"
+    },
+    {
+      "id": "env-template",
+      "group": ".env の各形",
+      "command": "cat .env.template",
+      "expect": "pass",
+      "why": "同じ慣習の別名"
+    },
+    {
+      "id": "env-example-copy-to-real",
+      "group": ".env の各形",
+      "command": "cp .env.example .env.local",
       "expect": "block",
-      "why": "既知の過剰検知（cycle2 YELLOW-N3）。3 エンジンとも同じく止まることだけをここで固定する。挙動を変えるなら 3 エンジン同時に変えること"
+      "why": "見本の読み出しは通すが、宛先が本物の .env.local なので止まること（除外は見本の名前だけで、本物の秘密ファイルの扱いは変えていない）"
+    },
+    {
+      "id": "env-example-lookalike",
+      "group": ".env の各形",
+      "command": "cat .env.examples",
+      "expect": "block",
+      "why": "見本の名前に 1 文字足しただけの別ファイルは除外に入らないこと（除外は example / sample / template そのものだけ）"
+    },
+    {
+      "id": "env-example-prefix",
+      "group": ".env の各形",
+      "command": "cat .env.exampl",
+      "expect": "block",
+      "why": "見本の名前の途中まで（＝別のファイル名）は除外に入らないこと"
+    },
+    {
+      "id": "env-example-suffixed",
+      "group": ".env の各形",
+      "command": "cat .env.example.local",
+      "expect": "block",
+      "why": "見本の名前の後ろにさらにパスが続く形は除外に入らないこと"
+    },
+    {
+      "id": "env-staging",
+      "group": ".env の各形",
+      "command": "cat .env.staging",
+      "expect": "block",
+      "why": "s で始まるが sample ではない本物。除外の書き方（先読みを使わない 1 文字ずつの照合）が守る側を巻き込んでいないこと"
+    },
+    {
+      "id": "env-test",
+      "group": ".env の各形",
+      "command": "cat .env.test",
+      "expect": "block",
+      "why": "t で始まるが template ではない本物"
+    },
+    {
+      "id": "env-local-backup",
+      "group": ".env の各形",
+      "command": "cat .env.local.bak",
+      "expect": "block",
+      "why": "秘密ファイルの控え。末尾の境界からドットを外した影響で取りこぼしていないこと"
+    },
+    {
+      "id": "env-head-direct",
+      "group": ".env の各形",
+      "command": "head -n 5 .env",
+      "expect": "block",
+      "why": "head で直接 .env を指す形は床が止める（グロブの形は下の head-glob-dotfiles を参照）"
+    },
+    {
+      "id": "head-glob-dotfiles",
+      "group": "グロブ経由の読み出し (cycle3)",
+      "command": "head -n 200 .*",
+      "expect": "pass",
+      "why": "床はコマンド文字列しか見ないので、読まれる先がグロブでしか書かれていない形は 3 エンジンとも止められない（実測: mac・Windows・OpenCode とも pass。実際にシェルで実行すると .env の中身が出る）。だから OpenCode の permission.bash から head * / tail * を allow から外し、確認を 1 回挟む形にした（grep* / rg* と同じ扱い）。ここが block に変わったら OpenCode 側の ask も見直すこと"
+    },
+    {
+      "id": "tail-glob-dotfiles",
+      "group": "グロブ経由の読み出し (cycle3)",
+      "command": "tail -n +1 .*",
+      "expect": "pass",
+      "why": "同じ性質の tail 版"
+    },
+    {
+      "id": "head-glob-dotenv-prefix",
+      "group": "グロブ経由の読み出し (cycle3)",
+      "command": "head -n 200 .e*",
+      "expect": "pass",
+      "why": "同じ性質。文字列に .env が現れないので protectedPathRegex も dangerousCommandRegex も当たらない"
     },
     {
       "id": "env-word-in-sentence",

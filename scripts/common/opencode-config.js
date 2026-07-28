@@ -347,9 +347,17 @@ function buildOpenCodeConfig({
       // opencode-bouncer-monitor.mjs の decisive deny 床（tool.execute.before）が受け止める。
       // deny は allow より後ろに置く（最後に一致したルールが勝つ）。
       // 「見るだけ」で副作用が出しようがないものは allow に置いて確認疲れを減らす。
-      // head / tail / wc は .env・.ssh 等に向けても decisive deny 床（protectedPathRegex /
-      // dangerousCommandRegex）が先に止める（実測）。git show* は `git show HEAD:.env` の形が
-      // 床の正規表現（パス区切り前提）をすり抜けるため allow に入れない＝確認のまま残す。
+      // wc は中身を出さない（行数・語数・バイト数だけ）ので allow に残す。
+      // git show* は `git show HEAD:.env` の形が床の正規表現（パス区切り前提）をすり抜けるため
+      // allow に入れない＝確認のまま残す。
+      //
+      // head * / tail * を allow から外した理由（2026-07-28、grep* / rg* と同じ理由）:
+      //   床はコマンド文字列しか見ないので、`head -n 200 .*` のようにグロブで書かれた形からは
+      //   何が読まれるか分からない。文字列に .env が出てこないため protectedPathRegex も
+      //   dangerousCommandRegex も当たらず（3 エンジン実測 = 3 者とも pass）、確認ダイアログも
+      //   出ないまま .env の中身がそのままモデルへ渡る。「head / tail は .env に向けても床が
+      //   先に止める」という旧コメントは `head .env` のような直書きの形でしか成り立たず、
+      //   グロブを使うと成立しない。ここを外すと '*': 'ask' に落ちて確認が 1 回出る。
       //
       // grep* / rg* を allow から外した理由（2026-07-28）:
       //   床はコマンド文字列しか見ないので、`grep -r SECRET .` のように検索先が「.」で
@@ -368,8 +376,6 @@ function buildOpenCodeConfig({
         'pwd': 'allow',
         'ls*': 'allow',
         'wc *': 'allow',
-        'head *': 'allow',
-        'tail *': 'allow',
         'git status*': 'allow',
         'git diff*': 'allow',
         'git branch': 'allow',
