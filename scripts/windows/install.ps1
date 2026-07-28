@@ -42,13 +42,37 @@ Write-Host ("Installing for platform: " + $Platform)
 # 全コピー処理より前に呼ぶので、中止時はワークスペースを一切変更しない。開発者/講師が意図的に
 # policy.json 等を変更したときだけ、明示 opt-out AI_SAFE_ALLOW_HASH_MISMATCH=1 で続行できる（警告は出す）。
 # 旧 AI_SAFETY_STRICT=1 は「既定で中止」に統合され不要になった（既定が常に strict）。
+# docs\tested_versions.md は BOM なし UTF-8 で、日本語ファイル名の行を含む。
+# Windows PowerShell 5.1 の Get-Content は -Encoding 未指定だと既定 ANSI（日本語環境では
+# CP932）として読むため、日本語パスの行が壊れて「一覧に無い」「ハッシュ行が拾えない」と
+# 誤判定し、日本語名のコマンドファイルが検証されないまま配置される。
+# この表を読むときは必ず -Encoding UTF8 を指定すること（PS 5.1 / PS 7 とも BOM なし
+# UTF-8 を正しく復号する）。
+$versionsFile = Join-Path $packageRoot "docs\tested_versions.md"
+
+# 検証表そのものが欠けていると、以下のハッシュ検証が 1 件残らずスキップされる
+# （＝改ざんに気付けないまま全部配置してしまう）。「表が無い＝検証できない＝配布物が
+# 壊れている」ので既定で中止する。開発者/講師が承知の上で進めるときだけ
+# AI_SAFE_ALLOW_HASH_MISMATCH=1 で警告に落とせる。
+function Assert-VersionsTable {
+    if (Test-Path -LiteralPath $versionsFile) { return }
+    if ($env:AI_SAFE_ALLOW_HASH_MISMATCH -eq '1') {
+        Write-Warning "改ざん検知の一覧 docs\tested_versions.md がありません。AI_SAFE_ALLOW_HASH_MISMATCH=1 が設定されているため、検証せずに続行します。"
+        return
+    }
+    throw ("配布物が壊れています。改ざん検知の一覧 docs\tested_versions.md が見つかりません。`n" +
+           "  この表が無いと配布ファイルの改ざん検知が一切できないため、インストールを中止しました。`n" +
+           "  パッケージを配布元から取り直してください。`n" +
+           "  （講師が承知の上で進める場合のみ AI_SAFE_ALLOW_HASH_MISMATCH=1 を設定して再実行）")
+}
+Assert-VersionsTable
+
 function Test-DistributionHash([string]$RelPath) {
     $absPath = Join-Path $packageRoot ($RelPath -replace '/', '\')
     if (-not (Test-Path -LiteralPath $absPath)) { return }
-    $versionsFile = Join-Path $packageRoot "docs\tested_versions.md"
     if (-not (Test-Path -LiteralPath $versionsFile)) { return }
     $expected = $null
-    foreach ($line in Get-Content -LiteralPath $versionsFile) {
+    foreach ($line in Get-Content -LiteralPath $versionsFile -Encoding UTF8) {
         if ($line -match ("^\|\s*" + [regex]::Escape($RelPath) + "\s*\|\s*([0-9a-fA-F]{64})\s*\|")) {
             $expected = $Matches[1].ToLower()
             break
@@ -97,9 +121,64 @@ switch ($Platform) {
         Test-DistributionHash "configs/codex/config.windows.toml"
     }
 }
+# 「必ず検証対象であるべき」ファイル用。表に行が無い = そのファイルだけ改ざん検知が
+# 効かない状態なので、黙って素通しさせない。扱いは 2 段階にする。
+#   (a) AI に読ませる指示書 (opencode-harness / dist-opencode / dist-skills 配下) は
+#       実質コード相当で、余分な .md が 1 枚混じるだけで無検証のままモデル指示として
+#       有効になってしまう。ここは登録漏れも**中止**する (fail-closed)。講師が承知の上で
+#       進めるときだけ AI_SAFE_ALLOW_UNLISTED_HARNESS=1 で続行できる。
+#   (b) それ以外の一般ファイルは従来どおり**警告のみ**で続行する。受講者の導入を
+#       止めないほうを優先し、登録漏れはリリース前のテストで落とす
+#       (scripts/common/test/opencode-harness.test.js が「同梱物に未登録が無いこと」を検査)。
+$hashListingRequiredPrefixes = @(
+    'workspace-template/opencode-harness/',
+    'workspace-template/dist-opencode/',
+    'workspace-template/dist-skills/'
+)
+
+function Test-DistributionHashListed([string]$RelPath) {
+    $absPath = Join-Path $packageRoot ($RelPath -replace '/', '\')
+    if ((Test-Path -LiteralPath $absPath) -and (Test-Path -LiteralPath $versionsFile)) {
+        $listed = $false
+        foreach ($line in Get-Content -LiteralPath $versionsFile -Encoding UTF8) {
+            if ($line.Contains("| " + $RelPath + " |")) { $listed = $true; break }
+        }
+        if (-not $listed) {
+            $mustBeListed = $false
+            foreach ($prefix in $hashListingRequiredPrefixes) {
+                if ($RelPath.StartsWith($prefix)) { $mustBeListed = $true; break }
+            }
+            if ($mustBeListed -and $env:AI_SAFE_ALLOW_UNLISTED_HARNESS -ne '1') {
+                throw ("このファイルは改ざん検知の一覧に登録されていません: " + $RelPath + "`n" +
+                       "  AI に読ませる指示書は実質コード相当のため、未検証のまま配置せずに中止しました。`n" +
+                       "  講師向け: docs\tested_versions.md にハッシュ行を追加してください。`n" +
+                       "  （承知の上で進める場合のみ AI_SAFE_ALLOW_UNLISTED_HARNESS=1 を設定して再実行）")
+            }
+            Write-Warning ("このファイルは改ざん検知の一覧に登録されていません: " + $RelPath)
+            Write-Warning "      講師向け: docs\tested_versions.md にハッシュ行を追加してください。"
+        }
+    }
+    Test-DistributionHash $RelPath
+}
+
 Test-DistributionHash "configs/gemini/policies/safety.toml"
 Test-DistributionHash "workspace-template/aiexclude.template"
-Test-DistributionHash "workspace-template/dist-skills/hearing-ladder/SKILL.md"
+Test-DistributionHashListed "workspace-template/dist-skills/hearing-ladder/SKILL.md"
+# OpenCode 用の日本語ハーネス (AGENTS.md / スラッシュコマンド / 追加エージェント)。
+# モデルに読ませる指示書 = 実質コード相当なので、同梱ファイルは丸ごとハッシュ検証対象にする。
+# 配布元フォルダ名は制作途中で opencode-harness / dist-opencode の両方が使われたため、
+# 存在するほうを採用する (配置先の名前は opencode-harness に正規化する)。
+$harnessSrcRoot = $null
+foreach ($harnessCandidate in @('opencode-harness', 'dist-opencode')) {
+    $candidatePath = Join-Path $packageRoot ("workspace-template\" + $harnessCandidate)
+    if (Test-Path -LiteralPath $candidatePath -PathType Container) { $harnessSrcRoot = $candidatePath; break }
+}
+if ($harnessSrcRoot) {
+    foreach ($harnessFile in @(Get-ChildItem -LiteralPath $harnessSrcRoot -Recurse -File -Filter *.md -ErrorAction SilentlyContinue | Sort-Object FullName)) {
+        $rel = $harnessFile.FullName.Substring($packageRoot.Length).TrimStart('\', '/').Replace('\', '/')
+        Test-DistributionHashListed $rel
+    }
+}
 
 function Copy-WithBackup([string]$Source, [string]$Dest) {
     $destDir = Split-Path -Parent $Dest
@@ -230,12 +309,14 @@ foreach ($guide in @("AGENTS.md", "CLAUDE.md", "GEMINI.md")) {
 # リポジトリ側は dist-skills\ に置く（.gitignore が .claude/ を除外するため）。
 # スキル単位で処理: 同名の既存スキル（ユーザーが手を入れた版も含む）は backup へ退避してから
 # 入れ替える（Copy-WithBackup と同じ思想）。同梱していない他スキルには触れない。
+# ※ かつて .opencode\skills\ にも同じものを置いていたが、OpenCode 統合ランチャーは
+#   OPENCODE_DISABLE_PROJECT_CONFIG=1 で起動するためプロジェクトの .opencode\ は
+#   スキャンされない (プローブスキルで実測)。死にコードなので廃止し、OpenCode 用は
+#   下の .ai-safety\dist-skills → (起動時に) 隔離設定ディレクトリ側へ一本化した。
 $skillsSrc = Join-Path $packageRoot "workspace-template\dist-skills"
 if (Test-Path -LiteralPath $skillsSrc) {
     $skillsDest = Join-Path $Workspace ".claude\skills"
-    $openCodeSkillsDest = Join-Path $Workspace ".opencode\skills"
     New-Item -ItemType Directory -Force -Path $skillsDest | Out-Null
-    New-Item -ItemType Directory -Force -Path $openCodeSkillsDest | Out-Null
     Get-ChildItem -LiteralPath $skillsSrc -Directory -Force | ForEach-Object {
         $skillDestDir = Join-Path $skillsDest $_.Name
         if (Test-Path -LiteralPath $skillDestDir) {
@@ -246,16 +327,34 @@ if (Test-Path -LiteralPath $skillsSrc) {
         }
         Copy-Item -LiteralPath $_.FullName -Destination $skillDestDir -Recurse -Force
 
-        $openCodeSkillDestDir = Join-Path $openCodeSkillsDest $_.Name
-        if (Test-Path -LiteralPath $openCodeSkillDestDir) {
-            $relativeName = ($openCodeSkillDestDir -replace "[:\\\/]+", "_")
-            New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
-            Copy-Item -LiteralPath $openCodeSkillDestDir -Destination (Join-Path $backupDir $relativeName) -Recurse -Force
-            Remove-Item -LiteralPath $openCodeSkillDestDir -Recurse -Force
-        }
-        Copy-Item -LiteralPath $_.FullName -Destination $openCodeSkillDestDir -Recurse -Force
     }
-    Write-Host "配布スキルを配置しました: $skillsDest / $openCodeSkillsDest"
+    Write-Host "配布スキルを配置しました: $skillsDest"
+
+    # OpenCode 統合ランチャー用の配布元。起動時に隔離設定ディレクトリ
+    # ($XDG_CONFIG_HOME\opencode\skills\) へ毎回コピーされる。受講者が触る場所ではないので
+    # .ai-safety 配下 (パッケージ管理領域) に置き、丸ごと入れ替える。
+    $distSkillsDest = Join-Path $Workspace ".ai-safety\dist-skills"
+    if (Test-Path -LiteralPath $distSkillsDest) {
+        $relativeName = ($distSkillsDest -replace "[:\\\/]+", "_")
+        New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+        Copy-Item -LiteralPath $distSkillsDest -Destination (Join-Path $backupDir $relativeName) -Recurse -Force
+        Remove-Item -LiteralPath $distSkillsDest -Recurse -Force
+    }
+    Copy-Item -LiteralPath $skillsSrc -Destination $distSkillsDest -Recurse -Force
+}
+
+# OpenCode 用の日本語ハーネス一式 (AGENTS.md / command / agents) を .ai-safety 配下に配置する。
+# 起動時にランチャーが隔離設定ディレクトリへ毎回コピーするため、ここが配布元になる。
+if ($harnessSrcRoot) {
+    $harnessDest = Join-Path $Workspace ".ai-safety\opencode-harness"
+    if (Test-Path -LiteralPath $harnessDest) {
+        $relativeName = ($harnessDest -replace "[:\\\/]+", "_")
+        New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+        Copy-Item -LiteralPath $harnessDest -Destination (Join-Path $backupDir $relativeName) -Recurse -Force
+        Remove-Item -LiteralPath $harnessDest -Recurse -Force
+    }
+    Copy-Item -LiteralPath $harnessSrcRoot -Destination $harnessDest -Recurse -Force
+    Write-Host "OpenCode 用の日本語ハーネスを配置しました: $harnessDest"
 }
 
 # A-1: .gitignore.template を workspace ルートに .gitignore としてコピーする。

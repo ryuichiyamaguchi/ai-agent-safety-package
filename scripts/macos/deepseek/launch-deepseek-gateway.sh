@@ -4,11 +4,18 @@
 # ガード付き Claude Code を起動。終了時に gateway を確実停止（fail-closed）。
 set -u
 
+# 受講者のシェルに残っていた AI_SAFE_POLICY / AI_SAFE_ROOT で deny 床ごと差し替えられる
+# のを防ぐため、起動時に必ず捨てる（このあと同梱ポリシーを自分で設定する）。
+# 万一これが漏れても、ガード側(lib/safety_policy.sh / lib/SafetyPolicy.ps1)が同梱パス以外を
+# 拒否するので床は残る。ここは二重の保険。
+unset AI_SAFE_POLICY AI_SAFE_ROOT
+
 WORKSPACE="${1:-$HOME/Documents/my-ai-workspace}"
 HOOKS_DIR="$WORKSPACE/.ai-safety/hooks"
 GATEWAY_JS="$HOOKS_DIR/common/ds-gateway.js"
 LAUNCH_CLAUDE="$HOOKS_DIR/macos/launch-claude-safe.sh"
 PORT="${DS_GATEWAY_PORT:-8788}"
+KEY_FILE="$HOME/.deepseek-claude/auth"
 # AI コーチ(モニター)に「これは d-claude セッション」を伝える目印。モニターは別プロセスなので
 # env では渡らない＝LOG_DIR にファイルを置く。モニターはこの目印があるとき Gemini へコマンド本文を
 # 送らず分類結果だけ送る(redact)＋UI 明示。終了時に必ず消す(消し忘れ対策にモニター側も鮮度を見る)。
@@ -17,6 +24,23 @@ COACH_MARKER="${AI_SAFE_LOG_DIR:-$HOME/.ai-safety/logs}/coach-engine"
 command -v node >/dev/null 2>&1 || { echo "【エラー】node が見つかりません。Claude Code には Node が必要です。"; exit 1; }
 [ -f "$GATEWAY_JS" ] || { echo "【エラー】ds-gateway.js が見つかりません: $GATEWAY_JS"; exit 1; }
 [ -f "$LAUNCH_CLAUDE" ] || { echo "【エラー】launch-claude-safe.sh が見つかりません: $LAUNCH_CLAUDE"; exit 1; }
+# 実キーは Gateway 子プロセスだけが読む（Claude Code 側には渡さない）ので、ここで存在を確かめる。
+[ -s "$KEY_FILE" ] || {
+  echo "【エラー】DeepSeek APIキーが未登録です。"
+  echo "  先に「登録-初回だけ」を実行してから、もう一度起動してください。"
+  exit 1
+}
+
+# 呼び出し元認証トークンを起動ごとに採番する。127.0.0.1 で待つだけでは同一 PC の
+# 任意プロセスや DNS リバインディングを踏んだブラウザから叩けてしまうため、
+# 「この起動で立てた Claude Code だけが通れる」合言葉を毎回作り直す。
+# コマンドライン引数には載せない（ps に出るため）。環境変数と gateway 内メモリだけで扱う。
+if command -v openssl >/dev/null 2>&1; then
+  GATEWAY_TOKEN="$(openssl rand -hex 32)"
+else
+  GATEWAY_TOKEN="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+fi
+[ -n "$GATEWAY_TOKEN" ] || { echo "【エラー】Gateway の合言葉を生成できませんでした（fail-closed）。"; exit 1; }
 
 stop_stale_gateway() {
   command -v lsof >/dev/null 2>&1 || return 0
@@ -42,9 +66,20 @@ stop_stale_gateway() {
 
 stop_stale_gateway
 
-DS_GATEWAY_PORT="$PORT" node "$GATEWAY_JS" &
+# 実キー(DS_GATEWAY_AUTH_FILE)と合言葉(DS_GATEWAY_TOKEN)は、この行だけの環境変数として
+# gateway 子プロセスに渡す（export しないので Claude Code 側の環境には残らない）。
+DS_GATEWAY_PORT="$PORT" \
+DS_GATEWAY_TOKEN="$GATEWAY_TOKEN" \
+DS_GATEWAY_AUTH_FILE="$KEY_FILE" \
+  node "$GATEWAY_JS" &
 GW_PID=$!
-cleanup() { kill "$GW_PID" 2>/dev/null; rm -f "$COACH_MARKER" 2>/dev/null; }
+# coach マーカーは d-claude と OpenCode が同じパスを共有する。並行起動時に片方の終了で
+# もう片方のバナーが消えないよう、「自分が書いた値のままのときだけ」消す。
+remove_own_coach_marker() {
+  [ "$(cat "$COACH_MARKER" 2>/dev/null || true)" = "d-claude" ] || return 0
+  rm -f "$COACH_MARKER" 2>/dev/null || true
+}
+cleanup() { kill "$GW_PID" 2>/dev/null; remove_own_coach_marker; }
 trap cleanup EXIT INT TERM
 
 ok=0
@@ -65,6 +100,11 @@ if ! kill -0 "$GW_PID" 2>/dev/null; then
 fi
 
 export ANTHROPIC_BASE_URL="http://127.0.0.1:$PORT"
+# Claude Code が gateway へ送る鍵を「実キー」から「この起動限りの合言葉」に差し替える。
+# 呼び出し元 (.command / launch-integrated.sh) が実キーを ANTHROPIC_AUTH_TOKEN に入れて
+# 渡してくるが、ここで上書きするので実キーは Claude Code のプロセスには残らない
+# （実キーを読むのは gateway 子プロセスだけ = OpenCode 経路と同じ扱い）。
+export ANTHROPIC_AUTH_TOKEN="$GATEWAY_TOKEN"
 # d-claude 経路の目印。launch-claude-safe.sh はこのフラグがあるとき
 # DeepSeek ルーティング env (AUTH_TOKEN/BASE_URL/MODEL) の unset をスキップする
 # （消すと DeepSeek に繋がらず claude が "not logged in" になるため）。

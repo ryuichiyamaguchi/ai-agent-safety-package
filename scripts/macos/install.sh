@@ -86,14 +86,35 @@ echo "Installing for platform: $PLATFORM"
 # 開発者/講師が意図的に policy.json 等を変更したときだけ、明示 opt-out
 # AI_SAFE_ALLOW_HASH_MISMATCH=1 で続行できる（その場合も警告は出す）。
 # 旧 AI_SAFETY_STRICT=1 は「既定で中止」に統合され不要になった（既定が常に strict）。
+versions_file="$package_root/docs/tested_versions.md"
+
+# 検証表そのものが欠けていると、以下のハッシュ検証が 1 件残らずスキップされる
+# （＝改ざんに気付けないまま全部配置してしまう）。「表が無い＝検証できない＝配布物が
+# 壊れている」ので既定で中止する。開発者/講師が承知の上で進めるときだけ
+# AI_SAFE_ALLOW_HASH_MISMATCH=1 で警告に落とせる。
+if [ ! -f "$versions_file" ]; then
+  if [ "${AI_SAFE_ALLOW_HASH_MISMATCH:-0}" = "1" ]; then
+    echo "警告: 改ざん検知の一覧 docs/tested_versions.md がありません。" >&2
+    echo "      AI_SAFE_ALLOW_HASH_MISMATCH=1 が設定されているため、検証せずに続行します。" >&2
+  else
+    echo "エラー: 配布物が壊れています。改ざん検知の一覧 docs/tested_versions.md が見つかりません。" >&2
+    echo "  この表が無いと配布ファイルの改ざん検知が一切できないため、インストールを中止します。" >&2
+    echo "  パッケージを配布元から取り直してください。" >&2
+    echo "  （講師が承知の上で進める場合のみ AI_SAFE_ALLOW_HASH_MISMATCH=1 を設定して再実行）" >&2
+    exit 1
+  fi
+fi
+
 verify_hash() {
   rel_path="$1"
   abs_path="$package_root/$rel_path"
   [ -f "$abs_path" ] || return 0
-  versions_file="$package_root/docs/tested_versions.md"
   [ -f "$versions_file" ] || return 0
   # Look up "| <rel_path> | <sha> |" rows in tested_versions.md.
-  expected="$(grep -F "| $rel_path |" "$versions_file" 2>/dev/null | head -n1 | awk -F'|' '{gsub(/ /,"",$3); print $3}')"
+  # 行が無いファイルは検証対象外として素通しする。`set -o pipefail` 下では grep の
+  # 「見つからない=1」がそのまま代入の失敗になり、set -e で install ごと落ちるため
+  # `|| true` で受ける（ハッシュ不一致のときの中止は下の比較でそのまま行う）。
+  expected="$(grep -F "| $rel_path |" "$versions_file" 2>/dev/null | head -n1 | awk -F'|' '{gsub(/ /,"",$3); print $3}' || true)"
   [ -n "$expected" ] || return 0
   actual="$(shasum -a 256 "$abs_path" | awk '{print $1}')"
   if [ "$actual" != "$expected" ]; then
@@ -138,9 +159,55 @@ case "$PLATFORM" in
     verify_hash "configs/codex/config.windows.toml"
     ;;
 esac
+# 「必ず検証対象であるべき」ファイル用。表に行が無い＝そのファイルだけ改ざん検知が
+# 効かない状態なので、黙って素通しせず知らせる。
+#
+# 扱いは 2 段階にする:
+#   (a) AI に読ませる指示書（opencode-harness / dist-opencode / dist-skills 配下）は
+#       実質コード相当で、余分な .md が 1 枚混じるだけで無検証のままモデル指示として
+#       有効になってしまう。ここは登録漏れも**中止**する（fail-closed）。
+#       講師が承知の上で進めるときだけ AI_SAFE_ALLOW_UNLISTED_HARNESS=1 で続行できる。
+#   (b) それ以外の一般ファイルは従来どおり**警告のみ**で続行する。受講者の導入を
+#       止めないほうを優先し、登録漏れはリリース前のテストで落とす
+#       （scripts/common/test/opencode-harness.test.js が「同梱物に未登録が無いこと」を検査）。
+hash_listing_required() {
+  case "$1" in
+    workspace-template/opencode-harness/*|workspace-template/dist-opencode/*|workspace-template/dist-skills/*)
+      return 0 ;;
+    *)
+      return 1 ;;
+  esac
+}
+
+verify_hash_listed() {
+  rel_path="$1"
+  if [ -f "$package_root/$rel_path" ] && [ -f "$versions_file" ] \
+     && ! grep -qF "| $rel_path |" "$versions_file" 2>/dev/null; then
+    if hash_listing_required "$rel_path" && [ "${AI_SAFE_ALLOW_UNLISTED_HARNESS:-0}" != "1" ]; then
+      echo "エラー: このファイルは改ざん検知の一覧に登録されていません: $rel_path" >&2
+      echo "  AI に読ませる指示書は実質コード相当のため、未検証のまま配置せずに中止します。" >&2
+      echo "  講師向け: docs/tested_versions.md にハッシュ行を追加してください。" >&2
+      echo "  （承知の上で進める場合のみ AI_SAFE_ALLOW_UNLISTED_HARNESS=1 を設定して再実行）" >&2
+      exit 1
+    fi
+    echo "警告: このファイルは改ざん検知の一覧に登録されていません: $rel_path" >&2
+    echo "      講師向け: docs/tested_versions.md にハッシュ行を追加してください。" >&2
+  fi
+  verify_hash "$rel_path"
+}
+
 verify_hash "configs/gemini/policies/safety.toml"
 verify_hash "workspace-template/aiexclude.template"
-verify_hash "workspace-template/dist-skills/hearing-ladder/SKILL.md"
+verify_hash_listed "workspace-template/dist-skills/hearing-ladder/SKILL.md"
+# OpenCode 用の日本語ハーネス（AGENTS.md / スラッシュコマンド / 追加エージェント）。
+# モデルに読ませる指示書＝実質コード相当なので、同梱ファイルは丸ごとハッシュ検証対象にする。
+for harness_candidate in opencode-harness dist-opencode; do
+  [ -d "$package_root/workspace-template/$harness_candidate" ] || continue
+  while IFS= read -r harness_file; do
+    verify_hash_listed "${harness_file#"$package_root"/}"
+  done < <(find "$package_root/workspace-template/$harness_candidate" -type f -name '*.md' | sort)
+  break
+done
 
 copy_with_backup() {
   src="$1"
@@ -220,8 +287,12 @@ done
 # スキル単位で処理: 同名の既存スキル（ユーザーが手を入れた版も含む）は backup へ退避してから
 # ディレクトリごと入れ替える（copy_with_backup と同じ思想＝上書き前に必ず控えを取る／古い
 # support ファイルが残らない）。同梱していない他スキルには触れない。
+# ※ かつて .opencode/skills/ にも同じものを置いていたが、OpenCode 統合ランチャーは
+#   OPENCODE_DISABLE_PROJECT_CONFIG=1 で起動するためプロジェクトの .opencode/ は
+#   スキャンされない（プローブスキルで実測）。死にコードなので廃止し、OpenCode 用は
+#   下の .ai-safety/dist-skills →（起動時に）隔離設定ディレクトリ側へ一本化した。
 if [ -d "$package_root/workspace-template/dist-skills" ]; then
-  mkdir -p "$workspace/.claude/skills" "$workspace/.opencode/skills"
+  mkdir -p "$workspace/.claude/skills"
   for skill_src in "$package_root/workspace-template/dist-skills"/*/; do
     [ -d "$skill_src" ] || continue
     skill_name="$(basename "$skill_src")"
@@ -232,17 +303,40 @@ if [ -d "$package_root/workspace-template/dist-skills" ]; then
       rm -rf "$skill_dest"
     fi
     cp -R "$skill_src" "$skill_dest"
-
-    # OpenCode の互換スキル探索先にも同梱スキルを配置する。
-    opencode_skill_dest="$workspace/.opencode/skills/$skill_name"
-    if [ -e "$opencode_skill_dest" ]; then
-      safe_name="$(printf '%s' "$opencode_skill_dest" | sed 's#[/:]#_#g')"
-      cp -R "$opencode_skill_dest" "$backup_dir/$safe_name"
-      rm -rf "$opencode_skill_dest"
-    fi
-    cp -R "$skill_src" "$opencode_skill_dest"
   done
-  echo "配布スキルを配置しました: $workspace/.claude/skills / $workspace/.opencode/skills"
+  echo "配布スキルを配置しました: $workspace/.claude/skills"
+
+  # OpenCode 統合ランチャー用の配布元。起動時に隔離設定ディレクトリ
+  # （$XDG_CONFIG_HOME/opencode/skills/）へ毎回コピーされる。
+  dist_skills_dest="$workspace/.ai-safety/dist-skills"
+  if [ -e "$dist_skills_dest" ]; then
+    safe_name="$(printf '%s' "$dist_skills_dest" | sed 's#[/:]#_#g')"
+    cp -R "$dist_skills_dest" "$backup_dir/$safe_name"
+    rm -rf "$dist_skills_dest"
+  fi
+  cp -R "$package_root/workspace-template/dist-skills" "$dist_skills_dest"
+fi
+
+# OpenCode 用の日本語ハーネス一式（AGENTS.md / スラッシュコマンド / 追加エージェント）を
+# .ai-safety 配下に配置する。起動時にランチャーが隔離設定ディレクトリへ毎回コピーするので、
+# ここが配布元になる。配布元フォルダ名は制作途中で opencode-harness / dist-opencode の
+# 両方が使われたため、存在するほうを採用して配置先の名前は 1 つに正規化する。
+harness_src=""
+for harness_candidate in opencode-harness dist-opencode; do
+  if [ -d "$package_root/workspace-template/$harness_candidate" ]; then
+    harness_src="$package_root/workspace-template/$harness_candidate"
+    break
+  fi
+done
+if [ -n "$harness_src" ]; then
+  harness_dest="$workspace/.ai-safety/opencode-harness"
+  if [ -e "$harness_dest" ]; then
+    safe_name="$(printf '%s' "$harness_dest" | sed 's#[/:]#_#g')"
+    cp -R "$harness_dest" "$backup_dir/$safe_name"
+    rm -rf "$harness_dest"
+  fi
+  cp -R "$harness_src" "$harness_dest"
+  echo "OpenCode 用の日本語ハーネスを配置しました: $harness_dest"
 fi
 
 # 受講者向けスタートフォルダ（番号ラッパー + 案内 HTML）を workspace に配置。

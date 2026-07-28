@@ -19,6 +19,36 @@ from .masking import MaskingSession
 from .rules import evaluate_rules
 
 
+LOCAL_HOST_NAMES = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def _host_header_name(value: str) -> str:
+    """The host part of a Host header, without the port."""
+    host = value.strip()
+    if host.startswith("["):
+        end = host.find("]")
+        if end > 0:
+            return host[1:end].lower()
+        return host.lower()
+    if host.count(":") == 1:
+        host = host.rsplit(":", 1)[0]
+    return host.lower()
+
+
+def _is_local_host_header(value: str | None, configured_host: str) -> bool:
+    """Reject names that resolve elsewhere, which is how DNS rebinding reaches
+    a loopback-only server from a browser."""
+    if value is None:
+        # HTTP/1.0 clients may omit Host; a rebinding attack cannot.
+        return True
+    name = _host_header_name(value)
+    if not name:
+        return False
+    if name in LOCAL_HOST_NAMES or name.startswith("127."):
+        return True
+    return name == configured_host.strip().lower()
+
+
 HOP_BY_HOP = {
     "connection",
     "keep-alive",
@@ -60,15 +90,61 @@ def _json_bytes(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
+def _dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _finish_stream_block(slot: dict[str, Any]) -> str:
+    """Rebuild one streamed content block into reviewable text.
+
+    Deltas belonging to a block are concatenated with no separator, because a
+    fragment boundary is not a character boundary: splitting `rm -rf /` across
+    two deltas must not turn into two lines. When the accumulated
+    `partial_json` parses, the tool call is rebuilt as a real object so the
+    rules can inspect it structurally.
+    """
+    block = slot["block"]
+    joined_json = "".join(slot["json"])
+    joined_text = "".join(slot["text"])
+    piece = ""
+    if isinstance(block, dict) and block.get("type") == "tool_use" and joined_json:
+        try:
+            parsed = json.loads(joined_json)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, (dict, list)):
+            rebuilt = dict(block)
+            rebuilt["input"] = parsed
+            piece = _dumps(rebuilt)
+        else:
+            piece = _dumps(block) + joined_json
+    else:
+        if isinstance(block, dict):
+            piece = _dumps(block)
+        piece += joined_json
+    return piece + joined_text
+
+
 def _extract_review_text(body: str, content_type: str) -> str:
     if "text/event-stream" not in content_type.lower():
         try:
             value = json.loads(body)
         except json.JSONDecodeError:
             return body
-        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        return _dumps(value)
 
-    fragments: list[str] = []
+    entries: list[Any] = []
+    slots: dict[Any, dict[str, Any]] = {}
+
+    def slot_for(index: Any) -> dict[str, Any]:
+        key = index if isinstance(index, (int, str)) else "_"
+        slot = slots.get(key)
+        if slot is None:
+            slot = {"block": None, "json": [], "text": []}
+            slots[key] = slot
+            entries.append(slot)
+        return slot
+
     for line in body.splitlines():
         if not line.startswith("data:"):
             continue
@@ -78,24 +154,33 @@ def _extract_review_text(body: str, content_type: str) -> str:
         try:
             event = json.loads(payload)
         except json.JSONDecodeError:
-            fragments.append(payload)
+            entries.append(payload)
             continue
         if not isinstance(event, dict):
             continue
-        delta = event.get("delta")
-        if isinstance(delta, dict):
-            for key in ("text", "partial_json", "thinking"):
-                if isinstance(delta.get(key), str):
-                    fragments.append(delta[key])
+        index = event.get("index")
         block = event.get("content_block")
         if isinstance(block, dict):
-            fragments.append(json.dumps(block, ensure_ascii=False, separators=(",", ":")))
+            slot_for(index)["block"] = block
+        delta = event.get("delta")
+        if isinstance(delta, dict):
+            for key in ("text", "thinking"):
+                if isinstance(delta.get(key), str):
+                    slot_for(index)["text"].append(delta[key])
+            if isinstance(delta.get("partial_json"), str):
+                slot_for(index)["json"].append(delta["partial_json"])
         message = event.get("message")
         if isinstance(message, dict):
-            fragments.append(json.dumps(message, ensure_ascii=False, separators=(",", ":")))
+            entries.append(_dumps(message))
         error = event.get("error")
         if isinstance(error, dict):
-            fragments.append(json.dumps(error, ensure_ascii=False, separators=(",", ":")))
+            entries.append(_dumps(error))
+
+    fragments: list[str] = []
+    for entry in entries:
+        piece = entry if isinstance(entry, str) else _finish_stream_block(entry)
+        if piece:
+            fragments.append(piece)
     return "\n".join(fragments) if fragments else body
 
 
@@ -332,7 +417,22 @@ class BouncerHandler(BaseHTTPRequestHandler):
             decision == "review" and self.app.config.review_mode == "block"
         )
 
+    def _reject_foreign_host(self) -> bool:
+        if _is_local_host_header(self.headers.get("Host"), self.app.config.host):
+            return False
+        self.close_connection = True
+        self._send_json(
+            403,
+            {
+                "status": "error",
+                "summary": "this gateway only answers to a loopback Host header",
+            },
+        )
+        return True
+
     def do_GET(self) -> None:  # noqa: N802
+        if self._reject_foreign_host():
+            return
         path = urlsplit(self.path).path
         if path == "/":
             self._send_bytes(
@@ -362,6 +462,8 @@ class BouncerHandler(BaseHTTPRequestHandler):
         self._send_json(404, {"status": "error", "summary": "not found"})
 
     def do_HEAD(self) -> None:  # noqa: N802
+        if self._reject_foreign_host():
+            return
         if urlsplit(self.path).path == "/":
             self.send_response(200)
             self.send_header("Content-Length", "0")
@@ -374,6 +476,8 @@ class BouncerHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self) -> None:  # noqa: N802
+        if self._reject_foreign_host():
+            return
         path = urlsplit(self.path).path
         if path in {"/bouncer/inspect", "/v1/messages", "/v1/messages/count_tokens"}:
             content_type = self.headers.get("Content-Type", "").lower()

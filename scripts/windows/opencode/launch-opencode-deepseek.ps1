@@ -32,6 +32,11 @@ if ($env:AI_SAFE_DRY_RUN -eq '1') {
 
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) { throw 'Node.js が見つかりません。' }
+# 安全プラグインが壊れていると「黙って無防備」になるので、起動前に構文まで確かめる。
+& $node.Source --check $monitorPlugin 2>$null | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "OpenCode承認モニターが壊れているため、OpenCode は起動しません（fail-closed）。「導入(インストール)」をやり直してください: $monitorPlugin"
+}
 $openCode = if ($env:OPENCODE_BIN) { $env:OPENCODE_BIN } else {
     $found = Get-Command opencode -ErrorAction SilentlyContinue
     if ($found) { $found.Source } else { $null }
@@ -41,7 +46,10 @@ if (-not (Test-Path -LiteralPath $keyFile -PathType Leaf) -or (Get-Item -Literal
     throw 'DeepSeek APIキーが未登録です。先に「DeepSeekキーを登録」を実行してください。'
 }
 
-$version = (& $openCode --version 2>$null | Select-Object -First 1).Trim()
+$versionRaw = (& $openCode --version 2>$null | Select-Object -First 1)
+if ($null -eq $versionRaw) { throw 'OpenCode のバージョンを取得できませんでした。OpenCode を入れ直してから、もう一度お試しください。' }
+$version = ([string]$versionRaw).Trim()
+if (-not $version) { throw 'OpenCode のバージョンを取得できませんでした。OpenCode を入れ直してから、もう一度お試しください。' }
 & $node.Source -e 'const m=require(process.argv[1]);process.exit(m.isSupportedVersion(process.argv[2])?0:1)' $configJs $version
 if ($LASTEXITCODE -ne 0) { throw "OpenCode 1.14.24 以上が必要です（検出: $version）。" }
 
@@ -61,15 +69,28 @@ function Stop-StaleGateway {
     }
 }
 
+# 呼び出し元認証トークンを起動ごとに採番する。127.0.0.1 で待つだけでは同一 PC の
+# 任意プロセスや DNS リバインディングを踏んだブラウザが、実キーへ差し替えて転送する
+# gateway をそのまま叩けてしまうため、「この起動で立てた OpenCode だけが通れる」
+# 合言葉を毎回作り直す。コマンドライン引数には載せない (プロセス一覧に出るため)。
+# RandomNumberGenerator の静的 GetBytes は .NET Framework に無いため Create() 経由
+# (PowerShell 5.1 と 7 の両方で動く書き方)。
+$tokenBytes = New-Object byte[] 32
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try { $rng.GetBytes($tokenBytes) } finally { $rng.Dispose() }
+$gatewayToken = -join ($tokenBytes | ForEach-Object { $_.ToString('x2') })
+if (-not $gatewayToken) { throw '送信検査 Gateway の合言葉を生成できませんでした (fail-closed)。' }
+
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 Stop-StaleGateway -Port $port -GatewayJs $gatewayJs
 $env:DS_GATEWAY_PORT = $port
 $env:DS_GATEWAY_UPSTREAM = 'https://api.deepseek.com'
 $env:DS_GATEWAY_AUTH_FILE = $keyFile
+$env:DS_GATEWAY_TOKEN = $gatewayToken
 $gatewayOut = Join-Path $logDir 'opencode-deepseek-gateway.log'
 $gatewayErr = Join-Path $logDir 'opencode-deepseek-gateway.err.log'
 $gw = Start-Process -FilePath $node.Source -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden -RedirectStandardOutput $gatewayOut -RedirectStandardError $gatewayErr
-Remove-Item Env:\DS_GATEWAY_AUTH_FILE, Env:\DS_GATEWAY_UPSTREAM -ErrorAction SilentlyContinue
+Remove-Item Env:\DS_GATEWAY_AUTH_FILE, Env:\DS_GATEWAY_UPSTREAM, Env:\DS_GATEWAY_TOKEN -ErrorAction SilentlyContinue
 
 try {
     $ready = $false
@@ -84,12 +105,149 @@ try {
         throw "送信検査 Gateway を確認できないため、OpenCode は起動しません（fail-closed）。確認先: $gatewayErr"
     }
 
+    # 実キーは Gateway 子プロセスだけが読み、OpenCode の環境には渡さない。
+    # 一覧は opencode-config.js が持つ (Mac 版と 1 か所で共有するため)。ここで先に消すのは、
+    # 消す前に設定を作ると「鍵があるので MCP を登録したのに、その鍵が MCP へ届かない」状態に
+    # なるため。検索・画像読取は %USERPROFILE%\.ai-safety\gemini-api-key.txt
+    # (「6_AIコーチのキーを登録」が書く場所) だけを見る。
+    $secretEnvRaw = (& $node.Source $configJs '--print-secret-env')
+    if ($LASTEXITCODE -ne 0 -or -not $secretEnvRaw) { throw 'OpenCode 安全設定を生成できませんでした。' }
+    $secretEnvNames = @(([string]$secretEnvRaw).Trim() -split '\s+' | Where-Object { $_ })
+    $coachKeyFile = Join-Path $env:USERPROFILE '.ai-safety\gemini-api-key.txt'
+    if (($env:GEMINI_API_KEY -or $env:GOOGLE_API_KEY) -and -not (Test-Path -LiteralPath $coachKeyFile -PathType Leaf)) {
+        Write-Warning '環境変数の Gemini キーは OpenCode へ渡しません (AI から見えてしまうため)。検索と画像読み取りを使うときは「6_AIコーチのキーを登録」で登録してください。'
+    }
+    foreach ($secretName in $secretEnvNames) {
+        Remove-Item -LiteralPath "Env:\$secretName" -ErrorAction SilentlyContinue
+    }
+    # deny 床そのものを決めるポリシーの置き場を、環境変数で差し替えられないようにする。
+    # 無害な正規表現だけのポリシーを指されると、決定的 deny 床が丸ごと消える。
+    Remove-Item Env:\AI_SAFE_POLICY, Env:\AI_SAFE_ROOT -ErrorAction SilentlyContinue
+
     # プロジェクト固有の設定は無効化し、隔離した設定ディレクトリからBouncerプラグインだけを読む。
     $env:OPENCODE_DISABLE_PROJECT_CONFIG = '1'
     Remove-Item Env:\OPENCODE_PURE -ErrorAction SilentlyContinue
+    # 強制設定を後から丸ごと無効化できる環境変数を先に消す。
+    # OPENCODE_PERMISSION と OPENCODE_TEST_MANAGED_CONFIG_DIR は OPENCODE_CONFIG_CONTENT より
+    # 後にマージされるため、外から仕込まれていると deny 床がそのまま外れる（1.18.4 実測）。
+    Remove-Item Env:\OPENCODE_PERMISSION, Env:\OPENCODE_CONFIG, Env:\OPENCODE_CONFIG_DIR, Env:\OPENCODE_TEST_MANAGED_CONFIG_DIR -ErrorAction SilentlyContinue
     $env:XDG_CONFIG_HOME = Join-Path $Workspace '.ai-safety\opencode-runtime\xdg-config'
     $env:AI_SAFE_LOG_DIR = $logDir
     New-Item -ItemType Directory -Force -Path $env:XDG_CONFIG_HOME | Out-Null
+
+    # --- 日本語ハーネスの配置 -------------------------------------------------
+    # OPENCODE_DISABLE_PROJECT_CONFIG=1 では作業フォルダの .opencode\ は一切読まれず、
+    # 作業フォルダ側 AGENTS.md の探索も止まる。一方、設定ディレクトリ直下の AGENTS.md は
+    # instructions の指定と関係なく無条件で読み込まれる (1.18.4 実測)。そこで
+    # 「隔離設定ディレクトリ側」にパッケージ同梱のハーネス一式を毎回置き直す。
+    #   - AGENTS.md         … 日本語の指示書本体 (設定ディレクトリ直下 = 無条件で読まれる)
+    #   - command(s)\*.md   … 日本語スラッシュコマンド (1.18.4 は単数・複数どちらも読む)
+    #   - agents\*.md       … 追加エージェント (読み取り専用「せんせい」等)
+    #   - skills\<名前>\    … 配布スキル (hearing-ladder 等)
+    # 同梱物の名前を決め打ちせず、配布元にある物をそのまま写す (将来 1 本増えても配線不要)。
+    # 毎回置き直すので、ここを書き換えられてもパッケージ側の内容が必ず勝つ。
+    # 中身が無いときは警告だけ出して続行する (保護には影響しないため止めない)。
+    $ocConfigDir = Join-Path $env:XDG_CONFIG_HOME 'opencode'
+    $harnessSrc = Join-Path $Workspace '.ai-safety\opencode-harness'
+    $skillsSrc = Join-Path $Workspace '.ai-safety\dist-skills'
+    # 消す前に「本当に自分が作った隔離設定ディレクトリか」を完全一致で確かめる。
+    # 前方一致だけで済ませると、環境変数の細工で受講者の作業フォルダを消しかねない。
+    $expectedConfigDir = Join-Path $Workspace '.ai-safety\opencode-runtime\xdg-config\opencode'
+    if (-not $ocConfigDir.Equals($expectedConfigDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw '設定ディレクトリの場所が想定外のため、OpenCode は起動しません (fail-closed)。'
+    }
+    New-Item -ItemType Directory -Force -Path $ocConfigDir | Out-Null
+
+    # --- OpenCode が読む場所を毎回まっさらにする -------------------------------------
+    # 「配布物にある名前だけ置き直す」方式だと、配布物に無い綴り (単数形の agent\ command\、
+    # mode\、skill\、themes\) へ仕込まれた定義が次の起動でも生き残る (1.18.4 のバイナリ実測:
+    # {agent,agents}/**/*.md ・ {command,commands}/**/*.md ・ {mode,modes}/*.md ・
+    # {plugin,plugins}/*.{ts,js} ・ skill\ と skills\ ・ themes\*.json を読む)。読む場所を
+    # 先に消してから配布物を置き直せば、綴りの取りこぼしが構造的に起きない。
+    # 消すのは上で場所を完全一致で確かめた隔離設定ディレクトリの中だけ。node_modules /
+    # package.json / bun.lock は OpenCode がプラグインの依存を入れる場所なので残す
+    # (毎回消すと起動のたびにダウンロードが走り、教室の PC では実用にならない)。
+    foreach ($known in @('agent', 'agents', 'command', 'commands', 'mode', 'modes', 'plugin', 'plugins', 'skill', 'skills', 'themes')) {
+        $knownPath = Join-Path $ocConfigDir $known
+        if (Test-Path -LiteralPath $knownPath) { Remove-Item -LiteralPath $knownPath -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    foreach ($knownFile in @('AGENTS.md', 'opencode.json', 'opencode.jsonc')) {
+        $knownFilePath = Join-Path $ocConfigDir $knownFile
+        if (Test-Path -LiteralPath $knownFilePath) { Remove-Item -LiteralPath $knownFilePath -Force -ErrorAction SilentlyContinue }
+    }
+
+    if (Test-Path -LiteralPath $harnessSrc -PathType Container) {
+        foreach ($entry in @(Get-ChildItem -LiteralPath $harnessSrc -Force -ErrorAction SilentlyContinue)) {
+            # plugin\ だけは写さない。設定ディレクトリの plugin は無条件で実行されるので、
+            # 動くコードは「ランチャーが明示的に渡す Bouncer 監視プラグイン 1 本」に限る。
+            if ($entry.Name -in @('plugin', 'plugins')) {
+                Write-Warning "配布物の $($entry.Name) は安全のため配置しません。"
+                continue
+            }
+            $entryDest = Join-Path $ocConfigDir $entry.Name
+            if ($entry.PSIsContainer) {
+                if (Test-Path -LiteralPath $entryDest) { Remove-Item -LiteralPath $entryDest -Recurse -Force }
+                Copy-Item -LiteralPath $entry.FullName -Destination $entryDest -Recurse -Force
+            } else {
+                Copy-Item -LiteralPath $entry.FullName -Destination $entryDest -Force
+            }
+        }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $ocConfigDir 'AGENTS.md') -PathType Leaf)) {
+        Write-Warning "日本語の指示書が見つからないため配置をとばしました: $(Join-Path $harnessSrc 'AGENTS.md')"
+    }
+
+    if (Test-Path -LiteralPath $skillsSrc -PathType Container) {
+        $skillsDest = Join-Path $ocConfigDir 'skills'
+        New-Item -ItemType Directory -Force -Path $skillsDest | Out-Null
+        foreach ($skill in @(Get-ChildItem -LiteralPath $skillsSrc -Directory -Force -ErrorAction SilentlyContinue)) {
+            if (-not (Test-Path -LiteralPath (Join-Path $skill.FullName 'SKILL.md') -PathType Leaf)) { continue }
+            $skillDest = Join-Path $skillsDest $skill.Name
+            if (Test-Path -LiteralPath $skillDest) { Remove-Item -LiteralPath $skillDest -Recurse -Force }
+            Copy-Item -LiteralPath $skill.FullName -Destination $skillDest -Recurse -Force
+        }
+    } else {
+        Write-Warning "配布スキルが見つからないため配置をとばしました: $skillsSrc"
+    }
+
+    # --- 設定ディレクトリのショートカット (シンボリックリンク) を禁じる ---------------
+    # opencode 1.18.4 は command / agent / mode を symlink:true で走査する = リンクの先に
+    # ある .md も読む。リンクを 1 本置かれるだけで「配置し直した安全なファイルを見ている
+    # つもりが、まったく別の場所のファイルを読ませられる」形になる。Get-ChildItem -Recurse は
+    # リンクの中までは降りないが、リンクそのものは一覧に出るので、外側を見つけた時点で
+    # 止めれば取りこぼしはない。配布物にリンクは 1 本も無いので、あれば作為とみなす。
+    $linkHits = @(Get-ChildItem -LiteralPath $ocConfigDir -Recurse -Force -ErrorAction SilentlyContinue |
+        Where-Object { ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint })
+    if ($linkHits.Count -gt 0) {
+        foreach ($hit in $linkHits) { Write-Warning "対象: $($hit.FullName)" }
+        throw '設定フォルダにショートカット (シンボリックリンク) が置かれていたため、OpenCode は起動しません (fail-closed)。「導入(インストール)」をやり直してください。それでも出る場合は講師に連絡してください。'
+    }
+
+    # --- スラッシュコマンドの中の「シェル実行」を禁じる (fail-closed) ---------------
+    # コマンド .md の本文に書かれた !`コマンド` は、テンプレート展開時に受講者のシェルへ
+    # そのまま渡されて実行される (1.18.4 のバイナリ内 /!`([^`]+)`/g → shell 実行を確認)。
+    # これはツール呼び出しを経ないので permission の確認も、承認モニターの決定的 deny 床も
+    # 通らない = 安全機構を丸ごと迂回する任意コード実行になる。配布物にこの書き方は無いので、
+    # 「配置後の実ファイル」を見て 1 つでもあれば起動しない (配置後の書き換えも拾う)。
+    # 走査は設定ディレクトリ全体にかける。opencode が読むのは command(s) / agent(s) /
+    # mode(s) だが、フォルダ名を並べて数え上げる書き方は取りこぼす (mode を書き忘れる、
+    # 大文字の Commands を見落とす、といった形)。配布物のどのファイルにもこの書き方は
+    # 無いので、全部見て 1 件でもあれば止めるほうが確実。読めなかったファイルも同じ扱い。
+    $shellExpansionHits = @()
+    foreach ($mdFile in @(Get-ChildItem -LiteralPath $ocConfigDir -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+        try {
+            $body = [System.IO.File]::ReadAllText($mdFile.FullName)
+        } catch {
+            $shellExpansionHits += $mdFile.FullName
+            continue
+        }
+        if ($body.Contains('!' + [char]96)) { $shellExpansionHits += $mdFile.FullName }
+    }
+    if ($shellExpansionHits.Count -gt 0) {
+        foreach ($hit in $shellExpansionHits) { Write-Warning "対象: $hit" }
+        throw 'コマンド定義に「確認なしでコマンドを実行する書き方」が含まれていたため、OpenCode は起動しません (fail-closed)。「導入(インストール)」をやり直してください。それでも出る場合は講師に連絡してください。'
+    }
+
     $configArgs = @($configJs, '--port', $port, '--monitor-plugin', $monitorPlugin)
     if ($WebSearch) {
         $env:OPENCODE_ENABLE_EXA = '1'
@@ -98,19 +256,90 @@ try {
     } else {
         Remove-Item Env:\OPENCODE_ENABLE_EXA -ErrorAction SilentlyContinue
     }
-    $env:OPENCODE_CONFIG_CONTENT = (& $node.Source @configArgs)
+    # 合言葉は provider の apiKey として設定に埋め込む (gateway 側で照合される)。
+    # opencode-config.js へは環境変数で渡し、生成直後に消す (引数にすると ps に出る)。
+    $env:DS_GATEWAY_TOKEN = $gatewayToken
+    try {
+        $env:OPENCODE_CONFIG_CONTENT = (& $node.Source @configArgs)
+    } finally {
+        Remove-Item Env:\DS_GATEWAY_TOKEN -ErrorAction SilentlyContinue
+    }
     if ($LASTEXITCODE -ne 0 -or -not $env:OPENCODE_CONFIG_CONTENT) { throw 'OpenCode 安全設定を生成できませんでした。' }
 
-    Remove-Item Env:\DEEPSEEK_API_KEY, Env:\DEEPSEEK_API_TOKEN, Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
-    Set-Content -NoNewline -Encoding ascii -LiteralPath $coachMarker -Value 'opencode-deepseek'
-    Write-Host 'Bouncer送信検査: 有効 / モデル: DeepSeek V4 Pro / 補助: V4 Flash'
-    Write-Host ('変更操作は確認、外部フォルダは禁止、Web検索は' + $(if ($WebSearch) { '許可時のみ' } else { '無効' }) + 'です。')
+    # 消すだけでなく「安全な値で上書き」して二重化する。環境変数側が最後にマージされるので、
+    # 将来マージ順が変わっても最小限の deny 床（削除・昇格・公開・外部通信・外部フォルダ）は残る。
+    $enforced = (& $node.Source $configJs '--print-permission-env')
+    if ($LASTEXITCODE -ne 0 -or -not $enforced) { throw 'OpenCode 安全設定を生成できませんでした。' }
+    $env:OPENCODE_PERMISSION = $enforced
 
+
+    $watchdog = $null
+    $resolvedFile = Join-Path $logDir 'opencode-resolved-config.json'
     Push-Location $Workspace
-    try { & $openCode } finally { Pop-Location }
+    try {
+        # --- 本体を出す前に「安全プラグインが本当に載るか」を実物で確かめる -----------
+        # `opencode debug config` はプラグインを実際に読み込む (1.18.4 実測: プラグインの
+        # 中でファイルを書かせて確認)。そこでこれを本体より先に 1 回だけ同期実行し、
+        #   (1) 解決済み設定で deny 床が生きているか
+        #   (2) プラグインが ready マーカーを書いたか (= 決定的 deny 床が載ったか)
+        # の両方を確かめてから本体を起動する。以前はどちらも「起動してから 30 秒後に
+        # 気づく」形だったため、無防備な OpenCode がそのまま動き続けていた。
+        # 検証結果はファイル経由で渡す（PowerShell 5.1 はネイティブコマンドの標準入力を
+        # 既定 ASCII で流すため、日本語ユーザー名などが混ざると壊れて誤検知になる）。
+        $readyMarker = Join-Path $logDir 'opencode-monitor-ready.json'
+        Remove-Item -LiteralPath $readyMarker -Force -ErrorAction SilentlyContinue
+        $epoch = New-Object System.DateTime(1970, 1, 1, 0, 0, 0, [System.DateTimeKind]::Utc)
+        $probeSince = [string][long]([System.DateTime]::UtcNow - $epoch).TotalMilliseconds
+
+        $resolved = (& $openCode debug config 2>$null | Out-String)
+        if (-not $resolved -or -not $resolved.Trim()) {
+            throw '安全設定を確認できないため、OpenCode は起動しません（fail-closed）。OpenCode が古い可能性があります。最新版に更新してから、もう一度お試しください。'
+        }
+        # 解決済み設定には provider の apiKey (= gateway の合言葉) が含まれる。検証は
+        # permission / share / agent しか見ないので、ディスクへ書く前に伏せる。
+        $resolvedSafe = $resolved.Replace($gatewayToken, 'REDACTED')
+        [System.IO.File]::WriteAllText($resolvedFile, $resolvedSafe, (New-Object System.Text.UTF8Encoding($false)))
+        & $node.Source $configJs '--verify-resolved' $resolvedFile
+        $verified = ($LASTEXITCODE -eq 0)
+        Remove-Item -LiteralPath $resolvedFile -Force -ErrorAction SilentlyContinue
+        if (-not $verified) {
+            throw '安全設定が有効になっていないため、OpenCode は起動しません（fail-closed）。「導入(インストール)」をやり直してから、もう一度お試しください。'
+        }
+
+        # 終了コードだけでなく合図の 1 行も要求する。何かの理由で検査そのものが走らなかった
+        # とき、「黙って 0 で終わった」を「確認できた」と取り違えないため。
+        $readySignal = (& $node.Source $monitorPlugin '--verify-ready' '--not-before' $probeSince | Out-String)
+        if ($LASTEXITCODE -ne 0 -or -not $readySignal.Contains('BOUNCER_READY_OK')) {
+            throw '危険なコマンドを止める安全プラグインが読み込まれないため、OpenCode は起動しません（fail-closed）。「導入(インストール)」をやり直してから、もう一度お試しください。'
+        }
+
+        # 見張り: 本体のセッションでもプラグインが読み込まれたかを ready マーカーで確かめ、
+        # 読み込まれていなければ監視画面の履歴に警告を残す（TUI は全画面なので画面出力では気づけない）。
+        # 上の確認で書かれたマーカーを消してから始めるので、今回のセッション分だけを見る。
+        Remove-Item -LiteralPath $readyMarker -Force -ErrorAction SilentlyContinue
+        $watchdog = Start-Process -FilePath $node.Source -ArgumentList @($monitorPlugin, '--watchdog', '--timeout-ms', '30000') -PassThru -WindowStyle Hidden
+
+        Set-Content -NoNewline -Encoding ascii -LiteralPath $coachMarker -Value 'opencode-deepseek'
+        Write-Host 'Bouncer送信検査: 有効 / モデル: DeepSeek V4 Pro / 補助: V4 Flash'
+        Write-Host ('変更操作は確認、外部フォルダは禁止、Web検索は' + $(if ($WebSearch) { '許可時のみ' } else { '無効' }) + 'です。')
+        Write-Host '危険なコマンド（まとめて削除・鍵の読み出し・ネットから拾った実行）は確認なしで止まります。'
+
+        & $openCode
+    } finally {
+        Pop-Location
+        if ($watchdog -and -not $watchdog.HasExited) { Stop-Process -Id $watchdog.Id -Force -ErrorAction SilentlyContinue }
+        Remove-Item -LiteralPath $resolvedFile -Force -ErrorAction SilentlyContinue
+    }
     exit $LASTEXITCODE
 } finally {
     if ($gw -and -not $gw.HasExited) { Stop-Process -Id $gw.Id -Force -ErrorAction SilentlyContinue }
-    Remove-Item -LiteralPath $coachMarker -Force -ErrorAction SilentlyContinue
+    # coach マーカーは d-claude と OpenCode が同じパスを共有する。並行起動時に片方の終了で
+    # もう片方のバナーが消えないよう、「自分が書いた値のままのときだけ」消す。
+    try {
+        if ((Get-Content -LiteralPath $coachMarker -Raw -ErrorAction Stop).Trim() -eq 'opencode-deepseek') {
+            Remove-Item -LiteralPath $coachMarker -Force -ErrorAction SilentlyContinue
+        }
+    } catch {}
     Remove-Item Env:\OPENCODE_CONFIG_CONTENT, Env:\OPENCODE_ENABLE_EXA, Env:\OPENCODE_DISABLE_PROJECT_CONFIG, Env:\OPENCODE_PURE, Env:\XDG_CONFIG_HOME -ErrorAction SilentlyContinue
+    Remove-Item Env:\OPENCODE_PERMISSION, Env:\DS_GATEWAY_PORT -ErrorAction SilentlyContinue
 }

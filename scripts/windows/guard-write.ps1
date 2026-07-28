@@ -24,6 +24,14 @@ try {
         if ($protectedTarget) {
             Block-Action $inputObj "write" ("protected path write target: " + $target) $observed $policy
         }
+        # シェル初期化ファイル・スタートアップ・各 CLI の設定ディレクトリ・安全パッケージ自身
+        # への書き込みは決定的に止める（mac guard-write.sh と同一集合）。リダイレクトだけ守って
+        # Write ツールが素通しでは意味がないため、生パスと解決後パスの両方を見る。
+        $redirectTarget = Test-RedirectProtectedPath $resolved $policy
+        if (-not $redirectTarget) { $redirectTarget = Test-RedirectProtectedPath $target $policy }
+        if ($redirectTarget) {
+            Block-Action $inputObj "write" ("protected configuration file targeted by write: " + $target) $observed $policy
+        }
     }
 
     $secret = Find-SecretMatch $content $policy

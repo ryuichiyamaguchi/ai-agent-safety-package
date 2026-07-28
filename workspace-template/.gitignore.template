@@ -28,6 +28,8 @@ auth.json
 # 安全パッケージのログ
 .ai-safety/logs/
 .ai-safety/cache/
+# OpenCode の隔離設定ディレクトリ（起動のたびに作り直される作業用データ）
+.ai-safety/opencode-runtime/
 
 # 機密
 .env

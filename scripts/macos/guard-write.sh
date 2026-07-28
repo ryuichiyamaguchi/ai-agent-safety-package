@@ -21,6 +21,12 @@ _wt="$(_extract_json_field "file_path")"
 [ -z "$_wt" ] && _wt="$(_extract_json_field "path")"
 [ -z "$_wt" ] && _wt="$(_extract_json_field "target_path")"
 [ -z "$_wt" ] && _wt="$(_extract_json_field "notebook_path")"
+# シェル初期化ファイル・LaunchAgents・各 CLI の設定ディレクトリ・安全パッケージ自身への
+# 書き込みは決定的に止める（読み取りは止めない）。Bash のリダイレクトだけ守って Write ツール
+# が素通しでは意味がないため、guard-bash.sh と同じ集合をここでも適用する。
+if [ -n "$_wt" ] && is_redirect_protected_path "$_wt"; then
+  block "protected configuration file targeted by write (${_wt})"
+fi
 _wc="$(_extract_json_field "cwd")"
 # cwd 末尾のスラッシュを正規化（ルート "/" は除く）。未正規化だと "$_wc"/* の "//" で
 # 内部パスがマッチ漏れし、内部書き込みが誤って ask になる。

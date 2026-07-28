@@ -29,7 +29,7 @@
 ## テスト
 
 ```bash
-cd /Users/ryuichi/Documents/Codex/2026-07-21/https-www-youtube-com-watch-v/bouncer
+cd bouncer-gateway
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 

@@ -17,6 +17,25 @@ class PatternSpec:
     summary: str
     regex: re.Pattern[str]
     secret_group: int = 0
+    # `SECRET_KEY = get_random_secret_key()` assigns a call, not a secret.
+    skip_call_values: bool = False
+
+
+# `\b` does not separate words at an underscore, so AWS_SECRET_ACCESS_KEY and
+# MYSERVICE_API_KEY never reached the secret words. Instead of a word boundary,
+# match the whole identifier: optional leading segments, the secret word, and
+# optional trailing segments. A bare `key` or `token` needs a leading segment so
+# that ordinary prose like `key: value` is left alone.
+_SECRET_NAME = (
+    r"(?<![A-Za-z0-9])(?:"
+    r"(?:[A-Za-z0-9]+[_-])*"
+    r"(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|"
+    r"auth[_-]?token|private[_-]?key|client[_-]?secret)"
+    r"(?:[_-][A-Za-z0-9]+)*"
+    r"|"
+    r"(?:[A-Za-z0-9]+[_-])+(?:key|token)(?:[_-][A-Za-z0-9]+)*"
+    r")"
+)
 
 
 PATTERNS: tuple[PatternSpec, ...] = (
@@ -93,11 +112,12 @@ PATTERNS: tuple[PatternSpec, ...] = (
         "credential",
         "high",
         "秘密値の代入らしき箇所をマスクしました",
+        # The closing quote of a JSON key sits between the name and the colon.
         re.compile(
-            r"(?i)\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token)\b"
-            r"\s*[:=]\s*[\"']?([^\s\"',;}{]{6,})"
+            r"(?i)" + _SECRET_NAME + r"[\"']?\s*[:=]\s*[\"']?([^\s\"',;}{]{6,})"
         ),
         1,
+        skip_call_values=True,
     ),
     PatternSpec(
         "mac_home_user",
@@ -179,6 +199,8 @@ class MaskingSession:
             def replace(match: re.Match[str], current: PatternSpec = spec) -> str:
                 original = match.group(current.secret_group)
                 if original.startswith("⟪BNC_"):
+                    return match.group(0)
+                if current.skip_call_values and "(" in original:
                     return match.group(0)
                 token = self._token_for(current.category, original)
                 self._record(current, original)

@@ -3,7 +3,10 @@
     [ValidateSet('codex','claude','opencode','d-claude')]
     [string]$Agent = 'codex',
     [ValidateSet('standard','assisted','maximum')]
-    [string]$Profile = 'standard',
+    # $PROFILE は PowerShell の自動変数なので、変数名は $SafetyProfile にする。
+    # 既存の呼び出し元 (スタート/*.bat, docs) は -Profile のまま使えるように別名を残す。
+    [Alias('Profile')]
+    [string]$SafetyProfile = 'standard',
     [switch]$WebSearch
 )
 
@@ -13,22 +16,22 @@ $root = Join-Path $Workspace '.ai-safety'
 $hooks = Join-Path $root 'hooks\windows'
 $logDir = if ($env:AI_SAFE_LOG_DIR) { $env:AI_SAFE_LOG_DIR } else { Join-Path $env:USERPROFILE '.ai-safety\logs' }
 
-if ($Agent -eq 'codex' -and $Profile -ne 'standard') { throw 'Codex は standard モードで起動してください。' }
-if ($Agent -eq 'opencode' -and $Profile -ne 'standard') { throw 'OpenCode は standard モードで起動してください。' }
-if ($Agent -eq 'd-claude' -and $Profile -ne 'standard') { throw 'd-claude は standard モードで起動してください。' }
+if ($Agent -eq 'codex' -and $SafetyProfile -ne 'standard') { throw 'Codex は standard モードで起動してください。' }
+if ($Agent -eq 'opencode' -and $SafetyProfile -ne 'standard') { throw 'OpenCode は standard モードで起動してください。' }
+if ($Agent -eq 'd-claude' -and $SafetyProfile -ne 'standard') { throw 'd-claude は standard モードで起動してください。' }
 if ($WebSearch -and $Agent -ne 'opencode') { throw '-WebSearch は OpenCode だけで指定できます。' }
 if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw "作業フォルダが見つかりません: $Workspace" }
 
 if ($env:AI_SAFE_DRY_RUN -eq '1') {
-    if ($Profile -eq 'maximum' -and -not (Test-Path -LiteralPath (Join-Path $root 'bouncer\scripts\run-local.ps1'))) {
+    if ($SafetyProfile -eq 'maximum' -and -not (Test-Path -LiteralPath (Join-Path $root 'bouncer\scripts\run-local.ps1'))) {
         throw "ローカルBouncer Gatewayが見つかりません: $(Join-Path $root 'bouncer')"
     }
     Write-Output 'Bouncer統合版 dry-run'
     Write-Output "  workspace: $Workspace"
     Write-Output "  agent:     $Agent"
-    Write-Output "  profile:   $Profile"
+    Write-Output "  profile:   $SafetyProfile"
     Write-Output '  monitor:   enabled'
-    if ($Profile -eq 'maximum') {
+    if ($SafetyProfile -eq 'maximum') {
         Write-Output '  gateway:   http://127.0.0.1:8787 (local only)'
     } elseif ($Agent -eq 'opencode' -or $Agent -eq 'd-claude') {
         Write-Output '  gateway:   http://127.0.0.1:8788 (send inspection, no local LLM)'
@@ -52,7 +55,7 @@ $monitorProc = $null
 $gatewayProc = $null
 
 try {
-    $env:AI_SAFE_PROFILE = $Profile
+    $env:AI_SAFE_PROFILE = $SafetyProfile
     $env:AI_SAFE_AGENT = $Agent
     $monitorOut = Join-Path $logDir 'integrated-monitor.log'
     $monitorErr = Join-Path $logDir 'integrated-monitor.err.log'
@@ -60,7 +63,7 @@ try {
         -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$monitorScript`"") `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $monitorOut -RedirectStandardError $monitorErr
 
-    if ($Profile -eq 'maximum') {
+    if ($SafetyProfile -eq 'maximum') {
         $bouncerRunner = Join-Path $root 'bouncer\scripts\run-local.ps1'
         if (-not (Test-Path -LiteralPath $bouncerRunner -PathType Leaf)) {
             throw "ローカルBouncer Gatewayが見つかりません: $(Join-Path $root 'bouncer')"
@@ -87,7 +90,7 @@ try {
     }
 
     $exitCode = 0
-    switch ("${Agent}:${Profile}") {
+    switch ("${Agent}:${SafetyProfile}") {
         'codex:standard' {
             & (Join-Path $hooks 'launch-codex-safe.ps1') -Workspace $Workspace
             $exitCode = $LASTEXITCODE

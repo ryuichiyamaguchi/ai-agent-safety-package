@@ -13,6 +13,9 @@ is_safe_loopback_fetch() {
   local cmd
   cmd="$(_extract_json_field "command")"
   [ -n "$cmd" ] || return 1
+  # 複数行コマンドは対象外。grep は行単位で照合するため、1 行目だけがホワイトリストに
+  # 当たる 2 行コマンド（1 行目 curl / 2 行目 rm -rf）を許可してしまうのを防ぐ。
+  is_single_line_value "$cmd" || return 1
   # メタ文字・制御文字・クォート・変数展開・バックスラッシュを 1 個でも含めば対象外。
   # これらが無ければ ; や $() / バッククォートによるコマンド連結・注入は成立しない。IPv6 の [] は許可。
   printf '%s' "$cmd" | LC_ALL=C grep -qE '[;&|<>`$(){}"'"'"'\\*?[:cntrl:]]' && return 1
@@ -27,12 +30,16 @@ is_scoped_generated_cleanup() {
   local cmd
   cmd="$(_extract_json_field "command")"
   [ -n "$cmd" ] || return 1
+  # 複数行コマンドは対象外（1 行目だけが当たって ask に格下げされるのを防ぐ）。
+  is_single_line_value "$cmd" || return 1
   printf '%s' "$cmd" | LC_ALL=C grep -qE \
     '^rm[[:space:]]+(-[A-Za-z]*r[A-Za-z]*|--recursive)([[:space:]]+(-f|--force))?[[:space:]]+(\./)?(node_modules|build|dist|coverage|target|\.next|\.turbo)([[:space:]]+(\./)?(node_modules|build|dist|coverage|target|\.next|\.turbo))*[[:space:]]*$'
 }
 
 has_sensitive_text && block "sensitive pattern in shell command"
 has_protected_path && block "protected path referenced in shell command"
+# 書き込み先（> >> tee）が設定ファイル等なら止める。読み取りは止めない。
+has_redirect_protected_target && block "protected file targeted by output redirect (設定ファイルの書き換え)"
 # loopback（localhost/127.0.0.1/::1）宛ての単純 fetch は許可。外部宛ては下の decisive deny に落とす。
 if is_safe_loopback_fetch; then
   allow "loopback fetch to localhost permitted"

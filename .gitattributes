@@ -1,0 +1,22 @@
+# 配布スクリプトの改行コードの扱い
+#
+# 規約:
+#   .bat / .cmd / .ps1   -> CRLF (日本語 Windows + PowerShell 5.1 向け)
+#   .command / .sh       -> LF   (macOS / Unix 向け)
+#
+# なぜ `text eol=crlf` を使わないのか:
+#   配布 ZIP は `git archive` で作るが、git archive は eol 属性を適用せず
+#   blob のバイト列をそのまま出力する (git 2.50.1 で実測確認)。
+#   `text eol=crlf` を付けると git add の時点で blob が LF に正規化されるため、
+#   作業ツリーが CRLF でも ZIP の中身は LF になる。
+#   LF 単独の .bat は CMD が goto のラベルを見失う既知の壊れ方をするので、
+#   これは配布物を壊す。
+#
+#   そこで `-text` で一切の改行変換を無効化し (core.autocrlf の設定に関わらず
+#   コミットしたバイト列がそのまま ZIP に入る)、規約違反は
+#   scripts/release-version-check.sh の実バイト検査で止める。
+*.bat     -text
+*.cmd     -text
+*.ps1     -text
+*.command -text
+*.sh      -text

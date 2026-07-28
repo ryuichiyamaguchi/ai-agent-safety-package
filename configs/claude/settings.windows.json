@@ -21,9 +21,6 @@
       "Bash(type *)",
       "Bash(head *)",
       "Bash(tail *)",
-      "Bash(grep *)",
-      "Bash(rg *)",
-      "Bash(findstr *)",
       "Bash(where *)",
       "Bash(tree*)",
       "Bash(echo *)",
@@ -117,7 +114,10 @@
       "Read(**/.config/gcloud/**)",
       "Read(**/.docker/config.json)",
       "Read(**/.npmrc)",
-      "Read(**/.pypirc)"
+      "Read(**/.pypirc)",
+      "Read(**/.ai-safety/**)",
+      "Write(**/.ai-safety/**)",
+      "Edit(**/.ai-safety/**)"
     ]
   },
   "hooks": {

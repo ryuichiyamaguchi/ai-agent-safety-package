@@ -187,8 +187,9 @@ function readOpenCodeApproval() {
 // （本物の API キー書式だけ maskSecrets/contextBlock で伏字＝鍵の外部漏れだけ防ぐ）。
 // 増える送信先については UI バナー(#dredact)で利用者に常時明示し、機微を含むコマンドは
 // 相談しないよう促す。coachRedact はこのバナー表示のオン/オフ判定に使う（本文の送信可否は変えない）。
-// signal: d-claude の起動スクリプト(launch-deepseek-gateway.*)が LOG_DIR に "coach-engine"
-// ファイル（中身 "d-claude"）を置き、終了時に消す。別プロセスのモニターが安全に読めるよう
+// signal: 起動スクリプトが LOG_DIR に "coach-engine" ファイルを置き、終了時に消す
+// （launch-deepseek-gateway.* は "d-claude"、launch-opencode-deepseek.* は "opencode-deepseek"）。
+// 別プロセスのモニターが安全に読めるよう
 // ファイル方式にし、消し忘れ（クラッシュ）対策に更新時刻が新しいときだけ有効とする。
 const REDACT_FRESH_MS = 12 * 60 * 60 * 1000; // 12h より古いマーカーは無視（stale 保険）
 function coachRedact() {
@@ -196,7 +197,9 @@ function coachRedact() {
     const f = path.join(LOG_DIR, 'coach-engine');
     const stat = fs.statSync(f);
     if (Date.now() - stat.mtimeMs > REDACT_FRESH_MS) return false;
-    return fs.readFileSync(f, 'utf8').trim() === 'd-claude';
+    // d-claude と OpenCode+DeepSeek のどちらも「本文が DeepSeek に流れる」経路なので、
+    // AI コーチ(Gemini)を使うと送信先が増える点は同じ。両方でバナーを出す。
+    return /^(?:d-claude|opencode-deepseek)$/.test(fs.readFileSync(f, 'utf8').trim());
   } catch { return false; }
 }
 
@@ -446,6 +449,207 @@ function companionPresentation(status, thinking = false) {
   return { ...COMPANION_STATES[key] };
 }
 
+// find は探すだけの読み取りコマンドに見えるが、これらのオプションが付くと
+// 一致した全ファイルを削除したり、任意のコマンドへ渡して実行したりできる。
+const FIND_DESTRUCTIVE_RE = /\bfind\b[^\n]*\s-(?:delete|execdir|exec|fprintf|fls|okdir|ok)\b/i;
+
+// リダイレクト先がここに挙げた擬似デバイスなら、実ファイルは作られない。
+// `2>/dev/null`（エラー表示を捨てる）だけを例外にし、他は必ず書き込み扱いにする。
+const REDIRECT_DISCARD_TARGETS = new Set(['/dev/null']);
+
+// 引用符の直前に来ても「語を分割して検査を逃れる書き方」とは見なさない文字。
+// `--include="*.js"` のような option=value は受講者の通常操作なので緑を維持する。
+const QUOTE_SAFE_PREV_RE = /[=:,([]/;
+
+// パイプの後段として許す表示系コマンド（これ自体はファイルを作らない）。
+const PAGER_SEGMENT_RE = /^\s*(?:head|tail|sort|uniq|wc|cut|sed\s+-n)\b/i;
+
+// シェルのメタ文字を1文字ずつ走査し、区切り・リダイレクト・置換を取り出す。
+// 正規表現1本で「> は書き込み」「2> は例外」を判定すると演算子と出力先が混ざり、
+// `git log 2> ~/.zshrc`（実際に元ファイルを切り詰める）を読み取り扱いする穴が空く。
+// ここでは演算子と出力先を必ず分けて取り出し、危険かどうかの判断は呼び出し側で行う。
+function scanShellCommand(raw) {
+  const src = String(raw || '');
+  const out = {
+    separators: [],    // ; & && || 改行 CR（次のコマンドが始まる合図）
+    pipeSegments: [],  // 区切り・パイプで切ったコマンド片
+    redirects: [],     // { op, target, fdDup } 出力側のリダイレクトだけ
+    substitutions: [], // $( ` <( >( =( ${(e ( グロブ修飾子 （別のコマンドが動く）
+    heredoc: false,    // << <<<
+    obfuscated: false, // 語の途中の引用符・英数字を隠すバックスラッシュ
+  };
+  const n = src.length;
+  let i = 0;
+  let segStart = 0;
+
+  // 空白とメタ文字以外は「語の一部」。リダイレクト先の読み取り範囲もこれで決める。
+  const isWordChar = (c) => c !== undefined && !/[\s;&|<>]/.test(c);
+  const cutSegment = (end) => { out.pipeSegments.push(src.slice(segStart, end)); };
+
+  // 語の先頭か（文字列の先頭・空白・区切り・リダイレクトの直後）。
+  // zsh の =( は語頭の = だけがプロセス置換で、arr=(1 2 3) は配列代入。
+  const isWordStart = (idx) => idx === 0 || !isWordChar(src[idx - 1]);
+
+  // ${(e)var} ${(fe)var} … zsh のパラメータ展開フラグ e は変数の値をもう一度展開する
+  // ＝値の中の $( ) が実際に動く。フラグに e を含まない ${(f)var} は対象外。
+  // 二重引用符の中でも展開されるので、引用符側の走査からも呼ぶ。
+  const evalFlagLength = (idx) => {
+    if (src[idx] !== '$' || src[idx + 1] !== '{' || src[idx + 2] !== '(') return 0;
+    const m = /^\$\{\(([^)]*)\)/.exec(src.slice(idx));
+    return m && m[1].includes('e') ? m[0].length : 0;
+  };
+
+  // 演算子の直後にある出力先を、引用符とバックスラッシュを外して1語ぶん読む。
+  const readTarget = () => {
+    while (i < n && (src[i] === ' ' || src[i] === '\t')) i += 1;
+    let target = '';
+    while (i < n && isWordChar(src[i])) {
+      const c = src[i];
+      if (c === '\\') { target += src[i + 1] || ''; i += 2; continue; }
+      if (c === '"' || c === "'") {
+        i += 1;
+        while (i < n && src[i] !== c) { target += src[i]; i += 1; }
+        i += 1;
+        continue;
+      }
+      target += c;
+      i += 1;
+    }
+    return target;
+  };
+
+  while (i < n) {
+    const ch = src[i];
+    const prev = i > 0 ? src[i - 1] : '';
+
+    if (ch === '"' || ch === "'") {
+      // 語の先頭ではない引用符は、単語を割って検査をすり抜ける書き方（cat ~/.e""nv）。
+      if (isWordChar(prev) && !QUOTE_SAFE_PREV_RE.test(prev)) out.obfuscated = true;
+      const quote = ch;
+      i += 1;
+      while (i < n && src[i] !== quote) {
+        // 二重引用符の中でもコマンド置換は展開されるので、そこだけは見逃さない。
+        if (quote === '"') {
+          if (src[i] === '\\') { i += 2; continue; }
+          if (src[i] === '`') { out.substitutions.push('`'); i += 1; continue; }
+          if (src[i] === '$' && src[i + 1] === '(') { out.substitutions.push('$('); i += 2; continue; }
+          const quotedEval = evalFlagLength(i);
+          if (quotedEval) { out.substitutions.push('${(e'); i += quotedEval; continue; }
+        }
+        i += 1;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (ch === '\\') {
+      // 空白や記号のエスケープは日常的（My\ Documents / find -name \*.js / grep "a\|b"）。
+      // 英数字を隠すバックスラッシュだけが、語を割る書き方（~/.z\shrc）。
+      if (/[A-Za-z0-9]/.test(src[i + 1] || '')) out.obfuscated = true;
+      i += 2;
+      continue;
+    }
+
+    if (ch === '`') { out.substitutions.push('`'); i += 1; continue; }
+    if (ch === '$' && src[i + 1] === '(') { out.substitutions.push('$('); i += 2; continue; }
+    // プロセス置換 <(cmd) >(cmd) は括弧の中のコマンドが実際に動く。
+    if ((ch === '<' || ch === '>') && src[i + 1] === '(') { out.substitutions.push(ch + '('); i += 2; continue; }
+    // zsh の一時ファイル型プロセス置換 =(cmd)。中のコマンドを実行し、出力を一時ファイルへ
+    // 書き出して、そのパスを引数に差し替える（実機 zsh 5.9 で確認）。
+    // 語頭の = だけが置換で、arr=(touch f) のような配列代入では中は実行されない。
+    if (ch === '=' && src[i + 1] === '(' && isWordStart(i)) { out.substitutions.push('=('); i += 2; continue; }
+    const evalLen = evalFlagLength(i);
+    if (evalLen) { out.substitutions.push('${(e'); i += evalLen; continue; }
+    // zsh のグロブ修飾子 (e:cmd:) (e{cmd}) (e[cmd]) (+func) はファイル名の展開中にコードを
+    // 実行する。修飾子はパターンへ空白なしで続くので、語の途中に現れる ( だけを見る。
+    if (ch === '(' && !isWordStart(i) && /^\((?:e[^\sA-Za-z0-9]|\+[A-Za-z_])/.test(src.slice(i, i + 3))) {
+      out.substitutions.push('glob-qualifier'); i += 1; continue;
+    }
+    if (ch === '<' && src[i + 1] === '<') { out.heredoc = true; i += 2; continue; }
+
+    // &> &>> は標準出力と標準エラーをまとめてファイルへ書く（区切りの & ではない）。
+    if (ch === '&' && src[i + 1] === '>') {
+      i += 2;
+      let op = '&>';
+      if (src[i] === '>') { op = '&>>'; i += 1; }
+      out.redirects.push({ op, target: readTarget(), fdDup: false });
+      continue;
+    }
+
+    // 単一の & は「バックグラウンドで動かして次のコマンドへ進む」＝ && と同じく区切り。
+    if (ch === '&') {
+      const op = src[i + 1] === '&' ? '&&' : '&';
+      out.separators.push(op);
+      cutSegment(i);
+      i += op.length;
+      segStart = i;
+      continue;
+    }
+
+    if (ch === '|') {
+      const isOr = src[i + 1] === '|';
+      if (isOr) out.separators.push('||');
+      cutSegment(i);
+      i += isOr ? 2 : 1;
+      segStart = i;
+      continue;
+    }
+
+    if (ch === ';' || ch === '\n' || ch === '\r') {
+      out.separators.push(ch === ';' ? ';' : 'newline');
+      cutSegment(i);
+      i += 1;
+      segStart = i;
+      continue;
+    }
+
+    if (ch === '>' || ch === '<') {
+      // 演算子の直前に付いた数字はファイル記述子の指定（1> 2> 9>>）。演算子側へ寄せる。
+      const fd = (src.slice(segStart, i).match(/(\d+)$/) || [])[1] || '';
+      let op = fd + ch;
+      i += 1;
+      if (ch === '>' && (src[i] === '>' || src[i] === '|')) { op += src[i]; i += 1; }
+      else if (ch === '<' && src[i] === '>') { op += '>'; i += 1; }
+      // 2>&1 のような記述子の複製はファイルを作らない。>&file は作る。
+      const dup = src[i] === '&' ? /^&(?:\d+|-)(?![^\s;&|<>])/.exec(src.slice(i)) : null;
+      if (dup) {
+        i += dup[0].length;
+        out.redirects.push({ op, target: dup[0], fdDup: true });
+        continue;
+      }
+      const target = readTarget();
+      // 入力リダイレクト（< file）は読むだけなので出力側の一覧には入れない。
+      if (op.endsWith('<')) continue;
+      out.redirects.push({ op, target, fdDup: false });
+      continue;
+    }
+
+    i += 1;
+  }
+  cutSegment(n);
+  return out;
+}
+
+// 「このリダイレクトはファイルを作る・上書きする」かどうか。
+// 出力先を読み取れなかった場合は、安全と証明できないので書き込み扱いにする。
+function redirectWritesFile(redirect) {
+  if (redirect.fdDup) return false;
+  if (!redirect.target) return true;
+  return !REDIRECT_DISCARD_TARGETS.has(redirect.target);
+}
+
+// 「この1本は読み取りだけで完結する」と言い切れるか。
+// ひとつでも証明できない要素（別コマンドの開始・書き込み・置換・難読化）があれば false。
+function isReadOnlyPipeline(cmd) {
+  const shell = scanShellCommand(cmd);
+  return shell.separators.length === 0
+    && !shell.heredoc
+    && !shell.obfuscated
+    && shell.substitutions.length === 0
+    && !shell.redirects.some(redirectWritesFile)
+    && shell.pipeSegments.slice(1).every((part) => PAGER_SEGMENT_RE.test(part));
+}
+
 // コマンドを実行せず、初心者向けの判断材料へ変換する。
 // AIコーチが使えない時も必ず表示できる決定的なローカル解析。
 function explainCommand(command, toolName) {
@@ -463,9 +667,9 @@ function explainCommand(command, toolName) {
   if (!cmd) return fallback;
 
   const grep = cmd.match(/^\s*(?:grep|egrep|fgrep|rg)\b/i);
-  const onlyReadPipeline = !/[;]|&&|\|\|/.test(cmd)
-    && !/(?:^|[^2])>\s*(?!\/dev\/null\b)|>>|\$\(|`/.test(cmd)
-    && cmd.split(/(?<!\\)\|/).slice(1).every((part) => /^\s*(?:head|tail|sort|uniq|wc|cut|sed\s+-n)\b/i.test(part));
+  // 区切り（改行・単一の & を含む）・書き込みリダイレクト・置換をシェル走査で判定する。
+  // 先頭が読み取りコマンドでも、後ろに別コマンドや書き込み先が付けば読み取りではない。
+  const onlyReadPipeline = isReadOnlyPipeline(cmd);
   if (grep && onlyReadPipeline) {
     const quoted = cmd.match(/(["'])(.*?)\1/);
     const words = quoted ? quoted[2].split(/\\\||\|/).map((x) => x.trim()).filter(Boolean) : [];
@@ -486,7 +690,9 @@ function explainCommand(command, toolName) {
     };
   }
 
-  if (/^\s*git\s+(?:status|diff|log|show|branch)(?:\s|$)/i.test(cmd)) {
+  // git の閲覧系でも、リダイレクトや別コマンド連結があれば読み取りとは言い切れない
+  // （`git log --all > ~/.zshrc` のようにファイルを書き換えられる）。
+  if (/^\s*git\s+(?:status|diff|log|show|branch)(?:\s|$)/i.test(cmd) && onlyReadPipeline) {
     return {
       kind: 'read',
       summary: 'Gitで、現在の変更状況や履歴を確認して表示します。',
@@ -495,7 +701,8 @@ function explainCommand(command, toolName) {
       outbound: 'PCの外へは送信しません',
     };
   }
-  if (/^\s*(?:pwd|ls|dir|find|cat|tac|head|tail|wc|stat|file)\b/i.test(cmd) && onlyReadPipeline) {
+  if (/^\s*(?:pwd|ls|dir|find|cat|tac|head|tail|wc|stat|file)\b/i.test(cmd)
+    && !FIND_DESTRUCTIVE_RE.test(cmd) && onlyReadPipeline) {
     return {
       kind: 'read',
       summary: '表示された場所やファイルの内容・状態を読み取って表示します。',
@@ -518,6 +725,32 @@ function explainCommand(command, toolName) {
   }
   return fallback;
 }
+
+// chmod で自分以外へ書き込みを与えると、他の利用者が中身を差し替えられる状態になる。
+// 旧実装は `\bchmod\s+777\b` だったため `chmod -R 777 /` のようにフラグが挟まる形を
+// 取りこぼしていた。オプションの並び順・書き方に依存しない形にしてある。
+//   数値: 下3桁が 777 か 666。先頭桁は問わない（777 / 0777 / 1777 / 2777 / 666 / 0666）
+//   記号: 付与先に a か o を含み、+ か = で w を与える形（a+rwx / a=rwx / o+w / go+w）
+//   複合: モードはカンマで複数の節を並べられる（a+x,o+w）。先頭の節だけを見ると
+//         2 つ目以降で他人へ書き込みを与える形を見落とすので、どの節に当たっても拾う。
+//   対象外: 755 / +x / u+w / g+w（自分または同一グループだけなので通常操作）
+//           付与先を省いた +w も対象外。umask 022 では所有者にしか効かず、
+//           「ファイルを編集できるようにする」普通の操作なので赤にすると過剰検知になる。
+//           4755 などの setuid は「他人への書き込み付与」とは別の危険なので今回の枠外。
+// キャプチャには「先行する節＋当たった節」が入る（実行権を与えるかの説明文で使う）。
+const WORLD_WRITABLE_RE = /\bchmod\b(?:\s+(?:-[A-Za-z]+|--[a-z][a-z-]*))*\s+((?:[A-Za-z0-9,+=-]*,)?(?:[0-7]?(?:777|666)|[ugo]*[ao][ugoa]*[+=][rwxXst]*w[rwxXst]*))(?![\w+=-])/i;
+// 再帰フラグが付くと、対象フォルダの中身すべてに広がる（説明文の出し分けに使う）。
+const CHMOD_RECURSIVE_RE = /\bchmod\b[^\n;&|]*(?:\s-[A-Za-z]*R[A-Za-z]*\b|\s--recursive\b)/i;
+// 「誰でも実行できる」と書いてよいのは、全員・その他へ実行権が渡る節があるときだけ。
+// u+x は所有者だけなので、書き込みの節と並んでいても「誰でも実行」とは書かない。
+// これは説明文の出し分け専用で、deny にするかどうかの判定には使わない。
+const WORLD_EXECUTE_RE = /(?:^|,)(?:[0-7]?777|[ugo]*[ao][ugoa]*[+=][rwxXst]*x)/i;
+
+// Windows 側の権限全開。`icacls <path> /grant Everyone:(F)` が代表形。
+// 付与先の名前は環境で変わる（Everyone / 全員 / Users / *S-1-1-0）ので名前では拾わず、
+// 「/grant（cacls は /G）で F=フルコントロール・M=変更・C=変更・W=書き込みを与える」形で判定する。
+// (OI)(CI) のような継承フラグが挟まる書き方にも対応。/deny と読み取り専用の :(RX) は対象外。
+const WINDOWS_ACL_GRANT_RE = /\b(?:icacls|cacls|xcacls)\b[^\n;&|]*?\s\/(?:grant(?::r)?|g|p)\b[^\n;&|]*?:(?:\([A-Za-z]+\))*\(?(?:F|M|C|W)\)?(?![A-Za-z])/i;
 
 // ---- 承認判断票（LLM不要・オフライン・決定的） ----------------------------
 // 承認ダイアログを前にした初心者が、コマンドを読めなくても「何が変わるか」を
@@ -552,11 +785,20 @@ function approvalGuide(st) {
   const concrete = explainCommand(cmd, tool);
 
   const generatedCleanup = /^\s*rm\s+(?:-[A-Za-z]*r[A-Za-z]*|--recursive)(?:\s+(?:-f|--force))?\s+(?:\.\/)?(?:node_modules|build|dist|coverage|target|\.next|\.turbo)(?:\s+(?:\.\/)?(?:node_modules|build|dist|coverage|target|\.next|\.turbo))*\s*$/i.test(cmd);
-  const destructive = !generatedCleanup && (/\brm\b[^\n;&|]*(?:-[a-z]*r|--recursive)|\bremove-item\b[^\n;|]*-rec|\b(?:del|erase|rd|rmdir)\b[^\n;&|]*\/s\b|\b(?:format|diskpart|clear-disk|format-volume|initialize-disk|mkfs|shred)\b|\bdd\b[^\n]*\bof=\s*["']?\/dev\//i.test(text));
+  const findDestructive = FIND_DESTRUCTIVE_RE.test(text);
+  const destructive = !generatedCleanup && (findDestructive || /\brm\b[^\n;&|]*(?:-[a-z]*r|--recursive)|\bremove-item\b[^\n;|]*-rec|\b(?:del|erase|rd|rmdir)\b[^\n;&|]*\/s\b|\b(?:format|diskpart|clear-disk|format-volume|initialize-disk|mkfs|shred)\b|\bdd\b[^\n]*\bof=\s*["']?\/dev\//i.test(text));
+  // -r なしの rm も「戻せない削除」。読み取りと同列に扱わない。
+  const singleDelete = !generatedCleanup && !destructive
+    && /(?:^|[\n;&|]\s*)\s*(?:rm|unlink|del|erase)\s+\S/i.test(cmd);
   const remoteExec = /\b(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b[^\n]*(?:\||;|&&)[^\n]*\b(?:sh|bash|zsh|python|node|pwsh|powershell|iex|invoke-expression)\b/i.test(text);
   const publishes = /\bgit\s+push\b[^\n]*(?:--force|-f\b)|\b(?:npm|pnpm|yarn)\b[^\n]*\bpublish\b|\btwine\s+upload\b|\bgem\s+push\b/i.test(text);
-  const protectedData = /(?:^|[\s\\/])\.(?:env|ssh|aws|azure|gnupg|kube)(?:[\\/\s.]|$)|private[ _-]?key|api[ _-]?key|password|credential/i.test(text);
-  const privilege = /\bsudo\b|\brunas\b|\bset-executionpolicy\b|\bchmod\s+777\b/i.test(text);
+  // 引用符やワイルドカード越しでも秘密パスを見落とさない（cat "$HOME/.env" / cat '.env' / -name "*.env"）。
+  const protectedData = /(?:^|[\s\\/"'*])\.(?:env|ssh|aws|azure|gnupg|kube)(?:[\\/\s."']|$)|private[ _-]?key|api[ _-]?key|password|credential/i.test(text);
+  // 他人へ書き込みを与える操作は「権限を全開にする」扱い。sudo と同じ強い権限に置く。
+  const chmodWorldWritable = WORLD_WRITABLE_RE.exec(text);
+  const windowsAclGrant = WINDOWS_ACL_GRANT_RE.test(text);
+  const privilege = Boolean(chmodWorldWritable) || windowsAclGrant
+    || /\bsudo\b|\brunas\b|\bset-executionpolicy\b/i.test(text);
   const network = /web\s*access|webfetch|websearch|https?:\/\/|\b(?:curl|wget|iwr|irm|ssh|scp|sftp|rsync|nc|ncat|netcat)\b|\bgit\s+push\b/i.test(lower);
   const writeTool = /^(write|edit|multiedit)$/.test(tool) || /ファイル書き込み|書き込|上書き|作成/.test(text);
   const readTool = /^(read|notebookread|fileread|glob|grep|search|ls)$/.test(tool);
@@ -566,8 +808,8 @@ function approvalGuide(st) {
 
   let status = 'review';
   if (generatedCleanup) status = 'review';
-  else if (risk === 'high' || destructive || remoteExec || publishes || protectedData || blocked) status = 'deny';
-  else if (risk === 'low' && !hasDanger && (readTool || readCommand) && !network) status = 'allow';
+  else if (risk === 'high' || destructive || remoteExec || publishes || protectedData || privilege || blocked) status = 'deny';
+  else if (risk === 'low' && !hasDanger && !singleDelete && (readTool || readCommand) && !network) status = 'allow';
 
   let impact = '影響範囲を自動では特定できません';
   let reversible = '分からないため、変更前の確認が必要';
@@ -582,11 +824,28 @@ function approvalGuide(st) {
     summary = 'ビルド結果や依存パッケージなど、作り直せるフォルダを整理する操作です。';
     checks = ['対象が生成物だけで、作成したファイルを含まないか', '再インストールや再ビルドができる状態か'];
     why = '日常的な整理操作ですが、対象を間違えると作業内容も消えるため今回だけ確認します。';
+    // 判断票が「確認」へ落としても、ガード側の判定は隠さない（格下げの根拠を利用者に見せる）。
+    if (risk === 'high') why += 'なお、ガードはこの操作を危険度「高」と判定しています。';
   } else if (destructive) {
-    impact = '表示されたファイルやフォルダが削除されます';
-    reversible = '戻せない可能性が高い（ゴミ箱を通らない場合があります）';
-    summary = summary || '削除対象とその中身をまとめて消す操作です。';
-    checks = ['削除対象を自分で開いて、中身を確認したか', 'バックアップがあり、消す理由を説明できるか'];
+    // find の -exec/-ok 系は「削除」ではなく「一致した全ファイルへの一括実行」。
+    const findExecOnly = findDestructive && !/\s-delete\b/i.test(text) && !/\brm\b/i.test(text);
+    impact = findExecOnly
+      ? '見つかったファイルすべてに対して、指定のコマンドがまとめて実行されます'
+      : '表示されたファイルやフォルダが削除されます';
+    reversible = findExecOnly
+      ? '実行される内容によっては戻せません'
+      : '戻せない可能性が高い（ゴミ箱を通らない場合があります）';
+    summary = summary || (findExecOnly
+      ? '検索で一致したファイルを、まとめて別のコマンドへ渡して実行する操作です。'
+      : '削除対象とその中身をまとめて消す操作です。');
+    checks = findExecOnly
+      ? ['一致するファイルの一覧を先に自分で確認したか', 'まとめて実行されるコマンドの中身を説明できるか']
+      : ['削除対象を自分で開いて、中身を確認したか', 'バックアップがあり、消す理由を説明できるか'];
+  } else if (singleDelete) {
+    impact = '表示されたファイルが削除されます（戻せない操作）';
+    reversible = 'ゴミ箱を通らない場合があり、元に戻せない可能性があります';
+    summary = summary || '指定されたファイルを削除する操作です。';
+    checks = ['削除するファイルを自分で開いて、中身を確認したか', 'バックアップがあり、消す理由を説明できるか'];
   } else if (remoteExec) {
     impact = 'インターネットから取得したプログラムがPC上で動きます';
     reversible = '実行内容によっては戻せません';
@@ -604,10 +863,25 @@ function approvalGuide(st) {
     summary = summary || '秘密情報として扱うべき場所や文字列が含まれています。';
     checks = ['この操作に秘密情報が本当に必要か', '内容がAIや外部サービスへ送られないか'];
   } else if (privilege) {
-    impact = 'PC全体の設定や通常は触れない場所を変更できます';
-    reversible = '変更内容によっては復旧作業が必要';
-    summary = summary || '管理者に近い強い権限を使う操作です。';
-    checks = ['なぜ強い権限が必要か説明できるか', '一般ユーザー権限で代用できないか'];
+    if (chmodWorldWritable) {
+      // 777 と a+rwx は実行権も与える。666 と a+w は読み書きだけ。説明文を合わせる。
+      const grantsExecute = WORLD_EXECUTE_RE.test(chmodWorldWritable[1]);
+      const scope = CHMOD_RECURSIVE_RE.test(text) ? '指定したフォルダとその中身すべて' : '指定した場所';
+      impact = `${scope}の権限が変わり、PCを使う誰でも${grantsExecute ? '読み書き・実行' : '読み書き'}できる状態になります`;
+      reversible = '元の権限は記録されないため、手作業で戻す必要があります';
+      summary = summary || 'ファイルやフォルダの権限を、他の利用者も書き換えられる状態まで広げる操作です。';
+      checks = ['権限を広げる対象が、他人に触られてよい場所だけか', 'もっと狭い権限（755 など）で足りないか'];
+    } else if (windowsAclGrant) {
+      impact = '指定した場所のアクセス権が変わり、権限を与えた相手が中身を自由に変更できるようになります';
+      reversible = '元のアクセス権は記録されないため、手作業で戻す必要があります';
+      summary = summary || 'Windowsのアクセス権を、ほかの利用者へ広げる操作です。';
+      checks = ['権限を与える相手（Everyone など）が意図どおりか', 'その場所を他の利用者へ開放してよいか'];
+    } else {
+      impact = 'PC全体の設定や通常は触れない場所を変更できます';
+      reversible = '変更内容によっては復旧作業が必要';
+      summary = summary || '管理者に近い強い権限を使う操作です。';
+      checks = ['なぜ強い権限が必要か説明できるか', '一般ユーザー権限で代用できないか'];
+    }
   } else if (writeTool) {
     impact = '表示されたファイルが作成・変更されます';
     reversible = 'Gitやバックアップがあれば戻せる可能性があります';
@@ -929,6 +1203,8 @@ module.exports = {
   hasCoachContext,
   approvalGuide,
   explainCommand,
+  scanShellCommand,
+  isReadOnlyPipeline,
   companionPresentation,
   coachRedact,
   saveApiKey,
@@ -1454,7 +1730,7 @@ async function saveKey(){
 	    el.classList.toggle('recommended',active);
 	    el.setAttribute('aria-current',active?'true':'false');
 	  });
-	  $('judgement-kicker').textContent = ({allow:'推奨: 今回だけ',review:'推奨: 追加確認',deny:'推奨: 拒否',wait:'待機中'})[status];
+	  $('judgement-kicker').textContent = ({allow:'目安: 今回だけ',review:'目安: 追加確認',deny:'目安: 拒否',wait:'待機中'})[status];
 	}
 
 	function renderEventCard(s){

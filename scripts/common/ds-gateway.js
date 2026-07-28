@@ -2,6 +2,7 @@
 'use strict';
 const http = require('node:http');
 const https = require('node:https');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -13,13 +14,58 @@ const { loadDenylistResult } = require('./denylist.js');
 const DEFAULT_PORT = Number(process.env.DS_GATEWAY_PORT || 8788);
 const DEFAULT_UPSTREAM = process.env.DS_GATEWAY_UPSTREAM || 'https://api.deepseek.com/anthropic';
 const DEFAULT_AUTH_FILE = process.env.DS_GATEWAY_AUTH_FILE || '';
+// 呼び出し元認証トークン。ランチャーが起動ごとに乱数で採番して環境変数で渡す。
+const DEFAULT_TOKEN = process.env.DS_GATEWAY_TOKEN || '';
 const DEFAULT_MAX_BODY = Number(process.env.DS_GATEWAY_MAX_BODY || 10 * 1024 * 1024); // 10MB（M2: ReDoS/メモリ枯渇の上限）
+
+// M-7（呼び出し元認証）: gateway は 127.0.0.1 で待ち受け、受け取った Authorization を
+// 検証せずに実キーへ差し替えて転送していた。そのため同一 PC の任意プロセス（受講者が
+// 拾ってきたスクリプト等）や DNS リバインディングを踏んだブラウザが、受講者の DeepSeek
+// キーで API を叩けてしまう。ランチャーが起動ごとに採番する乱数トークンを必須にして塞ぐ。
+// 突合は sha256 で 32 バイト固定長にしてから timingSafeEqual（長さ差で throw させない・
+// 一致バイト数から値を推測されない）。
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value), 'utf8').digest();
+}
+
+// Authorization / x-api-key / api-key から提示トークン候補を取り出す。
+// Authorization は "Bearer <token>" 形式（Claude Code）と生値の両方を受ける。
+function presentedTokens(headers) {
+  const out = [];
+  const auth = headers.authorization;
+  if (typeof auth === 'string' && auth.trim()) {
+    const value = auth.trim();
+    const bearer = /^Bearer[ \t]+(.+)$/i.exec(value);
+    out.push(bearer ? bearer[1].trim() : value);
+  }
+  for (const name of ['x-api-key', 'api-key']) {
+    const value = headers[name];
+    if (typeof value === 'string' && value.trim()) out.push(value.trim());
+  }
+  return out;
+}
+
+function isAuthorizedCaller(headers, expectedHash) {
+  let ok = false;
+  // 途中 return しない（どの候補で一致したかを応答時間から推測させない）。
+  for (const candidate of presentedTokens(headers)) {
+    if (crypto.timingSafeEqual(sha256(candidate), expectedHash)) ok = true;
+  }
+  return ok;
+}
 
 function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT,
                         tokenMap = createTokenMap(), denylistTerms = loadDenylistResult(),
                         maxBody = DEFAULT_MAX_BODY,
-                        upstreamAuthFile = DEFAULT_AUTH_FILE } = {}) {
+                        upstreamAuthFile = DEFAULT_AUTH_FILE,
+                        authToken = DEFAULT_TOKEN } = {}) {
   const upstreamUrl = new URL(upstream);
+  // 無認証モードは用意しない（後方互換で穴が残ると意味がないため fail-closed で起動拒否）。
+  const callerToken = String(authToken || '').trim();
+  if (!callerToken) {
+    throw new Error('ds-gateway: DS_GATEWAY_TOKEN is not set; refusing to start without caller auth (fail-closed)');
+  }
+  const authTokenHash = sha256(callerToken);
   let upstreamAuthorization = '';
   if (upstreamAuthFile) {
     let key;
@@ -43,11 +89,22 @@ function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT,
     denylistFailClosed,
     maxBody,
     upstreamAuthorization,
+    authTokenHash,
   };
   const server = http.createServer((req, res) => {
+    // /healthz は無認証のまま残す。ランチャーは「トークンを持つ自分」だけでなく
+    // 「gateway が listen 済みか」を起動待ちで確かめる必要があり、この応答は
+    // 固定文字列 {"status":"ok"} だけで秘密も設定も一切返さないため。
     if (req.method === 'GET' && req.url === '/healthz') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end('{"status":"ok"}');
+      return;
+    }
+    // 転送経路は全て呼び出し元認証を通す（欠落・不一致は 401・upstream へは出さない）。
+    if (!isAuthorizedCaller(req.headers, session.authTokenHash)) {
+      req.resume();
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end('{"error":"ds-gateway: unauthorized caller; not forwarded (fail-closed)"}');
       return;
     }
     handleProxy(req, res, upstreamUrl, session).catch(() => {
@@ -370,10 +427,14 @@ function forward(req, res, upstreamUrl, body, session, allocated, outUrl) {
   const isHttps = upstreamUrl.protocol === 'https:';
   const lib = isHttps ? https : http;
   const headers = maskHeaders(req.headers, session);
+  // 呼び出し元が提示したのはこの gateway 専用のローカル認証トークン（起動ごとの乱数）であり、
+  // upstream には何の意味も持たない local-only の秘密。素通しすると DeepSeek 側のログに
+  // 残るだけなので、upstream キーを載せる/載せないに関わらず必ず落とす。
+  delete headers.authorization;
+  delete headers['x-api-key'];
+  delete headers['api-key'];
   if (session.upstreamAuthorization) {
     headers.authorization = session.upstreamAuthorization;
-    delete headers['x-api-key'];
-    delete headers['api-key'];
   }
   headers.host = upstreamUrl.host;
   headers['content-length'] = Buffer.byteLength(body);
@@ -414,7 +475,16 @@ function forward(req, res, upstreamUrl, body, session, allocated, outUrl) {
 module.exports = { createGateway, DEFAULT_PORT, DEFAULT_UPSTREAM, DEFAULT_AUTH_FILE };
 
 if (require.main === module) {
-  createGateway().listen().then((s) => {
+  let gateway;
+  try {
+    gateway = createGateway();
+  } catch (e) {
+    // DS_GATEWAY_TOKEN 未設定・upstream キー読取失敗などはここで落とす。ランチャーは
+    // health 応答が来ないことで検知し「送信検査なしでは起動しない」に倒す。
+    console.error(`ds-gateway: ${e && e.message ? e.message : e}`);
+    process.exit(1);
+  }
+  gateway.listen().then((s) => {
     console.log(`listening on 127.0.0.1:${s.address().port}`);
   });
 }

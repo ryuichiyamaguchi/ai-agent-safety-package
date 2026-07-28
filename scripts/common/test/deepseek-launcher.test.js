@@ -36,6 +36,12 @@ test('macOS DeepSeek launcher replaces a stale gateway from the same package pat
   const root = path.join(__dirname, '..', '..', '..');
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-launcher-'));
   t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
+  // gateway は実キー（$HOME/.deepseek-claude/auth）と呼び出し元認証トークンを必須にしたので、
+  // 実 HOME を汚さない偽 HOME にキーを置いて起動させる。
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-launcher-home-'));
+  t.after(() => fs.rmSync(fakeHome, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(fakeHome, '.deepseek-claude'), { recursive: true });
+  fs.writeFileSync(path.join(fakeHome, '.deepseek-claude', 'auth'), 'ds-test-key-never-log\n', { mode: 0o600 });
 
   const hooks = path.join(workspace, '.ai-safety', 'hooks');
   fs.mkdirSync(path.join(hooks, 'common'), { recursive: true });
@@ -52,7 +58,7 @@ test('macOS DeepSeek launcher replaces a stale gateway from the same package pat
   fs.writeFileSync(path.join(hooks, 'macos', 'launch-claude-safe.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
 
   const stale = spawn(process.execPath, [path.join(hooks, 'common', 'ds-gateway.js')], {
-    env: { ...process.env, DS_GATEWAY_PORT: '8799' },
+    env: { ...process.env, DS_GATEWAY_PORT: '8799', DS_GATEWAY_TOKEN: 'stale-gateway-token' },
     stdio: 'ignore',
   });
   t.after(() => {
@@ -61,7 +67,12 @@ test('macOS DeepSeek launcher replaces a stale gateway from the same package pat
   await waitForHealth(8799);
 
   const launcher = spawn('bash', [path.join(hooks, 'macos', 'deepseek', 'launch-deepseek-gateway.sh'), workspace], {
-    env: { ...process.env, DS_GATEWAY_PORT: '8799' },
+    env: {
+      ...process.env,
+      HOME: fakeHome,
+      DS_GATEWAY_PORT: '8799',
+      AI_SAFE_LOG_DIR: path.join(fakeHome, 'logs'),
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';
@@ -72,6 +83,38 @@ test('macOS DeepSeek launcher replaces a stale gateway from the same package pat
 
   assert.strictEqual(code, 0, `stdout:\n${out}\nstderr:\n${err}`);
   assert.match(out, /送信検査 Gateway 稼働中/);
+  // 合言葉も実キーも画面・ログには出さない。
+  assert.doesNotMatch(out + err, /ds-test-key-never-log/, 'キー本文を出力しない');
+  assert.doesNotMatch(out + err, /[0-9a-f]{64}/, '合言葉を出力しない');
+});
+
+test('macOS DeepSeek launcher is fail-closed when the DeepSeek key is not registered', async (t) => {
+  const root = path.join(__dirname, '..', '..', '..');
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-launcher-nokey-'));
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-launcher-nokey-home-'));
+  t.after(() => {
+    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  });
+
+  const hooks = path.join(workspace, '.ai-safety', 'hooks');
+  fs.mkdirSync(path.join(hooks, 'common'), { recursive: true });
+  fs.mkdirSync(path.join(hooks, 'macos', 'deepseek'), { recursive: true });
+  for (const file of ['ds-gateway.js', 'secret-patterns.js', 'token-map.js', 'denylist.js']) {
+    fs.copyFileSync(path.join(root, 'scripts', 'common', file), path.join(hooks, 'common', file));
+  }
+  fs.copyFileSync(
+    path.join(root, 'scripts', 'macos', 'deepseek', 'launch-deepseek-gateway.sh'),
+    path.join(hooks, 'macos', 'deepseek', 'launch-deepseek-gateway.sh'),
+  );
+  fs.writeFileSync(path.join(hooks, 'macos', 'launch-claude-safe.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+
+  const result = require('node:child_process').spawnSync(
+    'bash', [path.join(hooks, 'macos', 'deepseek', 'launch-deepseek-gateway.sh'), workspace],
+    { env: { ...process.env, HOME: fakeHome, DS_GATEWAY_PORT: '8798', AI_SAFE_LOG_DIR: path.join(fakeHome, 'logs') }, encoding: 'utf8' },
+  );
+  assert.notStrictEqual(result.status, 0, 'キー未登録では起動しない');
+  assert.match(result.stdout + result.stderr, /DeepSeek APIキーが未登録/);
 });
 
 test('Windows DeepSeek launcher has same-package stale gateway cleanup before Start-Process', () => {

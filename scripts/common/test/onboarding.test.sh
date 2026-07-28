@@ -35,9 +35,20 @@ grep -Fq 'Unblock-File -ErrorAction SilentlyContinue; powershell -NoProfile -Exe
 grep -Fq 'powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\install.ps1"' "$ROOT/docs/00_クイックスタート.md" || { note "FAIL: クイックスタートに PowerShell 代替コマンドがない"; fail=1; }
 
 # 6) workspace 内ラッパー（.command）構文 + 相対 ws 解決
+#
+#    「自分の場所から親をたどる」($HERE/..) 解決が要るのは、作業フォルダ配下の
+#    ファイル（.ai-safety/... のガードやランチャー）を呼ぶラッパーだけ。
+#    npm でツールを入れるだけのラッパー（（上級）10_ccmuxを入れる.command）は
+#    作業フォルダの場所を知る必要がないので、この要件の対象外にする。
+#    免除の条件は「作業フォルダを一切参照しないこと」で、$HERE を使って別の場所を
+#    組み立てているファイルは免除しない（免除の乱用防止）。
 for f in "$START_DIR/"*.command; do
   bash -n "$f" || { note "FAIL syntax: $f"; fail=1; }
-  grep -q 'HERE/\.\.' "$f" || { note "FAIL: ws 解決(HERE/..)なし: $f"; fail=1; }
+  if grep -q '\.ai-safety' "$f"; then
+    grep -q 'HERE/\.\.' "$f" || { note "FAIL: ws 解決(HERE/..)なし: $f"; fail=1; }
+  else
+    grep -q 'HERE' "$f" && { note "FAIL: 作業フォルダを参照しないのに \$HERE を組み立てている: $f"; fail=1; }
+  fi
 done
 
 # 7) workspace 内ラッパー（.bat）相対解決 + ターゲット呼び出し
@@ -45,14 +56,38 @@ for f in "$START_DIR/"*.bat; do
   grep -q '%HERE%' "$f" || { note "FAIL: %HERE% なし: $f"; fail=1; }
 done
 
-# 7b) GitHub で文字化けしないよう、オンボーディング入口の .bat は UTF-8 + chcp 65001 に固定
+# 7b) オンボーディング入口の .bat は CP932 + 行頭 chcp 932 に固定
+#
+#     旧版のこの検査は逆に「GitHub の画面で文字化けしないように UTF-8 + chcp 65001」を
+#     要求していた。しかし UTF-8 + chcp 65001 の .bat を配ると、日本語 Windows の教室 PC で
+#     実行した瞬間に文字化けして即閉じになる事故が実際に起きている。GitHub 上の見た目より
+#     「配った PC で実行できること」を優先し、SSOT は CP932 + chcp 932 とする
+#     (SSOT の実物は scripts/windows/install-one-click.bat)。
+#     旧ルールは対象 21 本中 18 本が破ったまま放置され、検査として機能していなかった。
+#
+#     判定基準は scripts/release-version-check.sh の実バイト検査と揃えてある
+#     (そちらはパッケージ内の .bat/.cmd 全部の CRLF と行頭 chcp を見る)。
+#     行頭以外の chcp 65001 は対象外。9_作業ウィンドウを開く.bat が start で開く別ウィンドウを
+#     UTF-8 に切り替える (ccmux の表示崩れ対策) のは正当な用途のため。
+cp932_probe="/tmp/onboarding-cp932.$$"
 for f in "$ROOT"/0_*.bat "$ROOT"/1_*.bat "$START_DIR/"*.bat; do
   [ -f "$f" ] || continue
-  iconv -f UTF-8 -t UTF-8 "$f" >/dev/null 2>&1 || { note "FAIL: UTF-8 ではない: $f"; fail=1; }
+  if ! iconv -f CP932 -t UTF-8 "$f" > "$cp932_probe" 2>/dev/null; then
+    note "FAIL: CP932 ではない: $f"; fail=1
+  fi
+  # chcp 932 は日本語を含む .bat にだけ要求する (ASCII だけの .bat は指定なしでよい)。
   if LC_ALL=C tr -d '\000-\177' < "$f" | grep -q .; then
-    grep -q 'chcp 65001' "$f" || { note "FAIL: 非ASCII .bat なのに chcp 65001 ではない: $f"; fail=1; }
+    if ! LC_ALL=C grep -qiE '^[[:space:]]*@?chcp[[:space:]]+932' "$f"; then
+      note "FAIL: 非ASCII .bat なのに行頭 chcp 932 がない: $f"; fail=1
+    fi
+  fi
+  # chcp 65001 の禁止は中身によらず全部に効かせる (ASCII だけの .bat でも、後から
+  # 日本語を足した瞬間に教室 PC で文字化けするため)。release-version-check.sh と同基準。
+  if LC_ALL=C grep -qiE '^[[:space:]]*@?chcp[[:space:]]+65001' "$f"; then
+    note "FAIL: 行頭で chcp 65001 を指定している: $f"; fail=1
   fi
 done
+rm -f "$cp932_probe"
 
 # 8) install が スタート/ を配置する追記を含む（両 OS）
 grep -q 'workspace-template/スタート' "$ROOT/scripts/macos/install.sh" || { note "FAIL: install.sh に スタート 配置追記なし"; fail=1; }

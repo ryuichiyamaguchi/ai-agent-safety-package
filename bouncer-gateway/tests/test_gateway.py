@@ -23,6 +23,7 @@ class FakeAi:
 class EchoUpstreamHandler(BaseHTTPRequestHandler):
     received_body = b""
     response_text = ""
+    response_stream = ""
 
     def log_message(self, fmt, *args):
         return
@@ -30,6 +31,14 @@ class EchoUpstreamHandler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         length = int(self.headers.get("Content-Length", "0"))
         type(self).received_body = self.rfile.read(length)
+        if type(self).response_stream:
+            body = type(self).response_stream.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         payload = json.loads(type(self).received_body.decode("utf-8"))
         content = payload["messages"][0]["content"]
         text = type(self).response_text or f"Echo: {content}"
@@ -55,6 +64,7 @@ class GatewayTests(unittest.TestCase):
     def setUp(self) -> None:
         EchoUpstreamHandler.received_body = b""
         EchoUpstreamHandler.response_text = ""
+        EchoUpstreamHandler.response_stream = ""
         self.upstream = ThreadingHTTPServer(("127.0.0.1", 0), EchoUpstreamHandler)
         self.upstream_thread = threading.Thread(
             target=self.upstream.serve_forever, daemon=True
@@ -164,6 +174,139 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(error["error"]["type"], "bouncer_blocked")
         finally:
             raised.exception.close()
+
+    def test_dangerous_streamed_tool_call_is_blocked_before_client(self) -> None:
+        """The whole streaming path: the tool input arrives in fragments that
+        split the command, and the response still must not reach the client."""
+        tool_input = '{"command":"' + "r" + "m" + ' -rf /"}'
+        # The cut lands inside the flag, so a separator between the fragments
+        # would hide the command from the rules.
+        cut = tool_input.index("-rf") + 2
+        events = [
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": "toolu_01AbCdEfGhIjKlMnOpQrSt",
+                    "name": "Bash",
+                    "input": {},
+                },
+            },
+        ]
+        for chunk in (tool_input[:cut], tool_input[cut:]):
+            events.append(
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "input_json_delta", "partial_json": chunk},
+                }
+            )
+        events.append({"type": "content_block_stop", "index": 0})
+        EchoUpstreamHandler.response_stream = "".join(
+            f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            for event in events
+        )
+
+        payload = {
+            "model": "test",
+            "max_tokens": 10,
+            "stream": True,
+            "messages": [{"role": "user", "content": "整理してください"}],
+        }
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            self._post(payload)
+        try:
+            self.assertEqual(raised.exception.code, 451)
+            error = json.loads(raised.exception.read().decode("utf-8"))
+            codes = [item["code"] for item in error["error"]["findings"]]
+            self.assertIn("destructive_rm", codes)
+        finally:
+            raised.exception.close()
+
+    def test_ordinary_streamed_response_passes_through(self) -> None:
+        events = [
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "設定を確認"},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "しました。"},
+            },
+            {"type": "content_block_stop", "index": 0},
+        ]
+        EchoUpstreamHandler.response_stream = "".join(
+            f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            for event in events
+        )
+        payload = {
+            "model": "test",
+            "max_tokens": 10,
+            "stream": True,
+            "messages": [{"role": "user", "content": "確認して"}],
+        }
+        with self._post(payload) as response:
+            body = response.read().decode("utf-8")
+            self.assertEqual(response.status, 200)
+        self.assertIn("text/event-stream", response.headers["Content-Type"])
+        self.assertIn("設定を確認", body)
+
+    def _request_with_host(self, host):
+        request = urllib.request.Request(
+            self.gateway_url + "/bouncer/status",
+            headers={"Host": host},
+            method="GET",
+        )
+        return urllib.request.urlopen(request, timeout=5)
+
+    def test_rejects_a_host_header_that_is_not_loopback(self) -> None:
+        """A name that resolves elsewhere is how DNS rebinding reaches a
+        loopback-only server from a browser."""
+        port = self.gateway.server_address[1]
+        for host in ("evil.example.com", f"attacker.test:{port}", "192.168.1.20"):
+            with self.subTest(host=host):
+                with self.assertRaises(urllib.error.HTTPError) as raised:
+                    self._request_with_host(host)
+                try:
+                    self.assertEqual(raised.exception.code, 403)
+                finally:
+                    raised.exception.close()
+
+    def test_accepts_loopback_host_headers(self) -> None:
+        port = self.gateway.server_address[1]
+        for host in (f"127.0.0.1:{port}", f"localhost:{port}", "localhost", "[::1]"):
+            with self.subTest(host=host):
+                with self._request_with_host(host) as response:
+                    self.assertEqual(response.status, 200)
+
+    def test_blocked_host_does_not_reach_the_upstream(self) -> None:
+        request = urllib.request.Request(
+            self.gateway_url + "/v1/messages",
+            data=json.dumps(
+                {
+                    "model": "test",
+                    "max_tokens": 10,
+                    "messages": [{"role": "user", "content": "hello"}],
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Host": "evil.example.com"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(request, timeout=5)
+        try:
+            self.assertEqual(raised.exception.code, 403)
+        finally:
+            raised.exception.close()
+        self.assertEqual(EchoUpstreamHandler.received_body, b"")
 
     def test_rejects_non_json_content_type(self) -> None:
         request = urllib.request.Request(

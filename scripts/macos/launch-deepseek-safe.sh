@@ -17,6 +17,12 @@
 #                                            # （Web UI 用ワークフロー案内は出さない）
 
 set -u
+
+# 受講者のシェルに残っていた AI_SAFE_POLICY / AI_SAFE_ROOT で deny 床ごと差し替えられる
+# のを防ぐため、起動時に必ず捨てる（このあと同梱ポリシーを自分で設定する）。
+# 万一これが漏れても、ガード側(lib/safety_policy.sh / lib/SafetyPolicy.ps1)が同梱パス以外を
+# 拒否するので床は残る。ここは二重の保険。
+unset AI_SAFE_POLICY AI_SAFE_ROOT
 LANG=${LANG:-en_US.UTF-8}
 
 SKIP_WARNING=0

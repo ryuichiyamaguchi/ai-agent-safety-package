@@ -193,6 +193,12 @@ try {
         Block-Action $inputObj "bash" "protected path referenced in shell command" $cmd $policy
     }
 
+    # 書き込み先（> >> tee）が設定ファイル等なら止める。読み取りは止めない（mac guard-bash.sh と対称）。
+    $redirectHit = Test-RedirectProtectedCommand $cmd $policy
+    if ($redirectHit) {
+        Block-Action $inputObj "bash" ("protected file targeted by output redirect (設定ファイルの書き換え): " + $redirectHit.Target) $cmd $policy
+    }
+
     # loopback（localhost/127.0.0.1/::1）宛ての単純 fetch は許可。外部宛ては下の decisive deny に落とす。
     if (Test-IsSafeLoopbackFetch $cmd) {
         Allow-Action $inputObj "bash" "loopback fetch to localhost permitted" $cmd $policy

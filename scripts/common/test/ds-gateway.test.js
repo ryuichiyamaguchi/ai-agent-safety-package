@@ -1,13 +1,37 @@
 const { test, after } = require('node:test');
 const assert = require('node:assert');
-const http = require('node:http');
+const nodeHttp = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+
+// gateway は呼び出し元認証（起動ごとの乱数トークン）を必須にしている。テストでは
+// 環境変数で既定トークンを与え、リクエスト側は下の http ラッパーで自動的に付与する。
+// require より前に立てる（ds-gateway.js が読み込み時に既定値を確定するため）。
+const TEST_TOKEN = 'test-gateway-token-0123456789abcdef';
+process.env.DS_GATEWAY_TOKEN = TEST_TOKEN;
+
 const { createGateway } = require('../ds-gateway.js');
 const { createTokenMap } = require('../token-map.js');
 const { loadDenylistResult } = require('../denylist.js');
+
+// 認証以外の回帰テストは「正規の呼び出し元」であることが前提なので、認証ヘッダを
+// 明示していないリクエストには自動で正しいトークンを載せる。認証そのものの回帰は
+// authorization / x-api-key を明示して 401 を確かめる（自動付与は起きない）。
+function withAuth(options) {
+  if (!options || typeof options !== 'object') return options;
+  const headers = { ...(options.headers || {}) };
+  const hasAuth = Object.keys(headers).some((k) => /^(authorization|x-api-key|api-key)$/i.test(k));
+  if (!hasAuth) headers.authorization = `Bearer ${TEST_TOKEN}`;
+  return { ...options, headers };
+}
+
+const http = {
+  createServer: (...args) => nodeHttp.createServer(...args),
+  get: (options, cb) => nodeHttp.get(withAuth(options), cb),
+  request: (options, cb) => nodeHttp.request(withAuth(options), cb),
+};
 
 function get(port, path) {
   return new Promise((resolve, reject) => {
@@ -72,6 +96,87 @@ test('GET /healthz returns 200 ok with no token field', async () => {
   assert.strictEqual(res.status, 200);
   assert.strictEqual(res.body, '{"status":"ok"}');
   assert.ok(!res.body.includes('token'), 'healthz must not echo any token');
+});
+
+// ── M-7: 呼び出し元認証（同一 PC の他プロセス / DNS リバインディング対策）──
+test('M-7: gateway refuses to start without a caller auth token (fail-closed)', () => {
+  assert.throws(
+    () => createGateway({ upstream: 'http://127.0.0.1:1', port: 0, authToken: '' }),
+    /DS_GATEWAY_TOKEN/,
+  );
+  assert.throws(
+    () => createGateway({ upstream: 'http://127.0.0.1:1', port: 0, authToken: '   ' }),
+    /DS_GATEWAY_TOKEN/,
+  );
+});
+
+test('M-7: gateway process exits non-zero when DS_GATEWAY_TOKEN is unset', async () => {
+  const gwPath = path.join(__dirname, '..', 'ds-gateway.js');
+  const env = { ...process.env, DS_GATEWAY_PORT: '0' };
+  delete env.DS_GATEWAY_TOKEN;
+  const child = spawn(process.execPath, [gwPath], { env, stdio: 'ignore' });
+  const code = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('child did not exit without a token')); }, 5000);
+    child.on('exit', (c) => { clearTimeout(timer); resolve(c); });
+    child.on('error', (e) => { clearTimeout(timer); reject(e); });
+  });
+  assert.notStrictEqual(code, 0, 'gateway must not listen without caller auth');
+});
+
+test('M-7: correct token is forwarded, wrong/missing token is 401 and never reaches upstream', async (t) => {
+  let forwarded = 0;
+  const up = await startUpstream((req, res) => {
+    forwarded += 1; req.resume();
+    res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}');
+  });
+  t.after(() => up.close());
+  const gw = createGateway({ upstream: `http://127.0.0.1:${up.address().port}`, port: 0, denylistTerms: [] });
+  const server = await gw.listen(); t.after(() => server.close());
+  const port = server.address().port;
+  const body = { messages: [{ role: 'user', content: 'hi' }] };
+
+  const ok = await request(port, { path: '/v1/messages', method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${TEST_TOKEN}` }, body });
+  assert.strictEqual(ok.status, 200);
+  assert.strictEqual(forwarded, 1);
+
+  // x-api-key でも同じトークンなら通る（OpenCode 系クライアント向け）。
+  const viaApiKey = await request(port, { path: '/v1/messages', method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': TEST_TOKEN }, body });
+  assert.strictEqual(viaApiKey.status, 200);
+  assert.strictEqual(forwarded, 2);
+
+  // 不一致（同じ長さ）
+  const wrong = await request(port, { path: '/v1/messages', method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${'x'.repeat(TEST_TOKEN.length)}` }, body });
+  assert.strictEqual(wrong.status, 401);
+
+  // 不一致（長さ違い＝timingSafeEqual が throw しないこと込みで確認）
+  for (const bad of ['short', `${TEST_TOKEN}extra-suffix-that-makes-it-longer`, TEST_TOKEN.slice(0, -1)]) {
+    const res = await request(port, { path: '/v1/messages', method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${bad}` }, body });
+    assert.strictEqual(res.status, 401, `token "${bad}" must be rejected`);
+  }
+
+  // 欠落
+  const missing = await request(port, { path: '/v1/messages', method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': '' }, body });
+  assert.strictEqual(missing.status, 401);
+
+  assert.strictEqual(forwarded, 2, '401 requests must never reach upstream');
+});
+
+test('M-7: healthz stays reachable without a token (launcher readiness probe)', async (t) => {
+  const gw = createGateway({ upstream: 'http://127.0.0.1:1', port: 0 });
+  const server = await gw.listen(); t.after(() => server.close());
+  const res = await new Promise((resolve, reject) => {
+    nodeHttp.get({ host: '127.0.0.1', port: server.address().port, path: '/healthz' }, (r) => {
+      let b = ''; r.on('data', (c) => (b += c)); r.on('end', () => resolve({ status: r.statusCode, body: b }));
+    }).on('error', reject);
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body, '{"status":"ok"}');
+  assert.ok(!res.body.includes(TEST_TOKEN), 'healthz must not echo the caller token');
 });
 
 test('second gateway on the same port exits non-zero (bind failure)', async () => {
@@ -164,8 +269,8 @@ test('OpenCode mode injects the upstream key from a local file and never forward
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      authorization: 'Bearer bouncer-local-only',
-      'x-api-key': 'bouncer-local-only',
+      authorization: `Bearer ${TEST_TOKEN}`,
+      'x-api-key': TEST_TOKEN,
     },
     body: {
       model: 'deepseek-v4-pro',
@@ -175,7 +280,8 @@ test('OpenCode mode injects the upstream key from a local file and never forward
 
   assert.strictEqual(res.status, 200);
   assert.strictEqual(cap.headers.authorization, 'Bearer ds-test-key-from-file');
-  assert.ok(!JSON.stringify(cap.headers).includes('bouncer-local-only'));
+  // ローカル合言葉は upstream へ出さない（local-only の秘密なので DeepSeek 側に残さない）。
+  assert.ok(!JSON.stringify(cap.headers).includes(TEST_TOKEN));
   assert.strictEqual(cap.headers['x-api-key'], undefined);
 });
 
@@ -527,8 +633,8 @@ test('F-2: masks non-array string messages field (deep-walk)', async () => {
   assert.ok(!cap.body.includes('sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX'), 'non-array messages string leaked secret');
 });
 
-// ── F-3: header 値のマスク（auth header は保全）──
-test('F-3: masks PII/secret in custom headers but preserves auth headers', async () => {
+// ── F-3: header 値のマスク（標準 header は保全）──
+test('F-3: masks PII/secret in custom headers but preserves standard headers', async () => {
   const { server: up, cap } = await startCaptureUpstream();
   after(()=>up.close());
   const gw = createGateway({ upstream:`http://127.0.0.1:${up.address().port}`, port:0, denylistTerms: [] });
@@ -536,17 +642,19 @@ test('F-3: masks PII/secret in custom headers but preserves auth headers', async
   const res = await request(server.address().port, { path:'/v1/messages', method:'POST',
     headers:{
       'content-type':'application/json',
-      'authorization':'Bearer sk-ant-REALAUTHKEYAAAAAAAAAAAA',
-      'x-api-key':'sk-ant-REALAUTHKEYAAAAAAAAAAAA',
+      'authorization':`Bearer ${TEST_TOKEN}`,
+      'anthropic-version':'2023-06-01',
       'x-user-note':'contact header-leak@example.com and sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX',
     },
     body:{ messages:[{ role:'user', content:'hi' }] } });
   assert.strictEqual(res.status, 200);
   assert.ok(!cap.headers['x-user-note'].includes('header-leak@example.com'), 'custom header email leaked raw');
   assert.ok(!cap.headers['x-user-note'].includes('sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX'), 'custom header API key leaked raw');
-  // 認証/標準 header は素通り（壊すと認証不能）
-  assert.strictEqual(cap.headers['authorization'], 'Bearer sk-ant-REALAUTHKEYAAAAAAAAAAAA', 'authorization must not be masked');
-  assert.strictEqual(cap.headers['x-api-key'], 'sk-ant-REALAUTHKEYAAAAAAAAAAAA', 'x-api-key must not be masked');
+  // 標準 header は素通り（マスクすると API 呼び出しが壊れる）
+  assert.strictEqual(cap.headers['anthropic-version'], '2023-06-01', 'anthropic-version must not be masked');
+  assert.strictEqual(cap.headers['content-type'], 'application/json', 'content-type must not be masked');
+  // upstream キー未設定でも呼び出し元の合言葉は転送しない（M-7）。
+  assert.strictEqual(cap.headers['authorization'], undefined, 'caller token must not be forwarded upstream');
 });
 
 // ── F-4: denylist 読込失敗を fail-closed 化 ──
