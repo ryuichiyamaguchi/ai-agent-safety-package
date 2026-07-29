@@ -261,16 +261,27 @@ test('both launchers refuse to start when a command file can run a shell command
   const mac = read(MAC_LAUNCHER);
   const win = read(WIN_LAUNCHER);
 
-  // -R でないと symlink の先を見ない（BSD grep 実測: 同じフォルダで -r は 1 件、-R は 3 件）。
-  // opencode は command / agent / mode を symlink:true で走査するので -r では取りこぼす。
-  assert.ok(mac.includes(`grep -RlF '${SHELL_EXPANSION}'`), 'mac: 配置後のコマンド定義を検査していない');
+  assert.ok(mac.includes(`grep -lF '${SHELL_EXPANSION}'`), 'mac: 配置後のコマンド定義を検査していない');
   assert.match(mac, /確認なしでコマンドを実行する書き方/);
   assert.match(mac, /fail-closed/);
   assert.match(win, /Contains\('!' \+ \[char\]96\)/, 'win: 配置後のコマンド定義を検査していない');
   assert.match(win, /確認なしでコマンドを実行する書き方/);
   // 配置先に symlink があれば、その先を見るより前に起動を止める。
-  assert.match(mac, /find "\$OC_CONFIG_DIR" -type l/);
+  assert.match(mac, /-type l/);
   assert.match(win, /ReparsePoint/);
+});
+
+test('both launchers exclude only the OpenCode dependency cache from link and shell scans', () => {
+  const mac = read(MAC_LAUNCHER);
+  const win = read(WIN_LAUNCHER);
+
+  // node_modules には通常の JS テンプレートリテラル末尾の !` と .bin のリンクがある。
+  // ここだけを依存キャッシュとして除外し、その他の未知の設定ファイルは検査し続ける。
+  assert.match(mac, /-path "\$OC_CONFIG_DIR\/node_modules" -type d -prune -o[\s\S]+-type l/);
+  assert.match(mac, /-path "\$OC_CONFIG_DIR\/node_modules" -type d -prune -o[\s\S]+-type f[\s\S]+grep -lF/);
+  assert.match(win, /\$entry\.Name -eq 'node_modules'/);
+  assert.match(win, /\$entry\.Name -eq 'node_modules'[\s\S]{0,100}-not \$isReparsePoint/);
+  assert.match(win, /\$configScanEntries/);
 });
 
 // --- エージェント定義が共通の deny 床を上書きしないこと -------------------------

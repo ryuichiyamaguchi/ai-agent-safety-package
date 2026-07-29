@@ -215,10 +215,19 @@ try {
     # --- 設定ディレクトリのショートカット (シンボリックリンク) を禁じる ---------------
     # opencode 1.18.4 は command / agent / mode を symlink:true で走査する = リンクの先に
     # ある .md も読む。リンクを 1 本置かれるだけで「配置し直した安全なファイルを見ている
-    # つもりが、まったく別の場所のファイルを読ませられる」形になる。Get-ChildItem -Recurse は
-    # リンクの中までは降りないが、リンクそのものは一覧に出るので、外側を見つけた時点で
-    # 止めれば取りこぼしはない。配布物にリンクは 1 本も無いので、あれば作為とみなす。
-    $linkHits = @(Get-ChildItem -LiteralPath $ocConfigDir -Recurse -Force -ErrorAction SilentlyContinue |
+    # つもりが、まったく別の場所のファイルを読ませられる」形になる。ただし node_modules は
+    # OpenCode が管理する依存キャッシュで、.bin に通常のリンクが作られる。実ディレクトリの
+    # node_modules の中だけは走査せず、node_modules 自体がリンクなら検査対象に残す。
+    $configScanEntries = @()
+    foreach ($entry in @(Get-ChildItem -LiteralPath $ocConfigDir -Force -ErrorAction SilentlyContinue)) {
+        $isReparsePoint = (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint)
+        if ($entry.Name -eq 'node_modules' -and $entry.PSIsContainer -and -not $isReparsePoint) { continue }
+        $configScanEntries += $entry
+        if ($entry.PSIsContainer -and -not $isReparsePoint) {
+            $configScanEntries += @(Get-ChildItem -LiteralPath $entry.FullName -Recurse -Force -ErrorAction SilentlyContinue)
+        }
+    }
+    $linkHits = @($configScanEntries |
         Where-Object { ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint })
     if ($linkHits.Count -gt 0) {
         foreach ($hit in $linkHits) { Write-Warning "対象: $($hit.FullName)" }
@@ -231,19 +240,21 @@ try {
     # これはツール呼び出しを経ないので permission の確認も、承認モニターの決定的 deny 床も
     # 通らない = 安全機構を丸ごと迂回する任意コード実行になる。配布物にこの書き方は無いので、
     # 「配置後の実ファイル」を見て 1 つでもあれば起動しない (配置後の書き換えも拾う)。
-    # 走査は設定ディレクトリ全体にかける。opencode が読むのは command(s) / agent(s) /
+    # 走査は OpenCode 自身の依存キャッシュ node_modules を除く設定ディレクトリ全体にかける。
+    # node_modules の JavaScript には通常のテンプレートリテラル末尾として !` が現れるため、
+    # コマンド定義と同じ検査をすると誤検出になる。opencode が読むのは command(s) / agent(s) /
     # mode(s) だが、フォルダ名を並べて数え上げる書き方は取りこぼす (mode を書き忘れる、
     # 大文字の Commands を見落とす、といった形)。配布物のどのファイルにもこの書き方は
-    # 無いので、全部見て 1 件でもあれば止めるほうが確実。読めなかったファイルも同じ扱い。
+    # 無いので、依存キャッシュ以外を全部見て 1 件でもあれば止める。読めなかったファイルも同じ扱い。
     $shellExpansionHits = @()
-    foreach ($mdFile in @(Get-ChildItem -LiteralPath $ocConfigDir -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+    foreach ($definitionFile in @($configScanEntries | Where-Object { -not $_.PSIsContainer })) {
         try {
-            $body = [System.IO.File]::ReadAllText($mdFile.FullName)
+            $body = [System.IO.File]::ReadAllText($definitionFile.FullName)
         } catch {
-            $shellExpansionHits += $mdFile.FullName
+            $shellExpansionHits += $definitionFile.FullName
             continue
         }
-        if ($body.Contains('!' + [char]96)) { $shellExpansionHits += $mdFile.FullName }
+        if ($body.Contains('!' + [char]96)) { $shellExpansionHits += $definitionFile.FullName }
     }
     if ($shellExpansionHits.Count -gt 0) {
         foreach ($hit in $shellExpansionHits) { Write-Warning "対象: $hit" }

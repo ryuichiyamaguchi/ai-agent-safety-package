@@ -62,14 +62,32 @@ try {
     $installerItem = Get-Item -LiteralPath $installerPath -ErrorAction SilentlyContinue
     if (-not $installerItem -or $installerItem.PSIsContainer) { Die "展開後に install.ps1 が見つかりませんでした。" }
     if (($installerItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { Die "install.ps1 がリンク（reparse point）のため中止します。" }
+    $packagePolicy = Join-Path $pkgRoot "policy\safety-policy.json"
+    try {
+        $packageVersion = (Get-Content -LiteralPath $packagePolicy -Raw -Encoding UTF8 | ConvertFrom-Json).packageVersion
+    } catch {
+        Die "配布物のバージョン情報を読み取れませんでした。"
+    }
+    if (-not $packageVersion) { Die "配布物のバージョン情報が空でした。" }
 
     # 4. install 実行（内部で backup → コピー → doctor。既存設定は上書き前に backup される）。
     Write-Host "パッケージを更新しています…（既存の設定はバックアップされます）"
     & powershell -NoProfile -ExecutionPolicy Bypass -File $installerPath -Workspace $Workspace
     if ($LASTEXITCODE -ne 0) { Die "インストールでエラーが発生しました。" }
 
+    $installedPolicy = Join-Path $Workspace ".ai-safety\policy\safety-policy.json"
+    try {
+        $installedVersion = (Get-Content -LiteralPath $installedPolicy -Raw -Encoding UTF8 | ConvertFrom-Json).packageVersion
+    } catch {
+        Die "更新後のバージョン情報を読み取れませんでした。"
+    }
+    if ($installedVersion -ne $packageVersion) {
+        Die "更新後の版を確認できませんでした（予定: v$packageVersion / 実際: v$installedVersion）。"
+    }
+
     Write-Host ""
     Write-Host "✅ 更新が完了しました。ターミナルを開き直してからお使いください。" -ForegroundColor Green
+    Write-Host "   更新された版: v$installedVersion" -ForegroundColor Green
 }
 finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue

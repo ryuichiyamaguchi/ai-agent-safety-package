@@ -222,8 +222,14 @@ fi
 # opencode 1.18.4 は command / agent / mode を `symlink:true` で走査する＝リンクの
 # 先にある .md も読む。リンクを 1 本置かれるだけで「配置し直した安全なファイルを見て
 # いるつもりが、まったく別の場所のファイルを読ませられる」形になる。配布物に
-# シンボリックリンクは 1 本も無いので、あれば作為とみなして起動しない。
-_link_hits="$(find "$OC_CONFIG_DIR" -type l 2>/dev/null || true)"
+# シンボリックリンクは 1 本も無いので、あれば作為とみなして起動しない。ただし
+# node_modules は OpenCode が管理する依存キャッシュで、.bin に通常のリンクが作られる。
+# 実ディレクトリである node_modules の中だけは降りず、node_modules 自体がリンクなら止める。
+_link_hits="$(
+  find "$OC_CONFIG_DIR" \
+    -path "$OC_CONFIG_DIR/node_modules" -type d -prune -o \
+    -type l -print 2>/dev/null || true
+)"
 if [ -n "$_link_hits" ]; then
   echo "設定フォルダにショートカット（シンボリックリンク）が置かれていたため、OpenCode は起動しません（fail-closed）。" >&2
   printf '%s\n' "$_link_hits" | while IFS= read -r _f; do [ -n "$_f" ] && echo "  対象: $_f" >&2; done
@@ -238,14 +244,20 @@ fi
 # 通らない＝安全機構を丸ごと迂回する任意コード実行になる。配布物にこの書き方は無いので、
 # 「配置後の実ファイル」を見て 1 つでもあれば起動しない（配置後に書き換えられた場合も拾う）。
 #
-# 走査は設定ディレクトリ全体にかける。opencode が読むのは command(s) / agent(s) /
+# 走査は OpenCode 自身の依存キャッシュ node_modules を除く設定ディレクトリ全体にかける。
+# node_modules の JavaScript には通常のテンプレートリテラル末尾として !` が現れるため、
+# コマンド定義と同じ検査をすると誤検出になる。opencode が読むのは command(s) / agent(s) /
 # mode(s) だが、フォルダ名を並べて数え上げる書き方は取りこぼす（mode を書き忘れる、
 # 大文字の Commands を見落とす、といった形）。配布物のどのファイルにもこの書き方は
-# 無いので、全部見て 1 件でもあれば止めるほうが確実。-R はリンクも辿る指定（BSD grep の
-# -r は辿らない）だが、上でリンク自体を禁じているのでここでは保険。
-if grep -RlF '!`' "$OC_CONFIG_DIR" >/dev/null 2>&1; then
+# 無いので、依存キャッシュ以外を全部見て 1 件でもあれば止める。
+_shell_expansion_hits="$(
+  find "$OC_CONFIG_DIR" \
+    -path "$OC_CONFIG_DIR/node_modules" -type d -prune -o \
+    -type f -exec grep -lF '!`' {} + 2>/dev/null || true
+)"
+if [ -n "$_shell_expansion_hits" ]; then
   echo "コマンド定義に「確認なしでコマンドを実行する書き方」が含まれていたため、OpenCode は起動しません（fail-closed）。" >&2
-  grep -RlF '!`' "$OC_CONFIG_DIR" 2>/dev/null | while IFS= read -r _f; do echo "  対象: $_f" >&2; done
+  printf '%s\n' "$_shell_expansion_hits" | while IFS= read -r _f; do [ -n "$_f" ] && echo "  対象: $_f" >&2; done
   echo "「導入(インストール)」をやり直してください。それでも出る場合は講師に連絡してください。" >&2
   exit 1
 fi

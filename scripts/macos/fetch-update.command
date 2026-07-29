@@ -54,10 +54,21 @@ topcount="$(find "$tmp/unz" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
 pkg_root="$(find "$tmp/unz" -mindepth 1 -maxdepth 1 -type d)"
 installer="$pkg_root/scripts/macos/install.sh"
 { [ -f "$installer" ] && [ ! -L "$installer" ]; } || die "install.sh が見つからない/通常ファイルでないため中止します。"
+package_policy="$pkg_root/policy/safety-policy.json"
+[ -f "$package_policy" ] || die "配布物のバージョン情報が見つかりませんでした。"
+package_version="$(awk -F'"' '/"packageVersion"[[:space:]]*:/ { print $4; exit }' "$package_policy")"
+[ -n "$package_version" ] || die "配布物のバージョン情報を読み取れませんでした。"
 
 # 4. install 実行（内部で backup → コピー → doctor。既存設定は上書き前に backup される）。
 say "パッケージを更新しています…（既存の設定はバックアップされます）"
 bash "$installer" "$WORKSPACE" || die "インストールでエラーが発生しました。"
 
+installed_policy="$WORKSPACE/.ai-safety/policy/safety-policy.json"
+[ -f "$installed_policy" ] || die "更新後のバージョン情報が見つかりませんでした。"
+installed_version="$(awk -F'"' '/"packageVersion"[[:space:]]*:/ { print $4; exit }' "$installed_policy")"
+[ "$installed_version" = "$package_version" ] \
+  || die "更新後の版を確認できませんでした（予定: v${package_version} / 実際: v${installed_version:-不明}）。"
+
 say ""
 say "✅ 更新が完了しました。ターミナルを開き直してからお使いください。"
+say "   更新された版: v${installed_version}"

@@ -283,12 +283,43 @@ test('消す対象の外に置かれたシンボリックリンクは見逃さ�
   assert.match(run.output, /ショートカット（シンボリックリンク）|確認なしでコマンドを実行する書き方/);
 });
 
-test('消す対象の外に置かれたシェル実行つきファイルでも起動しない', (t) => {
+test('node_modules 自体がシンボリックリンクなら依存キャッシュ扱いで除外しない', (t) => {
+  const stage = makeStage(t);
+  const configDir = firstRunConfigDir(t, stage);
+
+  const outside = path.join(stage.stage, 'outside-node-modules');
+  fs.mkdirSync(outside, { recursive: true });
+  fs.symlinkSync(outside, path.join(configDir, 'node_modules'));
+
+  const run = runLauncher(stage);
+  assert.notStrictEqual(run.status, 0);
+  assert.strictEqual(run.launched, false, 'node_modules に偽装したリンクを見逃して本体が起動した');
+  assert.match(run.output, /ショートカット（シンボリックリンク）/);
+});
+
+test('OpenCode の依存キャッシュ内に通常のテンプレートリテラルと .bin リンクがあっても起動する', (t) => {
   const stage = makeStage(t);
   const configDir = firstRunConfigDir(t, stage);
 
   fs.mkdirSync(path.join(configDir, 'node_modules', 'deep'), { recursive: true });
-  fs.writeFileSync(path.join(configDir, 'node_modules', 'deep', 'x.md'), 'y !`sudo rm -rf /` z\n');
+  fs.mkdirSync(path.join(configDir, 'node_modules', '.bin'), { recursive: true });
+  const dependencyFile = path.join(configDir, 'node_modules', 'deep', 'x.js');
+  fs.writeFileSync(dependencyFile, 'const greet = (name) => `Hello, ${name}!`;\n');
+  fs.symlinkSync(dependencyFile, path.join(configDir, 'node_modules', '.bin', 'x'));
+
+  const run = runLauncher(stage);
+  assert.strictEqual(run.status, 0, run.output);
+  assert.strictEqual(run.launched, true, '依存キャッシュの通常コードをコマンド定義と誤認している');
+  assert.doesNotMatch(run.output, /確認なしでコマンドを実行する書き方|ショートカット（シンボリックリンク）/);
+});
+
+test('node_modules の外に置かれたシェル実行つきファイルは起動前に止める', (t) => {
+  const stage = makeStage(t);
+  const configDir = firstRunConfigDir(t, stage);
+
+  const planted = path.join(configDir, 'unexpected', 'x.md');
+  fs.mkdirSync(path.dirname(planted), { recursive: true });
+  fs.writeFileSync(planted, 'y !`sudo rm -rf /` z\n');
 
   const run = runLauncher(stage);
   assert.notStrictEqual(run.status, 0);
