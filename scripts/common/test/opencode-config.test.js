@@ -9,6 +9,7 @@ const {
   buildEnforcedPermissionEnv,
   buildMcpConfig,
   verifyResolvedConfig,
+  parseResolvedConfigOutput,
   isSupportedVersion,
   MCP_SERVERS,
 } = require('../opencode-config.js');
@@ -252,6 +253,24 @@ test('resolved-config CLI accepts one intact config surrounded by first-run prep
     [script, '--verify-resolved'],
     { input: firstRunOutput, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
   );
+});
+
+test('resolved-config parser accepts JSON attached directly to a non-JSON status line', () => {
+  const intact = intactConfig();
+  const output = `installing dependencies...\u001b[0m${JSON.stringify(intact)}`;
+
+  assert.deepStrictEqual(parseResolvedConfigOutput(output), intact);
+});
+
+test('resolved-config parser ignores structured JSON logs and selects the one config object', () => {
+  const intact = intactConfig();
+  const output = [
+    JSON.stringify({ level: 'info', message: 'installing dependencies', detail: { count: 1 } }),
+    JSON.stringify(intact),
+    JSON.stringify({ level: 'info', message: 'done' }),
+  ].join('\r\n');
+
+  assert.deepStrictEqual(parseResolvedConfigOutput(output), intact);
 });
 
 test('resolved-config CLI accepts the same first-run output through a Windows UTF-8 file', (t) => {

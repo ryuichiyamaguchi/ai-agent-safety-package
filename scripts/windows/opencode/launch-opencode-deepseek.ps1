@@ -288,6 +288,7 @@ try {
 
     $watchdog = $null
     $resolvedFile = Join-Path $logDir 'opencode-resolved-config.json'
+    $failedResolvedFile = Join-Path $logDir 'opencode-resolved-config.failed.txt'
     Push-Location $Workspace
     try {
         # --- 本体を出す前に「安全プラグインが本当に載るか」を実物で確かめる -----------
@@ -301,6 +302,7 @@ try {
         # 既定 ASCII で流すため、日本語ユーザー名などが混ざると壊れて誤検知になる）。
         $readyMarker = Join-Path $logDir 'opencode-monitor-ready.json'
         Remove-Item -LiteralPath $readyMarker -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $failedResolvedFile -Force -ErrorAction SilentlyContinue
         $epoch = New-Object System.DateTime(1970, 1, 1, 0, 0, 0, [System.DateTimeKind]::Utc)
         $probeSince = [string][long]([System.DateTime]::UtcNow - $epoch).TotalMilliseconds
 
@@ -314,10 +316,12 @@ try {
         [System.IO.File]::WriteAllText($resolvedFile, $resolvedSafe, (New-Object System.Text.UTF8Encoding($false)))
         & $node.Source $configJs '--verify-resolved' $resolvedFile
         $verified = ($LASTEXITCODE -eq 0)
-        Remove-Item -LiteralPath $resolvedFile -Force -ErrorAction SilentlyContinue
         if (-not $verified) {
-            throw '安全設定が有効になっていないため、OpenCode は起動しません（fail-closed）。「導入(インストール)」をやり直してから、もう一度お試しください。'
+            Move-Item -LiteralPath $resolvedFile -Destination $failedResolvedFile -Force -ErrorAction SilentlyContinue
+            Write-Warning ("診断ファイル: " + $failedResolvedFile)
+            throw '安全設定が有効になっていないため、OpenCode は起動しません（fail-closed）。診断ファイルを講師へ共有してください（Gatewayの合言葉は伏せてあります）。'
         }
+        Remove-Item -LiteralPath $resolvedFile -Force -ErrorAction SilentlyContinue
 
         # 終了コードだけでなく合図の 1 行も要求する。何かの理由で検査そのものが走らなかった
         # とき、「黙って 0 で終わった」を「確認できた」と取り違えないため。

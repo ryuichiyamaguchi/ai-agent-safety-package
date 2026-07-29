@@ -467,12 +467,14 @@ function parseArgs(argv) {
 }
 
 // `debug config` 自身は最後に JSON を stdout へ書くが、初回だけ、その前後へ Bun の
-// 依存関係準備ログが混ざることがある。出力全体を JSON.parse すると正しい設定でも止まるため、
-// 行頭から始まる JSON オブジェクトを 1 個だけ取り出す。
+// 依存関係準備ログが混ざることがある。Windows の npm/opencode ラッパーによってはログの
+// 改行が無い、またはログ自体が JSON のこともあるため、位置ではなく OpenCode 設定の
+// 構造を持つ JSON オブジェクトを 1 個だけ取り出す。
 //
 // 安全のため「見つかった中から都合のよい設定を選ぶ」ことはしない。設定 JSON が複数ある、
-// または JSON の外にも波括弧がある曖昧な出力は拒否する。これにより、先に安全な偽設定を
-// 出してから弱めた実設定を続ける形では起動前検査を通せない。
+// または設定らしい JSON が複数ある曖昧な出力は拒否する。これにより、先に安全な偽設定を
+// 出してから弱めた実設定を続ける形では起動前検査を通せない。単なる構造化ログや、設定内の
+// agent/provider の子オブジェクトは候補に数えない。
 function parseResolvedConfigOutput(value) {
   let raw = String(value ?? '');
   if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
@@ -484,10 +486,34 @@ function parseResolvedConfigOutput(value) {
     // 初回準備ログが混ざった経路だけ、下の一意抽出へ進む。
   }
 
+  const configKeys = [
+    '$schema',
+    'agent',
+    'mode',
+    'plugin',
+    'command',
+    'autoupdate',
+    'share',
+    'provider',
+    'permission',
+    'model',
+    'small_model',
+    'default_agent',
+    'enabled_providers',
+  ];
+  const looksLikeResolvedConfig = (parsed) => (
+    parsed
+    && typeof parsed === 'object'
+    && !Array.isArray(parsed)
+    && configKeys.reduce(
+      (count, key) => count + (Object.prototype.hasOwnProperty.call(parsed, key) ? 1 : 0),
+      0,
+    ) >= 4
+  );
+
   const candidates = [];
   for (let start = 0; start < raw.length; start += 1) {
     if (raw[start] !== '{') continue;
-    if (start > 0 && raw[start - 1] !== '\n' && raw[start - 1] !== '\r') continue;
 
     let depth = 0;
     let inString = false;
@@ -521,7 +547,7 @@ function parseResolvedConfigOutput(value) {
     if (end < 0) continue;
     try {
       const parsed = JSON.parse(raw.slice(start, end));
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      if (looksLikeResolvedConfig(parsed)) {
         candidates.push({ start, end, parsed });
       }
     } catch {
@@ -530,10 +556,7 @@ function parseResolvedConfigOutput(value) {
   }
 
   if (candidates.length !== 1) throw new SyntaxError('resolved config JSON is not unique');
-  const candidate = candidates[0];
-  const outside = raw.slice(0, candidate.start) + raw.slice(candidate.end);
-  if (/[{}]/.test(outside)) throw new SyntaxError('resolved config output contains ambiguous braces');
-  return candidate.parsed;
+  return candidates[0].parsed;
 }
 
 module.exports = {

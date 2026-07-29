@@ -297,7 +297,9 @@ cd "$WORKSPACE"
 # の両方を確かめてから本体を起動する。以前はどちらも「起動してから 30 秒後に気づく」
 # 形だったため、無防備な OpenCode がそのまま動き続けていた。
 READY_MARKER="$LOG_DIR/opencode-monitor-ready.json"
+FAILED_RESOLVED="$LOG_DIR/opencode-resolved-config.failed.txt"
 rm -f "$READY_MARKER" 2>/dev/null || true
+rm -f "$FAILED_RESOLVED" 2>/dev/null || true
 PLUGIN_PROBE_SINCE="$(node -e 'process.stdout.write(String(Date.now()))')"
 
 resolved="$("$OPENCODE_BIN" debug config 2>/dev/null || true)"
@@ -307,8 +309,11 @@ if [ -z "$resolved" ]; then
   exit 1
 fi
 if ! printf '%s' "$resolved" | node "$CONFIG_JS" --verify-resolved; then
+  resolved_safe="${resolved//$GATEWAY_TOKEN/REDACTED}"
+  ( umask 077; printf '%s' "$resolved_safe" > "$FAILED_RESOLVED" ) 2>/dev/null || true
   echo "安全設定が有効になっていないため、OpenCode は起動しません（fail-closed）。" >&2
-  echo "「導入(インストール)」をやり直してから、もう一度お試しください。" >&2
+  echo "診断ファイル: $FAILED_RESOLVED" >&2
+  echo "このファイルを講師へ共有してください（Gatewayの合言葉は伏せてあります）。" >&2
   exit 1
 fi
 # 終了コードだけでなく合図の 1 行も要求する。何かの理由で検査そのものが走らなかったとき、

@@ -105,6 +105,17 @@ test('both launchers keep the resolved-config check, the ready gate and the watc
   }
 });
 
+test('both launchers preserve a redacted diagnostic when resolved config parsing fails', () => {
+  const mac = read('scripts/macos/opencode/launch-opencode-deepseek.sh');
+  const win = read('scripts/windows/opencode/launch-opencode-deepseek.ps1');
+
+  for (const script of [mac, win]) {
+    assert.match(script, /opencode-resolved-config\.failed\.txt/);
+    assert.match(script, /REDACTED/);
+    assert.match(script, /診断ファイル/);
+  }
+});
+
 // 「毎回消して置き直す」方式が消すファイル名の一覧。opencode 1.18.4 は設定ディレクトリ直下の
 // config.json も設定として読む（実機確認）ので、ここに任意のプラグインや MCP を書かれると
 // 起動時に実行される。opencode.json5 / .opencoderc / config.jsonc は読まないので対象外。

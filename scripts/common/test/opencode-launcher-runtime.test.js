@@ -22,6 +22,8 @@ const launcher = path.join(root, 'scripts', 'macos', 'opencode', 'launch-opencod
 // FAKE_OPENCODE_MODE で debug config の振る舞いを切り替える:
 //   loads    … 正常（プラグインを読み込む）
 //   startup-log … 初回の依存関係準備ログを設定 JSON の前後に出す
+//   attached-log … 改行なしの準備ログ直後に設定 JSON を出す
+//   garbage … プラグインは読むが設定 JSON を出さない
 //   silent   … 設定は出すがプラグインを読み込まない（＝安全プラグインが載らない）
 //   noconfig … debug config が何も出さない（古い版のふり）
 //   tamper-* … プラグインは読み込むが、解決済み設定を書き換えて返す（設定ディレクトリへの
@@ -43,6 +45,22 @@ if [ "\${1:-}" = "debug" ] && [ "\${2:-}" = "config" ]; then
       printf '+ @opencode-ai/plugin@1.18.4\\n\\n'
       printf '%s\\n' "\$OPENCODE_CONFIG_CONTENT"
       printf '1 package installed\\n'
+      exit 0 ;;
+    attached-log)
+      node --input-type=module -e '
+        const config = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT);
+        const plugin = await import(config.plugin[0]);
+        await plugin.BouncerApprovalMonitor({ directory: process.cwd() });
+      ' || exit 1
+      printf 'installing dependencies...\\033[0m%s' "\$OPENCODE_CONFIG_CONTENT"
+      exit 0 ;;
+    garbage)
+      node --input-type=module -e '
+        const config = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT);
+        const plugin = await import(config.plugin[0]);
+        await plugin.BouncerApprovalMonitor({ directory: process.cwd() });
+      ' || exit 1
+      printf 'dependency preparation finished without a config'
       exit 0 ;;
     tamper-*)
       node --input-type=module -e '
@@ -156,6 +174,26 @@ test('初回の依存関係準備ログが混ざっても安全設定を確認�
   assert.strictEqual(run.status, 0, run.output);
   assert.strictEqual(run.launched, true, '準備ログだけを理由に fake-opencode 本体を止めている');
   assert.match(run.output, /Bouncer送信検査: 有効/);
+});
+
+test('改行なしの準備ログ直後に設定JSONが続いても本体を起動する', (t) => {
+  const stage = makeStage(t, { mode: 'attached-log' });
+  const run = runLauncher(stage);
+
+  assert.strictEqual(run.status, 0, run.output);
+  assert.strictEqual(run.launched, true);
+  assert.match(run.output, /Bouncer送信検査: 有効/);
+});
+
+test('設定JSONを特定できないときは赤字化済み診断を残して本体を起動しない', (t) => {
+  const stage = makeStage(t, { mode: 'garbage' });
+  const run = runLauncher(stage);
+  const diagnostic = path.join(stage.logDir, 'opencode-resolved-config.failed.txt');
+
+  assert.notStrictEqual(run.status, 0);
+  assert.strictEqual(run.launched, false);
+  assert.strictEqual(fs.existsSync(diagnostic), true, '失敗した出力の診断ファイルが残っていない');
+  assert.match(run.output, /opencode-resolved-config\.failed\.txt/);
 });
 
 // --- Codex RED-2: 安全プラグインが載らないなら本体を起動しない ---------------------
