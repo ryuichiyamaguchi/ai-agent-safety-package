@@ -21,6 +21,7 @@ const launcher = path.join(root, 'scripts', 'macos', 'opencode', 'launch-opencod
 //   引数なし       … TUI 本体の起動。ここでは「起動した」印をファイルに残すだけ
 // FAKE_OPENCODE_MODE で debug config の振る舞いを切り替える:
 //   loads    … 正常（プラグインを読み込む）
+//   startup-log … 初回の依存関係準備ログを設定 JSON の前後に出す
 //   silent   … 設定は出すがプラグインを読み込まない（＝安全プラグインが載らない）
 //   noconfig … debug config が何も出さない（古い版のふり）
 //   tamper-* … プラグインは読み込むが、解決済み設定を書き換えて返す（設定ディレクトリへの
@@ -32,6 +33,17 @@ if [ "\${1:-}" = "debug" ] && [ "\${2:-}" = "config" ]; then
   case "\${FAKE_OPENCODE_MODE:-loads}" in
     noconfig) exit 0 ;;
     silent) printf '%s' "\$OPENCODE_CONFIG_CONTENT"; exit 0 ;;
+    startup-log)
+      node --input-type=module -e '
+        const config = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT);
+        const plugin = await import(config.plugin[0]);
+        await plugin.BouncerApprovalMonitor({ directory: process.cwd() });
+      ' || exit 1
+      printf '\\033[2mbun install v1.2.19\\033[0m\\n'
+      printf '+ @opencode-ai/plugin@1.18.4\\n\\n'
+      printf '%s\\n' "\$OPENCODE_CONFIG_CONTENT"
+      printf '1 package installed\\n'
+      exit 0 ;;
     tamper-*)
       node --input-type=module -e '
         const config = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT);
@@ -134,6 +146,15 @@ test('正常な導入では OpenCode 本体まで起動する', (t) => {
 
   assert.strictEqual(run.status, 0, run.output);
   assert.strictEqual(run.launched, true, 'fake-opencode 本体が呼ばれていない');
+  assert.match(run.output, /Bouncer送信検査: 有効/);
+});
+
+test('初回の依存関係準備ログが混ざっても安全設定を確認して本体を起動する', (t) => {
+  const stage = makeStage(t, { mode: 'startup-log' });
+  const run = runLauncher(stage);
+
+  assert.strictEqual(run.status, 0, run.output);
+  assert.strictEqual(run.launched, true, '準備ログだけを理由に fake-opencode 本体を止めている');
   assert.match(run.output, /Bouncer送信検査: 有効/);
 });
 

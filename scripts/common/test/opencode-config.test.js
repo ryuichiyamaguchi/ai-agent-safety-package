@@ -233,6 +233,69 @@ test('CLI exposes the enforced permission env and the resolved-config check', ()
   ));
 });
 
+test('resolved-config CLI accepts one intact config surrounded by first-run preparation logs', () => {
+  const script = path.join(__dirname, '..', 'opencode-config.js');
+  const { execFileSync } = require('node:child_process');
+  const intact = JSON.stringify(intactConfig(), null, 2);
+  const firstRunOutput = [
+    '\u001b[2mbun install v1.2.19\u001b[0m',
+    '+ @opencode-ai/plugin@1.18.4',
+    '',
+    intact,
+    '',
+    '1 package installed',
+    '',
+  ].join('\r\n');
+
+  execFileSync(
+    process.execPath,
+    [script, '--verify-resolved'],
+    { input: firstRunOutput, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+});
+
+test('resolved-config CLI accepts the same first-run output through a Windows UTF-8 file', (t) => {
+  const script = path.join(__dirname, '..', 'opencode-config.js');
+  const { execFileSync } = require('node:child_process');
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-resolved-config-'));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const resolvedFile = path.join(temp, 'resolved-config.json');
+  const firstRunOutput = [
+    '\u001b[2mbun install v1.2.19\u001b[0m',
+    '+ @opencode-ai/plugin@1.18.4',
+    '',
+    JSON.stringify(intactConfig(), null, 2),
+    '',
+    '1 package installed',
+    '',
+  ].join('\r\n');
+  fs.writeFileSync(resolvedFile, `\ufeff${firstRunOutput}`, 'utf8');
+
+  execFileSync(
+    process.execPath,
+    [script, '--verify-resolved', resolvedFile],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+});
+
+test('resolved-config CLI rejects ambiguous output containing two config objects', () => {
+  const script = path.join(__dirname, '..', 'opencode-config.js');
+  const { spawnSync } = require('node:child_process');
+  const intact = JSON.stringify(intactConfig());
+  const result = spawnSync(
+    process.execPath,
+    [script, '--verify-resolved'],
+    {
+      input: `${intact}\n${intact}\n`,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
+  );
+
+  assert.notStrictEqual(result.status, 0, '設定JSONが複数ある曖昧な出力を受理してはいけない');
+  assert.match(result.stderr, /JSONとして読めませんでした/);
+});
+
 test('installer-facing config output does not write credentials to OpenCode auth storage', () => {
   const config = buildOpenCodeConfig();
   const serialized = JSON.stringify(config);

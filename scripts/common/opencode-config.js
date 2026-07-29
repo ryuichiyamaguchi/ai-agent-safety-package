@@ -466,6 +466,76 @@ function parseArgs(argv) {
   };
 }
 
+// `debug config` 自身は最後に JSON を stdout へ書くが、初回だけ、その前後へ Bun の
+// 依存関係準備ログが混ざることがある。出力全体を JSON.parse すると正しい設定でも止まるため、
+// 行頭から始まる JSON オブジェクトを 1 個だけ取り出す。
+//
+// 安全のため「見つかった中から都合のよい設定を選ぶ」ことはしない。設定 JSON が複数ある、
+// または JSON の外にも波括弧がある曖昧な出力は拒否する。これにより、先に安全な偽設定を
+// 出してから弱めた実設定を続ける形では起動前検査を通せない。
+function parseResolvedConfigOutput(value) {
+  let raw = String(value ?? '');
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+
+  // 通常経路は公式どおり JSON だけ。最も厳しい読み方を先に試す。
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // 初回準備ログが混ざった経路だけ、下の一意抽出へ進む。
+  }
+
+  const candidates = [];
+  for (let start = 0; start < raw.length; start += 1) {
+    if (raw[start] !== '{') continue;
+    if (start > 0 && raw[start - 1] !== '\n' && raw[start - 1] !== '\r') continue;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let end = -1;
+    for (let index = start; index < raw.length; index += 1) {
+      const character = raw[index];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (character === '\\') {
+          escaped = true;
+        } else if (character === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (character === '"') {
+        inString = true;
+      } else if (character === '{') {
+        depth += 1;
+      } else if (character === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          end = index + 1;
+          break;
+        }
+        if (depth < 0) break;
+      }
+    }
+    if (end < 0) continue;
+    try {
+      const parsed = JSON.parse(raw.slice(start, end));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        candidates.push({ start, end, parsed });
+      }
+    } catch {
+      // 行頭のログに波括弧があっただけなら候補にしない。ただし後段の曖昧性検査で拒否する。
+    }
+  }
+
+  if (candidates.length !== 1) throw new SyntaxError('resolved config JSON is not unique');
+  const candidate = candidates[0];
+  const outside = raw.slice(0, candidate.start) + raw.slice(candidate.end);
+  if (/[{}]/.test(outside)) throw new SyntaxError('resolved config output contains ambiguous braces');
+  return candidate.parsed;
+}
+
 module.exports = {
   MINIMUM_VERSION,
   MCP_SERVERS,
@@ -478,6 +548,7 @@ module.exports = {
   buildEnforcedPermissionEnv,
   buildMcpConfig,
   verifyResolvedConfig,
+  parseResolvedConfigOutput,
   isSupportedVersion,
 };
 
@@ -496,10 +567,9 @@ function verifyFromInput(file) {
     process.exitCode = 1;
     return;
   }
-  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
   let parsed;
   try {
-    parsed = JSON.parse(raw);
+    parsed = parseResolvedConfigOutput(raw);
   } catch {
     process.stderr.write('opencode-config: 解決済み設定がJSONとして読めませんでした。\n');
     process.exitCode = 1;
