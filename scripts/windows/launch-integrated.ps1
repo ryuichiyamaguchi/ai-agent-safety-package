@@ -131,8 +131,12 @@ try {
             $deepseekKey = ([System.IO.File]::ReadAllText($authFile)).Trim()
             if (-not $deepseekKey) { throw 'DeepSeek APIキーの登録ファイルが空です。登録し直してください。' }
             $env:ANTHROPIC_AUTH_TOKEN = $deepseekKey
-            $env:ANTHROPIC_MODEL = 'deepseek-v4-pro'
+            $env:ANTHROPIC_MODEL = 'deepseek-v4-pro[1m]'
+            $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'deepseek-v4-pro[1m]'
+            $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'deepseek-v4-pro[1m]'
             $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'deepseek-v4-flash'
+            $env:CLAUDE_CODE_SUBAGENT_MODEL = 'deepseek-v4-flash'
+            $env:CLAUDE_CODE_EFFORT_LEVEL = 'max'
             & $powerShell.Source -NoProfile -ExecutionPolicy Bypass -File $deepseekGateway -Workspace $Workspace
             $exitCode = $LASTEXITCODE
         }
@@ -141,5 +145,5 @@ try {
 } finally {
     if ($gatewayProc -and -not $gatewayProc.HasExited) { Stop-Process -Id $gatewayProc.Id -Force -ErrorAction SilentlyContinue }
     if ($monitorProc -and -not $monitorProc.HasExited) { Stop-Process -Id $monitorProc.Id -Force -ErrorAction SilentlyContinue }
-    Remove-Item Env:\BOUNCER_INTEGRATED_MODE, Env:\ANTHROPIC_BASE_URL, Env:\ANTHROPIC_AUTH_TOKEN, Env:\ANTHROPIC_MODEL, Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL, Env:\DS_CLAUDE_MODE -ErrorAction SilentlyContinue
+    Remove-Item Env:\BOUNCER_INTEGRATED_MODE, Env:\ANTHROPIC_BASE_URL, Env:\ANTHROPIC_AUTH_TOKEN, Env:\ANTHROPIC_MODEL, Env:\ANTHROPIC_DEFAULT_OPUS_MODEL, Env:\ANTHROPIC_DEFAULT_SONNET_MODEL, Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL, Env:\CLAUDE_CODE_SUBAGENT_MODEL, Env:\CLAUDE_CODE_EFFORT_LEVEL, Env:\DS_CLAUDE_MODE -ErrorAction SilentlyContinue
 }

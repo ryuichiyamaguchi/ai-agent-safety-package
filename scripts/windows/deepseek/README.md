@@ -37,7 +37,7 @@
 2. **`登録-初回だけ.bat` をダブルクリック** → キーを貼り付けて Enter（初回だけ）。
 3. **いったんウィンドウを閉じる**（環境変数は新しいウィンドウから反映されるため）。
 4. **`起動-Claude-DeepSeek.bat` をダブルクリック** → 赤枠の同意ゲートで `yes` →
-   Claude Code が起動。画面のモデル表示が **`deepseek-v4-pro`** になっていればOK。
+   Claude Code が起動。画面のモデル表示が **`deepseek-v4-pro[1m]`** になっていればOK。
 5. **授業後：** `キー削除.bat` をダブルクリック ＋ DeepSeek 管理画面でもキーを Delete。
 
 > SmartScreen が警告を出したら「詳細情報」→「実行」。3つを1つの ZIP にまとめると警告が減ることがあります。
@@ -46,7 +46,7 @@
 
 ## 「本当に DeepSeek が動いている」確認
 
-- 画面のモデル名が `deepseek-v4-pro`（Opus / Sonnet ではない）。
+- 画面のモデル名が `deepseek-v4-pro[1m]`（Opus / Sonnet ではない）。
 - 数回質問後、https://platform.deepseek.com/ の Usage / Billing で**残高が減っていれば確実**。
 
 ---
@@ -54,9 +54,9 @@
 ## つまずき対処（講師向けメモ）
 
 ### ① モデル名で「無効」エラーが出る環境がある
-一部の Claude Code バージョンは非 Anthropic のモデル名（`deepseek-v4-pro`）を弾く検証を
+一部の Claude Code バージョンは非 Anthropic のモデル名（`deepseek-v4-pro[1m]`）を弾く検証を
 入れています（GitHub Issue #56990）。`起動-Claude-DeepSeek.bat` の `ANTHROPIC_MODEL` 行を差し替え：
-- **A案（表示も deepseek にしたい・検証スキップ）**：`set "ANTHROPIC_CUSTOM_MODEL_OPTION=deepseek-v4-pro"`
+- **A案（表示も deepseek にしたい・検証スキップ）**：`set "ANTHROPIC_CUSTOM_MODEL_OPTION=deepseek-v4-pro[1m]"`
 - **B案（動けばよい・表示は Opus）**：`ANTHROPIC_MODEL` 行を消し、起動後 `/model` で opus を選ぶ（サーバ側で v4 に振り分け）
 
 全員の表示を揃えたいなら Claude Code のバージョンを固定し、1台で事前確認を。

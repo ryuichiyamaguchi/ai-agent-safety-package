@@ -69,14 +69,18 @@ set "ANTHROPIC_AUTH_TOKEN="
 if exist "%AUTH_FILE%" (
     for /f "usebackq delims=" %%K in ("%AUTH_FILE%") do set "ANTHROPIC_AUTH_TOKEN=%%K"
 )
-set "ANTHROPIC_MODEL=deepseek-v4-pro"
+set "ANTHROPIC_MODEL=deepseek-v4-pro[1m]"
+set "ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro[1m]"
+set "ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro[1m]"
 set "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash"
+set "CLAUDE_CODE_SUBAGENT_MODEL=deepseek-v4-flash"
+set "CLAUDE_CODE_EFFORT_LEVEL=max"
 set "GATEWAY_LAUNCH=%HOOKS%\deepseek\launch-deepseek-gateway.ps1"
 
 :: ↑ もし起動時に「モデル名が無効」エラーが出る環境では（GitHub Issue #56990）、
 ::   上の ANTHROPIC_MODEL 行を次のどちらかに差し替えてください:
 ::   A案（表示も deepseek にしたい・検証スキップ）:
-::     set "ANTHROPIC_CUSTOM_MODEL_OPTION=deepseek-v4-pro"
+::     set "ANTHROPIC_CUSTOM_MODEL_OPTION=deepseek-v4-pro[1m]"
 ::   B案（動けばよい・表示は Opus）: ANTHROPIC_MODEL 行を消し、
 ::     起動後に /model で opus を選ぶ（サーバ側で v4 に振り分け）。
 
@@ -97,7 +101,7 @@ if "%ANTHROPIC_AUTH_TOKEN%"=="" (
 :: バックエンドだけ DeepSeek に向いた Claude Code が起動する。
 echo.
 echo DeepSeek バックエンドで Claude Code を起動します...
-echo （画面のモデル表示が deepseek-v4-pro になっていればOK）
+echo （画面のモデル表示が deepseek-v4-pro[1m] になっていればOK）
 echo.
 pushd "%WORKSPACE%"
 PowerShell -NoProfile -ExecutionPolicy Bypass -File "%GATEWAY_LAUNCH%" -Workspace "%WORKSPACE%"
