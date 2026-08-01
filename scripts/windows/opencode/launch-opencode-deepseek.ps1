@@ -87,10 +87,11 @@ $env:DS_GATEWAY_PORT = $port
 $env:DS_GATEWAY_UPSTREAM = 'https://api.deepseek.com'
 $env:DS_GATEWAY_AUTH_FILE = $keyFile
 $env:DS_GATEWAY_TOKEN = $gatewayToken
+$env:DS_GATEWAY_WORKSPACE = $Workspace
 $gatewayOut = Join-Path $logDir 'opencode-deepseek-gateway.log'
 $gatewayErr = Join-Path $logDir 'opencode-deepseek-gateway.err.log'
 $gw = Start-Process -FilePath $node.Source -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden -RedirectStandardOutput $gatewayOut -RedirectStandardError $gatewayErr
-Remove-Item Env:\DS_GATEWAY_AUTH_FILE, Env:\DS_GATEWAY_UPSTREAM, Env:\DS_GATEWAY_TOKEN -ErrorAction SilentlyContinue
+Remove-Item Env:\DS_GATEWAY_AUTH_FILE, Env:\DS_GATEWAY_UPSTREAM, Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_WORKSPACE -ErrorAction SilentlyContinue
 
 try {
     $ready = $false

@@ -50,6 +50,8 @@ test('OpenCode runtime config forces DeepSeek through the loopback inspection ga
     'deepseek-v4-flash',
     'deepseek-v4-pro',
   ]);
+  assert.deepStrictEqual(provider.models['deepseek-v4-pro'].limit, { context: 1048576, output: 393216 });
+  assert.deepStrictEqual(provider.models['deepseek-v4-flash'].limit, { context: 1048576, output: 393216 });
   assert.strictEqual(config.agent.bouncer.model, 'bouncer-deepseek/deepseek-v4-pro');
   assert.strictEqual(config.agent['bouncer-helper'].mode, 'subagent');
   assert.strictEqual(config.agent['bouncer-helper'].model, 'bouncer-deepseek/deepseek-v4-flash');

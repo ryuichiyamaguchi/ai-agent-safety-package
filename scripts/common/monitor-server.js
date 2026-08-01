@@ -318,24 +318,27 @@ function readGatewayState() {
       const req = http.get({
         hostname: HOST,
         port: DS_GATEWAY_PORT,
-        path: '/healthz',
+        path: '/status',
         timeout: 700,
         headers: { Accept: 'application/json' },
       }, (upstream) => {
         let body = '';
         upstream.setEncoding('utf8');
         upstream.on('data', (chunk) => {
-          if (body.length < 4096) body += chunk;
+          if (body.length < 32768) body += chunk;
         });
         upstream.on('end', () => {
           let healthy = false;
+          let activity = null;
           try {
             const value = JSON.parse(body);
             healthy = upstream.statusCode === 200 && value.status === 'ok';
+            activity = value && value.activity && typeof value.activity === 'object' ? value.activity : null;
           } catch { /* fail closed */ }
           finish({
             available: healthy,
             label: healthy ? 'DeepSeek送信検査 稼働中' : '送信検査を確認できません',
+            activity,
           });
         });
       });
@@ -1426,6 +1429,20 @@ function renderPage() {
 	body{max-width:100%;margin:0;padding:14px;font-family:"BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;background:radial-gradient(circle at 50% -30%,#1b2823 0,transparent 45%),var(--sky);color:var(--ink);line-height:1.6;overflow-x:hidden;overflow-wrap:anywhere;-webkit-font-smoothing:antialiased}
 	body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.15;background-image:linear-gradient(rgba(169,221,125,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(169,221,125,.07) 1px,transparent 1px);background-size:34px 34px;mask-image:linear-gradient(to bottom,black,transparent 72%)}
 	.wrap{position:relative;width:100%;max-width:1580px;margin:0 auto}
+	.opencode-statusline{position:sticky;top:8px;z-index:30;display:grid;grid-template-columns:minmax(0,1.25fr) minmax(260px,.7fr) minmax(0,.9fr);gap:10px;align-items:center;margin:0 0 10px;padding:9px 11px;border:1px solid #4c6149;border-radius:12px;background:linear-gradient(90deg,rgba(10,15,13,.97),rgba(18,28,25,.97));box-shadow:0 12px 34px rgba(0,0,0,.32),inset 0 0 0 1px rgba(255,255,255,.025);backdrop-filter:blur(8px)}
+	.opencode-statusline[hidden]{display:none}
+	.oc-status-left,.oc-status-right{display:flex;align-items:center;gap:8px;min-width:0;white-space:nowrap}
+	.oc-status-right{justify-content:flex-end}
+	.oc-pill{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:4px 8px;border:1px solid #5e774d;border-radius:999px;background:rgba(169,221,125,.08);color:var(--green);font:850 10px/1.3 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.05em}
+	.oc-pill:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(169,221,125,.08)}
+	.oc-pill.busy{border-color:#6c5b2e;color:var(--amber);background:rgba(225,185,74,.08)}
+	.oc-pill.busy:before{background:var(--amber);box-shadow:0 0 0 4px rgba(225,185,74,.09)}
+	.oc-pill.error{border-color:#78483f;color:var(--red);background:rgba(237,107,88,.08)}
+	.oc-pill.error:before{background:var(--red);box-shadow:0 0 0 4px rgba(237,107,88,.08)}
+	.oc-value{display:inline-block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;color:#dfe7e2;font:700 11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}
+	.oc-context{display:grid;grid-template-columns:auto minmax(86px,1fr);align-items:center;gap:8px;min-width:0;color:var(--muted);font:750 10px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:nowrap}
+	.oc-meter{display:block;height:9px;overflow:hidden;border:1px solid #394a42;border-radius:999px;background:#09100e}
+	.oc-meter span{display:block;width:0;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--green),var(--amber));transition:width .25s ease}
 	.dashboard{display:grid;grid-template-columns:minmax(220px,.72fr) minmax(540px,1.7fr) minmax(300px,1fr);gap:14px;align-items:start}
 	.dashboard>*{min-width:0}
 	.shell{max-width:100%;border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,rgba(21,30,27,.98),rgba(12,18,16,.98));box-shadow:var(--shadow)}
@@ -1603,12 +1620,28 @@ function renderPage() {
 	.protection-copy{font-size:9px;color:var(--muted)}
 	.protection-state{font-size:10px;font-weight:800;color:var(--green)}
 	.footer-note{grid-column:1/-1;margin:0;padding:10px 14px;color:var(--muted);font-size:10px;text-align:center;border:1px solid var(--line);border-radius:12px;background:#0d1311}
-	@media(max-width:1220px){.dashboard{grid-template-columns:220px minmax(0,1fr)}.right-rail{grid-column:1/-1;grid-template-columns:repeat(3,minmax(0,1fr))}.events{border-radius:18px}.brand-rail{min-height:720px}}
-	@media(max-width:900px){body{padding:10px}.dashboard{grid-template-columns:minmax(0,1fr)}.brand-rail{position:static;min-height:0;display:grid;grid-template-columns:1fr 170px;align-items:center}.brand,.brand-kicker,.companion-message,.guard-overview{grid-column:1}.companion-stage{grid-column:2;grid-row:1/5;max-width:170px}.right-rail{grid-column:auto;grid-template-columns:minmax(0,1fr)}}
-		@media(max-width:620px){body{padding:7px}.shell,.events{width:100%;border-radius:14px}.brand-rail,.center-shell,.rail-panel,.events{padding:13px}.brand-rail{display:block}.brand-rail>*{min-width:0}.brand-shield{width:35px;height:38px;font-size:18px;border-radius:10px}.brand-name{font-size:26px}.brand-kicker{margin-left:47px;font-size:8px}.companion-message{margin-top:18px;overflow:hidden}.companion-copy,.profile-summary,.live-note{word-break:break-word;overflow-wrap:anywhere}.companion-stage{max-width:118px;margin:8px auto 0}.topbar{align-items:flex-start;flex-wrap:wrap}.topbar>div:first-child{min-width:0}.topbar-copy{display:none}.live{flex:1 1 100%;max-width:100%;white-space:normal;font-size:9px;padding:6px 8px}.profile-strip{grid-template-columns:36px minmax(0,1fr);overflow:hidden}.profile-mark{width:34px;height:34px}.profile-speed{grid-column:1/-1;width:max-content;max-width:100%;white-space:normal}.tabs{width:100%}.tab{flex:1;min-width:0}.live-title-row{align-items:flex-start;flex-direction:column}.live-source{text-align:left}.live-subject{font-size:20px;word-break:break-word}.live-steps{grid-template-columns:minmax(0,1fr)}.decision-signal{grid-template-columns:36px minmax(0,1fr);padding:16px 14px 14px}.decision-symbol{width:34px;height:34px;border-radius:9px}.decision-headline{font-size:22px;word-break:break-word;overflow-wrap:anywhere}.decision-action{grid-column:1/-1}.decision-body{padding:14px}.fact{grid-template-columns:30px minmax(0,1fr)}.fact-value{grid-column:2}.qrow,.ks-row{flex-direction:column}.qrow button,.ks-row button{width:100%}.btns button{flex:1;min-width:130px}.footer-note{font-size:9px}}
+	@media(max-width:1220px){.opencode-statusline{grid-template-columns:1fr 1fr}.oc-status-right{grid-column:1/-1;justify-content:flex-start}.dashboard{grid-template-columns:220px minmax(0,1fr)}.right-rail{grid-column:1/-1;grid-template-columns:repeat(3,minmax(0,1fr))}.events{border-radius:18px}.brand-rail{min-height:720px}}
+	@media(max-width:900px){body{padding:10px}.opencode-statusline{top:6px;grid-template-columns:1fr}.oc-status-left,.oc-status-right{flex-wrap:wrap;white-space:normal}.dashboard{grid-template-columns:minmax(0,1fr)}.brand-rail{position:static;min-height:0;display:grid;grid-template-columns:1fr 170px;align-items:center}.brand,.brand-kicker,.companion-message,.guard-overview{grid-column:1}.companion-stage{grid-column:2;grid-row:1/5;max-width:170px}.right-rail{grid-column:auto;grid-template-columns:minmax(0,1fr)}}
+		@media(max-width:620px){body{padding:7px}.opencode-statusline{padding:8px}.oc-context{grid-template-columns:1fr}.oc-value{flex:1 1 100%;max-width:100%;font-size:10px;white-space:normal;overflow:visible;overflow-wrap:anywhere;text-overflow:clip}.shell,.events{width:100%;border-radius:14px}.brand-rail,.center-shell,.rail-panel,.events{padding:13px}.brand-rail{display:block}.brand-rail>*{min-width:0}.brand-shield{width:35px;height:38px;font-size:18px;border-radius:10px}.brand-name{font-size:26px}.brand-kicker{margin-left:47px;font-size:8px}.companion-message{margin-top:18px;overflow:hidden}.companion-copy,.profile-summary,.live-note{word-break:break-word;overflow-wrap:anywhere}.companion-stage{max-width:118px;margin:8px auto 0}.topbar{align-items:flex-start;flex-wrap:wrap}.topbar>div:first-child{min-width:0}.topbar-copy{display:none}.live{flex:1 1 100%;max-width:100%;white-space:normal;font-size:9px;padding:6px 8px}.profile-strip{grid-template-columns:36px minmax(0,1fr);overflow:hidden}.profile-mark{width:34px;height:34px}.profile-speed{grid-column:1/-1;width:max-content;max-width:100%;white-space:normal}.tabs{width:100%}.tab{flex:1;min-width:0}.live-title-row{align-items:flex-start;flex-direction:column}.live-source{text-align:left}.live-subject{font-size:20px;word-break:break-word}.live-steps{grid-template-columns:minmax(0,1fr)}.decision-signal{grid-template-columns:36px minmax(0,1fr);padding:16px 14px 14px}.decision-symbol{width:34px;height:34px;border-radius:9px}.decision-headline{font-size:22px;word-break:break-word;overflow-wrap:anywhere}.decision-action{grid-column:1/-1}.decision-body{padding:14px}.fact{grid-template-columns:30px minmax(0,1fr)}.fact-value{grid-column:2}.qrow,.ks-row{flex-direction:column}.qrow button,.ks-row button{width:100%}.btns button{flex:1;min-width:130px}.footer-note{font-size:9px}}
 	@media(prefers-reduced-motion:reduce){.live-dot{animation:none!important}.choice-card,.companion{transition:none}}
 	</style></head>
 	<body><div class="wrap">
+	  <div id="opencode-statusline" class="opencode-statusline" hidden>
+	    <div class="oc-status-left">
+	      <span id="oc-status-state" class="oc-pill">OpenCode 待機中</span>
+	      <span id="oc-status-cwd" class="oc-value">cwd: —</span>
+	      <span id="oc-status-model" class="oc-value">model: —</span>
+	      <span id="oc-status-thinking" class="oc-value">thinking: —</span>
+	    </div>
+	    <div class="oc-context">
+	      <span id="oc-context-label">context —</span>
+	      <span class="oc-meter" aria-hidden="true"><span id="oc-context-bar"></span></span>
+	    </div>
+	    <div class="oc-status-right">
+	      <span id="oc-status-tokens" class="oc-value">tokens: —</span>
+	      <span id="oc-status-speed" class="oc-value">speed: —</span>
+	    </div>
+	  </div>
 	<main class="dashboard">
 	  <aside class="brand-rail shell" aria-label="Bouncerの状態">
 	    <div class="brand">
@@ -1783,6 +1816,54 @@ let openHistoryKeys = new Set();
 function riskClass(meta){ if(/risk=high/.test(meta))return'high'; if(/risk=medium/.test(meta))return'medium'; return ''; }
 function compactText(v){ return String(v||'').replace(/\s+/g,' ').trim(); }
 function clipClient(v,n){ const s=String(v||''); return s.length>n ? s.slice(0,n)+'…' : s; }
+function compactPath(v){
+  const s=String(v||'').replace(/\\\\/g,'/').trim();
+  if(!s) return '—';
+  const home=(s.match(/^(?:[A-Za-z]:)?\\/Users\\/[^/]+|^~[^/]*/) || [''])[0];
+  const parts=s.split('/').filter(Boolean);
+  if(parts.length<=3) return s;
+  const tail=parts.slice(-2).join('/');
+  return (s.startsWith('~') || home ? '~/…/' : '…/') + tail;
+}
+function formatTokens(n){
+  const value=Number(n)||0;
+  if(value>=1000000) return (value/1000000).toFixed(value>=10000000?1:2).replace(/\\.0+$/,'')+'M';
+  if(value>=1000) return (value/1000).toFixed(value>=10000?0:1).replace(/\\.0$/,'')+'k';
+  return String(Math.round(value));
+}
+function formatPercent(n){
+  const value=Number(n);
+  if(!Number.isFinite(value)) return '0%';
+  return value.toFixed(value>=10?1:2).replace(/\\.0+$/,'')+'%';
+}
+function renderOpenCodeStatus(g, profile){
+  const show=!!(profile && profile.agent === 'opencode');
+  const root=$('opencode-statusline');
+  root.hidden=!show;
+  if(!show) return;
+  const activity=(g && g.activity) || {};
+  const available=!!(g && g.available);
+  const state=String(activity.request_status || (available ? 'idle' : 'error'));
+  const labels={streaming:'OpenCode 生成中',completed:'OpenCode 完了',error:'OpenCode 要確認',idle:'OpenCode 待機中'};
+  const pill=$('oc-status-state');
+  pill.textContent=labels[state] || labels.idle;
+  pill.className='oc-pill' + (state==='streaming'?' busy':(state==='error' || !available?' error':''));
+  $('oc-status-cwd').textContent='cwd: '+compactPath(activity.cwd || '');
+  $('oc-status-model').textContent='model: '+clipClient(String(activity.model||'—').replace(/^bouncer-deepseek\\//,''),36);
+  $('oc-status-thinking').textContent='thinking: '+(activity.thinking||'—');
+  const context=activity.context || {};
+  const tokens=activity.tokens || {};
+  const speed=activity.speed || {};
+  const approx=tokens.source === 'usage' ? '' : '~';
+  const remaining=Number(context.remaining)||0;
+  const limit=Number(context.limit)||0;
+  const usedPct=Math.max(0,Math.min(100,Number(context.used_pct)||0));
+  $('oc-context-label').textContent='ctx left '+approx+formatTokens(remaining)+' / '+formatTokens(limit)+' ('+formatPercent(context.remaining_pct)+')';
+  $('oc-context-bar').style.width=usedPct+'%';
+  $('oc-status-tokens').textContent='tokens: '+approx+formatTokens(tokens.total)+' total / in '+approx+formatTokens(tokens.input)+' / out '+approx+formatTokens(tokens.output);
+  const tps=Number(speed.output_tokens_per_sec)||0;
+  $('oc-status-speed').textContent='speed: '+(tps?approx+tps.toFixed(tps>=10?1:2).replace(/\\.0+$/,''):'0')+' tok/s';
+}
 function metaToolName(meta){
   const m=String(meta||'').match(/(?:^|[・\s])tool=([A-Za-z0-9_-]+)/);
   return m ? m[1] : '';
@@ -1841,6 +1922,8 @@ function renderCompanion(status, thinking){
 function renderProfile(s,g){
   const p=(s&&s.profile)||{id:'standard',label:'標準モード',short:'推奨・軽快',summary:'固定ルールと実行フックで守ります。',speed:'応答速度を優先',agent:'unknown'};
   document.body.dataset.profile=p.id||'standard';
+  document.body.dataset.agent=p.agent||'unknown';
+  renderOpenCodeStatus(g,p);
   $('profile-label').textContent=p.label||'標準モード';
   $('profile-summary').textContent=p.summary||'';
   $('profile-speed').textContent=p.speed||'';

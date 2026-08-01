@@ -323,6 +323,8 @@ async function main() {
     const rawUrl = await waitForUrl(proc);
     const url = new URL(rawUrl);
     const page = await fetch(rawUrl).then((res) => res.text());
+    const clientScript = (page.match(/<script>([\s\S]*)<\/script>/) || [])[1] || '';
+    assert.doesNotThrow(() => new Function(clientScript), 'generated client script should parse');
     assert.match(page, /安全イベント \/ AI回答モニター/, 'page title should expose both monitor targets');
     assert.match(page, /LIVE TRACE/, 'page should lead with live tool-call narration');
     assert.match(page, /Bouncerが観測したtool call/, 'page should explain observable behavior without claiming private reasoning');
@@ -350,6 +352,9 @@ async function main() {
     assert.match(page, /dataset[.]key/, 'history detail rows should have stable keys');
     assert.match(page, /現在の保護モード/, 'page should make the active convenience profile visible');
     assert.match(page, /ローカルGateway/, 'page should disclose whether the local gateway is in the request path');
+    assert.match(page, /id="opencode-statusline"/, 'page should include the OpenCode runtime status line');
+    assert.match(page, /renderOpenCodeStatus/, 'page should render OpenCode runtime metrics from the gateway');
+    assert.match(page, /context —/, 'OpenCode status line should expose context-window remaining state');
 
     for (const state of ['wait', 'allow', 'review', 'deny', 'thinking']) {
       const companionRes = await fetch(new URL('/companion-' + state + '.png' + url.search, url.origin));

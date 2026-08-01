@@ -82,6 +82,7 @@ DS_GATEWAY_PORT="$PORT" \
 DS_GATEWAY_UPSTREAM="https://api.deepseek.com" \
 DS_GATEWAY_AUTH_FILE="$KEY_FILE" \
 DS_GATEWAY_TOKEN="$GATEWAY_TOKEN" \
+DS_GATEWAY_WORKSPACE="$WORKSPACE" \
   node "$GATEWAY_JS" >"$LOG_DIR/opencode-deepseek-gateway.log" 2>&1 &
 GW_PID=$!
 

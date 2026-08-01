@@ -17,6 +17,32 @@ const DEFAULT_AUTH_FILE = process.env.DS_GATEWAY_AUTH_FILE || '';
 // 呼び出し元認証トークン。ランチャーが起動ごとに乱数で採番して環境変数で渡す。
 const DEFAULT_TOKEN = process.env.DS_GATEWAY_TOKEN || '';
 const DEFAULT_MAX_BODY = Number(process.env.DS_GATEWAY_MAX_BODY || 10 * 1024 * 1024); // 10MB（M2: ReDoS/メモリ枯渇の上限）
+const DEFAULT_WORKSPACE = process.env.DS_GATEWAY_WORKSPACE || process.cwd();
+const DEEPSEEK_V4_LIMIT = { context: 1048576, output: 393216 };
+const STATUS_IDLE = {
+  version: 1,
+  status: 'idle',
+  request_status: 'idle',
+  model: 'unknown',
+  cwd: DEFAULT_WORKSPACE,
+  thinking: 'unknown',
+  endpoint: '',
+  started_at: '',
+  first_output_at: '',
+  updated_at: '',
+  duration_ms: 0,
+  active_requests: 0,
+  context: {
+    limit: DEEPSEEK_V4_LIMIT.context,
+    used: 0,
+    remaining: DEEPSEEK_V4_LIMIT.context,
+    used_pct: 0,
+    remaining_pct: 100,
+    source: 'estimate',
+  },
+  tokens: { input: 0, output: 0, total: 0, source: 'estimate' },
+  speed: { output_tokens_per_sec: 0, source: 'estimate' },
+};
 
 // M-7（呼び出し元認証）: gateway は 127.0.0.1 で待ち受け、受け取った Authorization を
 // 検証せずに実キーへ差し替えて転送していた。そのため同一 PC の任意プロセス（受講者が
@@ -54,11 +80,215 @@ function isAuthorizedCaller(headers, expectedHash) {
   return ok;
 }
 
+function cloneStatus(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function modelId(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'unknown';
+  const tail = raw.split('/').pop().replace(/\[[^\]]+\]$/, '');
+  return tail || raw;
+}
+
+function modelLimit(value) {
+  const id = modelId(value);
+  if (/^deepseek-v4-(?:pro|flash)$/i.test(id)) return { ...DEEPSEEK_V4_LIMIT };
+  return { ...DEEPSEEK_V4_LIMIT };
+}
+
+function asNumber(...values) {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 0;
+}
+
+function addStringLengths(value) {
+  if (typeof value === 'string') return value.length;
+  if (Array.isArray(value)) return value.reduce((sum, item) => sum + addStringLengths(item), 0);
+  if (value && typeof value === 'object') {
+    return Object.values(value).reduce((sum, item) => sum + addStringLengths(item), 0);
+  }
+  return 0;
+}
+
+function approxTokensFromChars(chars) {
+  const n = Number(chars) || 0;
+  if (n <= 0) return 0;
+  return Math.max(1, Math.ceil(n / 4));
+}
+
+function requestTokenEstimate(json) {
+  return approxTokensFromChars(addStringLengths(json));
+}
+
+function normalizeUsage(usage) {
+  if (!usage || typeof usage !== 'object') return null;
+  const input = asNumber(
+    usage.prompt_tokens,
+    usage.input_tokens,
+    usage.promptTokens,
+    usage.inputTokens,
+  );
+  const output = asNumber(
+    usage.completion_tokens,
+    usage.output_tokens,
+    usage.completionTokens,
+    usage.outputTokens,
+  );
+  const total = asNumber(
+    usage.total_tokens,
+    usage.totalTokens,
+    input + output,
+  );
+  if (!input && !output && !total) return null;
+  return { input, output, total: total || input + output, source: 'usage' };
+}
+
+function thinkingLabel(json, model) {
+  const extra = json && (json.extra_body || json.extraBody || {});
+  const thinking = (json && json.thinking) || extra.thinking || {};
+  const type = String(thinking.type || '').trim().toLowerCase();
+  if (type === 'disabled') return 'disabled';
+  const effort = String(
+    (json && (json.reasoning_effort || json.reasoningEffort)) ||
+    extra.reasoning_effort ||
+    extra.reasoningEffort ||
+    (json && json.output_config && json.output_config.effort) ||
+    (extra.output_config && extra.output_config.effort) ||
+    '',
+  ).trim();
+  if (effort) return effort;
+  return /^deepseek-v4-/i.test(modelId(model)) ? 'auto(max)' : 'unknown';
+}
+
+function updateDerivedStatus(status) {
+  const limits = modelLimit(status.model);
+  const tokens = status.tokens || { input: 0, output: 0, total: 0, source: 'estimate' };
+  const used = asNumber(tokens.total, tokens.input + tokens.output);
+  const remaining = Math.max(0, limits.context - used);
+  const usedPct = limits.context ? Math.min(100, (used / limits.context) * 100) : 0;
+  status.context = {
+    limit: limits.context,
+    used,
+    remaining,
+    used_pct: Number(usedPct.toFixed(2)),
+    remaining_pct: Number(Math.max(0, 100 - usedPct).toFixed(2)),
+    source: tokens.source || 'estimate',
+  };
+  const start = Date.parse(status.started_at || '');
+  const speedStart = Date.parse(status.first_output_at || status.started_at || '');
+  const end = status.request_status === 'streaming' ? Date.now() : Date.parse(status.updated_at || '');
+  const elapsedMs = start && end && end >= start ? Math.max(0, end - start) : 0;
+  const outputElapsedMs = speedStart && end && end >= speedStart ? Math.max(0, end - speedStart) : elapsedMs;
+  status.duration_ms = elapsedMs;
+  const seconds = outputElapsedMs / 1000;
+  const output = asNumber(tokens.output);
+  status.speed = {
+    output_tokens_per_sec: seconds > 0 && output > 0 ? Number((output / seconds).toFixed(2)) : 0,
+    source: tokens.source || 'estimate',
+  };
+  return status;
+}
+
+function createActivity(workspace) {
+  const state = cloneStatus({ ...STATUS_IDLE, cwd: workspace || DEFAULT_WORKSPACE });
+  let seq = 0;
+  const active = new Set();
+  const byId = new Map();
+
+  function publish(record) {
+    const now = new Date().toISOString();
+    state.version = 1;
+    state.status = record.request_status === 'streaming' ? 'streaming' : record.request_status;
+    state.request_status = record.request_status;
+    state.model = record.model;
+    state.cwd = record.cwd;
+    state.thinking = record.thinking;
+    state.endpoint = record.endpoint;
+    state.started_at = record.started_at;
+    state.first_output_at = record.first_output_at || '';
+    state.updated_at = now;
+    state.active_requests = active.size;
+    const exact = record.usage || null;
+    const outputEstimate = approxTokensFromChars(record.output_chars || 0);
+    const input = exact ? exact.input : record.estimated_input_tokens;
+    const output = exact ? exact.output : outputEstimate;
+    const total = exact ? exact.total : input + output;
+    state.tokens = {
+      input,
+      output,
+      total,
+      source: exact ? 'usage' : 'estimate',
+    };
+    updateDerivedStatus(state);
+  }
+
+  return {
+    start(meta) {
+      const id = ++seq;
+      const now = new Date().toISOString();
+      const record = {
+        id,
+        request_status: 'streaming',
+        model: meta.model || 'unknown',
+        cwd: workspace || DEFAULT_WORKSPACE,
+        thinking: meta.thinking || 'unknown',
+        endpoint: meta.endpoint || '',
+        started_at: now,
+        first_output_at: '',
+        output_chars: 0,
+        estimated_input_tokens: meta.inputTokens || 0,
+        usage: null,
+      };
+      active.add(id);
+      byId.set(id, record);
+      publish(record);
+      return id;
+    },
+    observe(id, data) {
+      const record = byId.get(id);
+      if (!record) return;
+      if (data && data.usage) record.usage = data.usage;
+      if (data && data.outputChars) {
+        record.output_chars += data.outputChars;
+        if (!record.first_output_at) record.first_output_at = new Date().toISOString();
+      }
+      publish(record);
+    },
+    finish(id, status) {
+      const record = byId.get(id);
+      if (!record) return;
+      record.request_status = status || 'completed';
+      active.delete(id);
+      publish(record);
+    },
+    snapshot() {
+      state.active_requests = active.size;
+      if (state.request_status === 'streaming') updateDerivedStatus(state);
+      return cloneStatus(state);
+    },
+  };
+}
+
+function requestMetaFromJson(json, req) {
+  const model = json && json.model ? String(json.model) : 'unknown';
+  return {
+    model,
+    thinking: thinkingLabel(json || {}, model),
+    inputTokens: requestTokenEstimate(json || {}),
+    endpoint: `${req.method || 'POST'} ${String(req.url || '').split('?')[0]}`,
+  };
+}
+
 function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT,
                         tokenMap = createTokenMap(), denylistTerms = loadDenylistResult(),
                         maxBody = DEFAULT_MAX_BODY,
                         upstreamAuthFile = DEFAULT_AUTH_FILE,
-                        authToken = DEFAULT_TOKEN } = {}) {
+                        authToken = DEFAULT_TOKEN,
+                        workspace = DEFAULT_WORKSPACE } = {}) {
   const upstreamUrl = new URL(upstream);
   // 無認証モードは用意しない（後方互換で穴が残ると意味がないため fail-closed で起動拒否）。
   const callerToken = String(authToken || '').trim();
@@ -90,6 +320,7 @@ function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT,
     maxBody,
     upstreamAuthorization,
     authTokenHash,
+    activity: createActivity(workspace),
   };
   const server = http.createServer((req, res) => {
     // /healthz は無認証のまま残す。ランチャーは「トークンを持つ自分」だけでなく
@@ -98,6 +329,12 @@ function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT,
     if (req.method === 'GET' && req.url === '/healthz') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end('{"status":"ok"}');
+      return;
+    }
+    if (req.method === 'GET' && req.url === '/status') {
+      const status = session.activity.snapshot();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', activity: status }));
       return;
     }
     // 転送経路は全て呼び出し元認証を通す（欠落・不一致は 401・upstream へは出さない）。
@@ -331,6 +568,7 @@ async function handleProxy(req, res, upstreamUrl, session) {
   const counts = {};
   const alloc = (v, c) => { const t = session.tokenMap.alloc(v, c); allocated.add(t); return t; };
   const ctx = { alloc, denylistTerms: session.denylistTerms };
+  let requestMeta = requestMetaFromJson({}, req);
 
   // F-2: body を持つあらゆるメソッド（POST/PUT/PATCH/DELETE 等）の JSON body を検査。
   // 非JSON body は全メソッドで検査不能 → 415 fail-closed。
@@ -350,6 +588,7 @@ async function handleProxy(req, res, upstreamUrl, session) {
     }
     const { json, counts: bodyCounts } = maskRequestBody(parsed, ctx);
     addCounts(counts, bodyCounts);
+    requestMeta = requestMetaFromJson(json, req);
     outBody = Buffer.from(JSON.stringify(json), 'utf8');
   }
 
@@ -367,7 +606,7 @@ async function handleProxy(req, res, upstreamUrl, session) {
 
   if (counts.total) logDetection(req.url.split('?')[0], counts);
 
-  forward(req, res, upstreamUrl, outBody, session, allocated, outUrl);
+  forward(req, res, upstreamUrl, outBody, session, allocated, outUrl, requestMeta);
 }
 
 function jsonEscape(s) { const j = JSON.stringify(String(s)); return j.slice(1, -1); }
@@ -423,7 +662,86 @@ function maskHeaders(headers, session) {
   return out;
 }
 
-function forward(req, res, upstreamUrl, body, session, allocated, outUrl) {
+function deltaTextLength(obj) {
+  if (!obj || typeof obj !== 'object') return 0;
+  let chars = 0;
+  const choices = Array.isArray(obj.choices) ? obj.choices : [];
+  for (const choice of choices) {
+    const delta = choice && typeof choice.delta === 'object' ? choice.delta : {};
+    const message = choice && typeof choice.message === 'object' ? choice.message : {};
+    for (const source of [delta, message]) {
+      if (typeof source.content === 'string') chars += source.content.length;
+      if (typeof source.reasoning_content === 'string') chars += source.reasoning_content.length;
+      if (typeof source.reasoningContent === 'string') chars += source.reasoningContent.length;
+    }
+  }
+  if (!choices.length && typeof obj.content === 'string') chars += obj.content.length;
+  return chars;
+}
+
+function createResponseObserver(activity, id, contentType) {
+  const ct = String(contentType || '').toLowerCase();
+  const isSse = ct.includes('event-stream');
+  const isJson = ct.includes('json');
+  let carry = '';
+  let jsonText = '';
+  let jsonTooLarge = false;
+
+  function observeJsonValue(value) {
+    const usage = normalizeUsage(value && value.usage);
+    const outputChars = deltaTextLength(value);
+    if (usage || outputChars) activity.observe(id, { usage, outputChars });
+  }
+
+  function processSseText(text, flush = false) {
+    carry += text;
+    const lines = carry.split(/\r?\n/);
+    const tail = lines.pop() || '';
+    carry = flush ? '' : tail;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const payload = trimmed.slice(5).trim();
+      if (!payload || payload === '[DONE]') continue;
+      try {
+        observeJsonValue(JSON.parse(payload));
+      } catch { /* malformed stream fragments are ignored for metrics only */ }
+    }
+    if (flush && tail.trim()) {
+      const trimmed = tail.trim();
+      if (trimmed.startsWith('data:')) {
+        const payload = trimmed.slice(5).trim();
+        if (payload && payload !== '[DONE]') {
+          try { observeJsonValue(JSON.parse(payload)); } catch { /* metrics only */ }
+        }
+      }
+    }
+  }
+
+  return {
+    chunk(chunk) {
+      if (isSse) {
+        processSseText(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+        return;
+      }
+      if (isJson && !jsonTooLarge) {
+        jsonText += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        if (jsonText.length > 2 * 1024 * 1024) {
+          jsonTooLarge = true;
+          jsonText = '';
+        }
+      }
+    },
+    end() {
+      if (isSse) processSseText('', true);
+      if (isJson && jsonText) {
+        try { observeJsonValue(JSON.parse(jsonText)); } catch { /* metrics only */ }
+      }
+    },
+  };
+}
+
+function forward(req, res, upstreamUrl, body, session, allocated, outUrl, requestMeta) {
   const isHttps = upstreamUrl.protocol === 'https:';
   const lib = isHttps ? https : http;
   const headers = maskHeaders(req.headers, session);
@@ -443,16 +761,26 @@ function forward(req, res, upstreamUrl, body, session, allocated, outUrl) {
   for (const h of HOP_BY_HOP) delete headers[h];
   const basePath = upstreamUrl.pathname.replace(/\/$/, '');
   const reqPath = basePath + (outUrl !== undefined ? outUrl : req.url);
+  const activityId = session.activity.start(requestMeta || requestMetaFromJson({}, req));
 
   const upReq = lib.request(
     { protocol: upstreamUrl.protocol, host: upstreamUrl.hostname, port: upstreamUrl.port || (isHttps ? 443 : 80), method: req.method, path: reqPath, headers },
     (upRes) => {
       const ct = (upRes.headers['content-type'] || '').toLowerCase();
+      const observer = createResponseObserver(session.activity, activityId, ct);
       const transform = (ct.includes('json') || ct.includes('event-stream')) && allocated && allocated.size > 0;
       if (!transform) {
         res.writeHead(upRes.statusCode, upRes.headers);
-        upRes.on('error', () => { if (!res.writableEnded) res.end(); });
-        upRes.pipe(res);
+        upRes.on('data', (chunk) => { observer.chunk(chunk); res.write(chunk); });
+        upRes.on('end', () => {
+          observer.end();
+          session.activity.finish(activityId, upRes.statusCode >= 400 ? 'error' : 'completed');
+          res.end();
+        });
+        upRes.on('error', () => {
+          session.activity.finish(activityId, 'error');
+          if (!res.writableEnded) res.end();
+        });
         return;
       }
       // RED-B: 復元でバイト長が変わるため content-length を外し chunked にする。
@@ -461,11 +789,23 @@ function forward(req, res, upstreamUrl, body, session, allocated, outUrl) {
       res.writeHead(upRes.statusCode, outHeaders);
       const restorer = makeRestorer(session.tokenMap, allocated);
       upRes.setEncoding('utf8');
-      upRes.on('data', (chunk) => res.write(restorer.push(chunk)));
-      upRes.on('end', () => { res.write(restorer.flush()); res.end(); });
-      upRes.on('error', () => { if (!res.writableEnded) res.end(); });
+      upRes.on('data', (chunk) => {
+        observer.chunk(chunk);
+        res.write(restorer.push(chunk));
+      });
+      upRes.on('end', () => {
+        observer.end();
+        session.activity.finish(activityId, upRes.statusCode >= 400 ? 'error' : 'completed');
+        res.write(restorer.flush());
+        res.end();
+      });
+      upRes.on('error', () => {
+        session.activity.finish(activityId, 'error');
+        if (!res.writableEnded) res.end();
+      });
     });
   upReq.on('error', () => {
+    session.activity.finish(activityId, 'error');
     if (!res.headersSent) { res.writeHead(502, {'content-type':'application/json'}); res.end('{"error":"ds-gateway: upstream unreachable (fail-closed)"}'); }
     else if (!res.writableEnded) res.end();
   });

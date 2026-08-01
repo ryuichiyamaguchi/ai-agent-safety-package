@@ -98,6 +98,55 @@ test('GET /healthz returns 200 ok with no token field', async () => {
   assert.ok(!res.body.includes('token'), 'healthz must not echo any token');
 });
 
+test('GET /status reports runtime metrics without echoing prompts or caller tokens', async (t) => {
+  const up = await startUpstream((req, res) => {
+    req.resume();
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n');
+    res.end('data: {"usage":{"prompt_tokens":1200,"completion_tokens":80,"total_tokens":1280}}\n\ndata: [DONE]\n\n');
+  });
+  t.after(() => up.close());
+  const gw = createGateway({
+    upstream: `http://127.0.0.1:${up.address().port}`,
+    port: 0,
+    denylistTerms: [],
+    workspace: '/tmp/my-ai-workspace',
+  });
+  const server = await gw.listen();
+  t.after(() => server.close());
+
+  const port = server.address().port;
+  const secretPrompt = 'the classroom prompt text must not appear in status';
+  const call = await request(port, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: { model: 'deepseek-v4-pro', messages: [{ role: 'user', content: secretPrompt }], stream: true },
+  });
+  assert.strictEqual(call.status, 200);
+
+  const status = await new Promise((resolve, reject) => {
+    nodeHttp.get({ host: '127.0.0.1', port, path: '/status' }, (res) => {
+      let body = '';
+      res.on('data', (c) => (body += c));
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    }).on('error', reject);
+  });
+  assert.strictEqual(status.status, 200);
+  const parsed = JSON.parse(status.body);
+  assert.strictEqual(parsed.status, 'ok');
+  assert.strictEqual(parsed.activity.model, 'deepseek-v4-pro');
+  assert.strictEqual(parsed.activity.cwd, '/tmp/my-ai-workspace');
+  assert.strictEqual(parsed.activity.tokens.input, 1200);
+  assert.strictEqual(parsed.activity.tokens.output, 80);
+  assert.strictEqual(parsed.activity.tokens.total, 1280);
+  assert.strictEqual(parsed.activity.tokens.source, 'usage');
+  assert.strictEqual(parsed.activity.context.limit, 1048576);
+  assert.ok(parsed.activity.speed.output_tokens_per_sec >= 0);
+  assert.ok(!status.body.includes(secretPrompt));
+  assert.ok(!status.body.includes(TEST_TOKEN));
+});
+
 // ── M-7: 呼び出し元認証（同一 PC の他プロセス / DNS リバインディング対策）──
 test('M-7: gateway refuses to start without a caller auth token (fail-closed)', () => {
   assert.throws(

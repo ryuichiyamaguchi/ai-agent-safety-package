@@ -332,8 +332,14 @@ function buildOpenCodeConfig({
           apiKey,
         },
         models: {
-          'deepseek-v4-pro': { name: 'DeepSeek V4 Pro (Bouncer protected)' },
-          'deepseek-v4-flash': { name: 'DeepSeek V4 Flash (Bouncer protected)' },
+          'deepseek-v4-pro': {
+            name: 'DeepSeek V4 Pro (Bouncer protected)',
+            limit: { context: 1048576, output: 393216 },
+          },
+          'deepseek-v4-flash': {
+            name: 'DeepSeek V4 Flash (Bouncer protected)',
+            limit: { context: 1048576, output: 393216 },
+          },
         },
       },
     },

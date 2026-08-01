@@ -6,6 +6,9 @@ Codex CLI、Claude Code、OpenCode、Gemini CLI を「あなたを守る安全�
 
 ## v1.14.4：Windowsラッパーの出力形式差へ追加対応
 
+- Bouncer統合版のOpenCode画面に、常時表示の実行ステータスバーを追加
+- OpenCodeのGateway観測値から、作業ディレクトリ、モデル、thinking、文脈残量、トークン消費、出力速度を表示
+- DeepSeek V4 Pro / Flash のモデル上限を1M context / 384K outputとしてOpenCode設定へ明示
 - 準備ログと設定JSONの間に改行がない出力、およびJSON形式の準備ログが混ざる出力へ対応
 - JSONの位置ではなくOpenCode解決済み設定の構造で本体を一意に特定
 - 安全設定らしいJSONが複数ある場合は引き続きfail-closedで停止

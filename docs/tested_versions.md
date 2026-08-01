@@ -119,7 +119,8 @@ mismatch が出た場合、配布 URL すり替えや手動改変・破損の可
 > mac の Bouncer 起動スクリプト `bouncer-gateway/scripts/run-local.zsh` を Windows 版と同じ判定（running / stopped / unknown）にそろえ、判定不能・空出力は日本語メッセージで中止するよう修正。偽の `lms` を使った実走 9 ケースで確認。
 > 実バイト検査の CRLF 判定を厳密化。CR と LF の個数一致だけでは、行の途中に紛れた CR と CR の付かない LF が相殺して素通りするため（例: `a<CR><LF>b<CR>c<LF>`）、「LF で区切って CR で終わる行の数＝CRLF の個数」も一致することまで見るようにした。相殺ケースを実際に作って検出することを確認済み。
 > 検査自体が空振りしていないかの点検も実施。`release-version-check.sh` の各検査を 1 つずつ壊して（.ps1 の BOM 除去 / .bat の LF 化 / 行頭 chcp 65001 / .bat の UTF-8 化 / 表のハッシュ書き換え / 表の削除）**6 件すべてが FAIL として検出され、復元すると PASS に戻る**ことを実測した。PowerShell 側のテストは「中止したこと」だけでなく「中止の理由」まで照合するようにし、期待文言をわざと外すとテストが落ちることも確認した。
-> テスト件数: `node --test scripts/common/test/*.test.js scripts/common/test/*.test.mjs` = 273 件すべて成功（2026-07-29実測。v1.14.4で、改行なしログ、構造化JSONログ、診断ファイル保存、両OSの診断配線を追加）。mac シェルテスト、PowerShell構文検査、WindowsファイルのBOM・CRLF検査も成功。`scripts/release-version-check.sh` は RESULT: PASS。
+> 2026-08-01: OpenCode統合版のGatewayに `/status` を追加し、Bouncer画面上部に常時表示のOpenCode runtime statusを追加。会話本文・生成本文は保存せず、モデル、cwd、thinking、文脈残量、トークン消費、出力速度だけを表示する。DeepSeek V4 Pro / Flash は1M context / 384K outputとしてOpenCode設定へ明示。デスクトップ 1440x900 とモバイル 390x900 のヘッドレスChromeスクリーンショットで表示崩れなしを確認。
+> テスト件数: `node --test scripts/common/test/*.test.js scripts/common/test/*.test.mjs` = 278 件すべて成功（2026-08-01実測。OpenCode runtime status、Gateway `/status`、DeepSeek V4 limit、クライアントJS構文検査を追加）。mac シェルテスト、PowerShell構文検査、WindowsファイルのBOM・CRLF検査も成功。`scripts/release-version-check.sh` は RESULT: PASS。
 
 | ファイル | SHA-256 | 備考 |
 |---------|---------|------|
