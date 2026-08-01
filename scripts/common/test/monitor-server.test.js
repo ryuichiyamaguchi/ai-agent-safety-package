@@ -325,10 +325,11 @@ async function main() {
     assert.match(page, /AIコーチを使わなくても表示されます/, 'page should explain that the guide works without an AI key');
     assert.match(page, /Bouncer/, 'page should expose the Bouncer product identity');
     assert.match(page, /あなたの判断/, 'page should keep the three decision guides separate from AI tool controls');
-    assert.match(page, /bouncer-companion|companion/, 'page should include the local companion asset');
-    assert.match(page, /id="companion-stage"/, 'dog should be a stateful motion stage rather than a static image');
-    assert.match(page, /companion-tail/, 'dog motion should use small overlay parts instead of moving the whole image');
-    assert.match(page, /companion-scan/, 'dog should have state-specific differential motion parts');
+    assert.match(page, /id="companion-stage"/, 'dog should be a stateful image stage');
+    assert.match(page, /companion-wait[.]png/, 'dog should start from a real PNG pose asset');
+    assert.match(page, /companion-' \+ encodeURIComponent\(mood[.]state\) \+ '[.]png/, 'dog should switch real PNG pose assets by state');
+    assert.doesNotMatch(page, /<svg\b/, 'Bouncer UI should not ship inline SVG art');
+    assert.doesNotMatch(page, /companion-(?:ear|tail|paw|face|scan|orbit|mark)/, 'dog should not be patched with overlaid DOM/CSS parts');
     assert.match(page, /id="companion-copy"/, 'speech bubble copy should update with the current Bouncer state');
     assert.match(page, /renderCompanion/, 'dog state should be synchronized with approval and coach states');
     assert.match(page, /prefers-reduced-motion/, 'dog motion should respect reduced-motion preferences');
@@ -337,10 +338,15 @@ async function main() {
     assert.match(page, /現在の保護モード/, 'page should make the active convenience profile visible');
     assert.match(page, /ローカルGateway/, 'page should disclose whether the local gateway is in the request path');
 
-    const companionRes = await fetch(new URL('/companion.png' + url.search, url.origin));
-    assert.equal(companionRes.status, 200, 'local companion asset should be served with the session token');
-    assert.equal(companionRes.headers.get('content-type'), 'image/png');
-    assert.ok((await companionRes.arrayBuffer()).byteLength > 10000, 'companion asset should not be empty');
+    for (const state of ['wait', 'allow', 'review', 'deny', 'thinking']) {
+      const companionRes = await fetch(new URL('/companion-' + state + '.png' + url.search, url.origin));
+      assert.equal(companionRes.status, 200, 'local companion ' + state + ' asset should be served with the session token');
+      assert.equal(companionRes.headers.get('content-type'), 'image/png');
+      assert.ok((await companionRes.arrayBuffer()).byteLength > 10000, 'companion ' + state + ' asset should not be empty');
+    }
+
+    const legacyCompanionRes = await fetch(new URL('/companion.png' + url.search, url.origin));
+    assert.equal(legacyCompanionRes.status, 200, 'legacy companion route should remain as a fallback');
 
     // プロンプトカード（本文あり）はコーチ相談可＝受講者が「この質問はなぜ止まった？」を聞ける。
     fs.writeFileSync(path.join(tmp, 'now.html'), promptOnlyNowHtml(), 'utf8');

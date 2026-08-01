@@ -34,6 +34,10 @@ const MAX_BODY = 16 * 1024;            // POST 本文上限（相談文）
 const AI_TIMEOUT_MS = Number(process.env.AI_SAFE_COACH_TIMEOUT || 60000);
 const REFRESH_MS = Number(process.env.AI_SAFE_MONITOR_INTERVAL || 1) * 1000;
 const COMPANION_FILE = path.join(__dirname, 'assets', 'bouncer-companion.png');
+const COMPANION_ASSET_STATES = ['wait', 'allow', 'review', 'deny', 'thinking'];
+const COMPANION_FILES = Object.fromEntries(
+  COMPANION_ASSET_STATES.map((state) => [state, path.join(__dirname, 'assets', `bouncer-companion-${state}.png`)])
+);
 const BOUNCER_PORT = Number(process.env.BOUNCER_PORT || 8787);
 const DS_GATEWAY_PORT = Number(process.env.DS_GATEWAY_PORT || 8788);
 
@@ -447,31 +451,26 @@ const COMPANION_STATES = {
   wait: {
     state: 'wait',
     label: '待機中',
-    mark: '•',
     text: '承認が必要な操作を待っています。検知したら、ここで知らせます。',
   },
   allow: {
     state: 'allow',
     label: '読み取り中心',
-    mark: '✓',
     text: '変更しない操作です。対象が依頼どおりなら「今回だけ許可」で進められます。',
   },
   review: {
     state: 'review',
     label: '要確認',
-    mark: '!',
     text: 'まだ許可しないでください。「何が変わる」と「PCの外へ送る」を確認しましょう。',
   },
   deny: {
     state: 'deny',
     label: '止める',
-    mark: '×',
     text: 'この操作は止めるのが安全です。AIツール側で「許可しない」を選んでください。',
   },
   thinking: {
     state: 'thinking',
     label: '確認中',
-    mark: '…',
     text: 'いまコマンドの意味を確認しています。回答が出るまで許可しないでください。',
   },
 };
@@ -480,6 +479,17 @@ function companionPresentation(status, thinking = false) {
   if (thinking) return { ...COMPANION_STATES.thinking };
   const key = ['allow', 'review', 'deny', 'wait'].includes(status) ? status : 'wait';
   return { ...COMPANION_STATES[key] };
+}
+
+function companionAssetFile(state) {
+  const key = COMPANION_ASSET_STATES.includes(state) ? state : 'wait';
+  const file = COMPANION_FILES[key];
+  try {
+    if (file && fs.existsSync(file)) return file;
+  } catch {
+    // Fall back to the legacy single pose asset if the state image is missing.
+  }
+  return COMPANION_FILE;
 }
 
 // find は探すだけの読み取りコマンドに見えるが、これらのオプションが付くと
@@ -1211,9 +1221,10 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': body.length });
     return res.end(body);
   }
-  if (req.method === 'GET' && url.pathname === '/companion.png') {
+  const companionMatch = url.pathname.match(/^\/companion(?:-([a-z]+))?[.]png$/);
+  if (req.method === 'GET' && companionMatch) {
     try {
-      const body = fs.readFileSync(COMPANION_FILE);
+      const body = fs.readFileSync(companionAssetFile(companionMatch[1]));
       res.writeHead(200, {
         'Content-Type': 'image/png',
         'Content-Length': body.length,
@@ -1327,7 +1338,7 @@ function renderPage() {
 	.shell{max-width:100%;border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,rgba(21,30,27,.98),rgba(12,18,16,.98));box-shadow:var(--shadow)}
 	.brand-rail{position:sticky;top:14px;min-height:calc(100vh - 28px);padding:22px;display:flex;flex-direction:column;overflow:hidden}
 	.brand{display:flex;align-items:center;gap:12px}
-	.brand-shield{width:44px;height:48px;flex:none;color:var(--green);filter:drop-shadow(0 0 12px rgba(169,221,125,.16))}
+	.brand-shield{display:grid;place-items:center;width:44px;height:48px;flex:none;border:1px solid #5f784f;border-radius:13px;background:linear-gradient(180deg,rgba(169,221,125,.12),rgba(169,221,125,.035));color:var(--green);font:900 22px/1 ui-monospace,SFMono-Regular,Consolas,monospace;box-shadow:inset 0 0 18px rgba(169,221,125,.08),0 0 12px rgba(169,221,125,.12)}
 	.brand-name{font-size:clamp(25px,2.2vw,34px);font-weight:850;line-height:1;letter-spacing:-.025em}
 	.brand-kicker{margin:8px 0 0 57px;font:700 9px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.2em;color:var(--green);text-transform:uppercase}
 	.companion-message{position:relative;margin:28px 0 2px;padding:13px 15px;border:1px solid #52644f;border-radius:15px;background:rgba(255,255,255,.025);color:#d9e1dc}
@@ -1335,28 +1346,11 @@ function renderPage() {
 	.companion-status{display:block;margin-bottom:3px;color:var(--green);font:800 9px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.13em}
 	.companion-copy{display:block;font-size:12px;font-weight:650;line-height:1.65}
 	.companion-stage{--companion-signal:var(--green);position:relative;display:grid;place-items:center;width:min(100%,300px);margin:2px auto 0;aspect-ratio:1;isolation:isolate}
-	.companion-stage:before{content:"";position:absolute;z-index:-1;width:78%;height:38%;bottom:11%;border-radius:50%;background:radial-gradient(ellipse,color-mix(in srgb,var(--companion-signal) 23%,transparent),transparent 68%);filter:blur(10px);transition:background .35s ease,transform .35s ease}
+	.companion-stage:before{content:"";position:absolute;z-index:-1;width:78%;height:38%;bottom:11%;border-radius:50%;background:radial-gradient(ellipse,color-mix(in srgb,var(--companion-signal) 23%,transparent),transparent 68%);filter:blur(10px);transition:background .35s ease}
 	.companion-stage[data-state="review"]{--companion-signal:var(--amber)}
 	.companion-stage[data-state="deny"]{--companion-signal:var(--red)}
 	.companion-stage[data-state="thinking"]{--companion-signal:var(--blue)}
-	.companion{display:block;width:100%;aspect-ratio:1;object-fit:cover;object-position:center;border-radius:20px;mix-blend-mode:screen;filter:drop-shadow(0 8px 18px color-mix(in srgb,var(--companion-signal) 14%,transparent));transition:filter .35s ease}
-	.companion-mark{position:absolute;right:7%;top:9%;display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--companion-signal);border-radius:50%;background:#111916;color:var(--companion-signal);font-size:17px;font-weight:900;box-shadow:0 0 0 5px color-mix(in srgb,var(--companion-signal) 8%,transparent);transition:color .35s ease,border-color .35s ease}
-	.companion-orbit{position:absolute;inset:12%;border:1px dashed color-mix(in srgb,var(--companion-signal) 45%,transparent);border-radius:50%;opacity:0;transform:scale(.88)}
-	.companion-stage[data-state="thinking"] .companion-orbit{opacity:.65;animation:companion-orbit 7s linear infinite}
-	.companion-part{position:absolute;pointer-events:none;color:var(--companion-signal);opacity:.82;transition:opacity .2s ease,color .35s ease,transform .35s ease}
-	.companion-ear{left:32%;top:21%;width:18px;height:24px;border:2px solid currentColor;border-right:0;border-bottom:0;border-radius:12px 0 0 0;transform-origin:100% 100%}
-	.companion-tail{right:15%;top:55%;width:36px;height:11px;border-top:3px solid currentColor;border-radius:50%;transform-origin:0 50%;opacity:.72}
-	.companion-scan{left:31%;right:31%;top:39%;height:2px;background:linear-gradient(90deg,transparent,currentColor,transparent);box-shadow:0 0 10px currentColor;opacity:0}
-	.companion-stage[data-state="wait"] .companion-ear{animation:ear-listen 5.2s ease-in-out infinite}
-	.companion-stage[data-state="allow"] .companion-tail{animation:tail-wag 1.4s ease-in-out infinite}
-	.companion-stage[data-state="review"] .companion-ear{animation:ear-twitch 1.8s ease-in-out infinite}
-	.companion-stage[data-state="deny"] .companion-scan{opacity:.88;animation:scan-line 1.35s ease-in-out infinite}
-	.companion-stage[data-state="thinking"] .companion-scan{opacity:.78;animation:scan-line 1.1s ease-in-out infinite}
-	@keyframes ear-listen{0%,86%,100%{transform:rotate(0)}91%{transform:rotate(-9deg)}96%{transform:rotate(4deg)}}
-	@keyframes tail-wag{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(13deg)}}
-	@keyframes ear-twitch{0%,100%{transform:rotate(-4deg)}46%{transform:rotate(12deg)}58%{transform:rotate(-9deg)}}
-	@keyframes scan-line{0%,100%{transform:translateY(-10px)}50%{transform:translateY(12px)}}
-	@keyframes companion-orbit{to{transform:scale(.88) rotate(360deg)}}
+	.companion{display:block;width:100%;aspect-ratio:1;object-fit:cover;object-position:center;border-radius:20px;background:#050807;box-shadow:0 0 0 1px rgba(255,255,255,.04),0 10px 24px rgba(0,0,0,.24);filter:drop-shadow(0 8px 18px color-mix(in srgb,var(--companion-signal) 14%,transparent));transition:filter .25s ease,opacity .18s ease}
 	.guard-overview{margin-top:auto;padding:16px;border:1px solid #44533e;border-radius:14px;background:rgba(169,221,125,.035)}
 	.guard-overview h2,.rail-panel h2{font-size:14px;margin:0 0 11px}
 	.guard-row{display:grid;grid-template-columns:26px 1fr auto;align-items:center;gap:8px;padding:8px 0;border-top:1px solid rgba(255,255,255,.055);font-size:12px}
@@ -1509,14 +1503,14 @@ function renderPage() {
 	.footer-note{grid-column:1/-1;margin:0;padding:10px 14px;color:var(--muted);font-size:10px;text-align:center;border:1px solid var(--line);border-radius:12px;background:#0d1311}
 	@media(max-width:1220px){.dashboard{grid-template-columns:220px minmax(0,1fr)}.right-rail{grid-column:1/-1;grid-template-columns:repeat(3,minmax(0,1fr))}.events{border-radius:18px}.brand-rail{min-height:720px}}
 	@media(max-width:900px){body{padding:10px}.dashboard{grid-template-columns:minmax(0,1fr)}.brand-rail{position:static;min-height:0;display:grid;grid-template-columns:1fr 170px;align-items:center}.brand,.brand-kicker,.companion-message,.guard-overview{grid-column:1}.companion-stage{grid-column:2;grid-row:1/5;max-width:170px}.right-rail{grid-column:auto;grid-template-columns:minmax(0,1fr)}}
-		@media(max-width:620px){body{padding:7px}.shell,.events{width:100%;border-radius:14px}.brand-rail,.center-shell,.rail-panel,.events{padding:13px}.brand-rail{display:block}.brand-rail>*{min-width:0}.brand-shield{width:35px;height:38px}.brand-name{font-size:26px}.brand-kicker{margin-left:47px;font-size:8px}.companion-message{margin-top:18px;overflow:hidden}.companion-copy,.profile-summary,.live-note{word-break:break-word;overflow-wrap:anywhere}.companion-stage{max-width:118px;margin:8px auto 0}.companion-mark{width:25px;height:25px;font-size:12px}.topbar{align-items:flex-start;flex-wrap:wrap}.topbar>div:first-child{min-width:0}.topbar-copy{display:none}.live{flex:1 1 100%;max-width:100%;white-space:normal;font-size:9px;padding:6px 8px}.profile-strip{grid-template-columns:36px minmax(0,1fr);overflow:hidden}.profile-mark{width:34px;height:34px}.profile-speed{grid-column:1/-1;width:max-content;max-width:100%;white-space:normal}.tabs{width:100%}.tab{flex:1;min-width:0}.live-title-row{align-items:flex-start;flex-direction:column}.live-source{text-align:left}.live-subject{font-size:20px;word-break:break-word}.live-steps{grid-template-columns:minmax(0,1fr)}.decision-signal{grid-template-columns:36px minmax(0,1fr);padding:16px 14px 14px}.decision-symbol{width:34px;height:34px;border-radius:9px}.decision-headline{font-size:22px;word-break:break-word;overflow-wrap:anywhere}.decision-action{grid-column:1/-1}.decision-body{padding:14px}.fact{grid-template-columns:30px minmax(0,1fr)}.fact-value{grid-column:2}.qrow,.ks-row{flex-direction:column}.qrow button,.ks-row button{width:100%}.btns button{flex:1;min-width:130px}.footer-note{font-size:9px}}
-	@media(prefers-reduced-motion:reduce){.live-dot,.companion-orbit,.companion-part{animation:none!important}.choice-card{transition:none}}
+		@media(max-width:620px){body{padding:7px}.shell,.events{width:100%;border-radius:14px}.brand-rail,.center-shell,.rail-panel,.events{padding:13px}.brand-rail{display:block}.brand-rail>*{min-width:0}.brand-shield{width:35px;height:38px;font-size:18px;border-radius:10px}.brand-name{font-size:26px}.brand-kicker{margin-left:47px;font-size:8px}.companion-message{margin-top:18px;overflow:hidden}.companion-copy,.profile-summary,.live-note{word-break:break-word;overflow-wrap:anywhere}.companion-stage{max-width:118px;margin:8px auto 0}.topbar{align-items:flex-start;flex-wrap:wrap}.topbar>div:first-child{min-width:0}.topbar-copy{display:none}.live{flex:1 1 100%;max-width:100%;white-space:normal;font-size:9px;padding:6px 8px}.profile-strip{grid-template-columns:36px minmax(0,1fr);overflow:hidden}.profile-mark{width:34px;height:34px}.profile-speed{grid-column:1/-1;width:max-content;max-width:100%;white-space:normal}.tabs{width:100%}.tab{flex:1;min-width:0}.live-title-row{align-items:flex-start;flex-direction:column}.live-source{text-align:left}.live-subject{font-size:20px;word-break:break-word}.live-steps{grid-template-columns:minmax(0,1fr)}.decision-signal{grid-template-columns:36px minmax(0,1fr);padding:16px 14px 14px}.decision-symbol{width:34px;height:34px;border-radius:9px}.decision-headline{font-size:22px;word-break:break-word;overflow-wrap:anywhere}.decision-action{grid-column:1/-1}.decision-body{padding:14px}.fact{grid-template-columns:30px minmax(0,1fr)}.fact-value{grid-column:2}.qrow,.ks-row{flex-direction:column}.qrow button,.ks-row button{width:100%}.btns button{flex:1;min-width:130px}.footer-note{font-size:9px}}
+	@media(prefers-reduced-motion:reduce){.live-dot{animation:none!important}.choice-card,.companion{transition:none}}
 	</style></head>
 	<body><div class="wrap">
 	<main class="dashboard">
 	  <aside class="brand-rail shell" aria-label="Bouncerの状態">
 	    <div class="brand">
-	      <svg class="brand-shield" viewBox="0 0 48 54" aria-hidden="true"><path d="M24 2 43 10v13c0 13-7.8 22.7-19 29C12.8 45.7 5 36 5 23V10L24 2Z" fill="none" stroke="currentColor" stroke-width="3"/><path d="M15 22c2-4 5-6 9-6s7 2 9 6v8c-3 3-6 4-9 4s-6-1-9-4v-8Z" fill="currentColor" opacity=".18"/><circle cx="19" cy="25" r="2" fill="currentColor"/><circle cx="29" cy="25" r="2" fill="currentColor"/><path d="M21 31c2 1.5 4 1.5 6 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+	      <span class="brand-shield" aria-hidden="true">B</span>
 	      <div class="brand-name">Bouncer</div>
 	    </div>
 	    <p class="brand-kicker">AI safety monitoring<br>&amp; approval assistant</p>
@@ -1525,12 +1519,7 @@ function renderPage() {
 	      <span id="companion-copy" class="companion-copy">承認が必要な操作を待っています。検知したら、ここで知らせます。</span>
 	    </div>
 	    <div id="companion-stage" class="companion-stage" data-state="wait">
-	      <span class="companion-orbit" aria-hidden="true"></span>
-	      <img id="companion" class="companion" alt="待機中のBouncerロボット犬" />
-	      <span class="companion-part companion-ear" aria-hidden="true"></span>
-	      <span class="companion-part companion-tail" aria-hidden="true"></span>
-	      <span class="companion-part companion-scan" aria-hidden="true"></span>
-	      <span id="companion-mark" class="companion-mark" aria-hidden="true">•</span>
+	      <img id="companion" class="companion" alt="待機中のBouncerロボット犬" src="/companion-wait.png?t=${TOKEN}" />
 	    </div>
 	    <section class="guard-overview">
 	      <h2>いま働いている見守り</h2>
@@ -1679,7 +1668,6 @@ function renderPage() {
 <script>
 const T = new URLSearchParams(location.search).get('t');
 const $ = (id) => document.getElementById(id);
-$('companion').src = '/companion.png?t=' + encodeURIComponent(T);
 const COMPANION_STATES = ${JSON.stringify(COMPANION_STATES)};
 let lastCmd = null;
 let lastAnswerText = null;
@@ -1713,10 +1701,10 @@ function subjectLine(s,g){
 function activityKind(g){
   const text=String(((g&&g.summary)||'')+' '+((g&&g.impact)||'')+' '+((g&&g.outbound)||''));
   if(/依存|パッケージ|node_modules|レジストリ/.test(text)) return '依存追加 + 外部通信';
+  if(/読み取|変更しません|作成・変更・削除はしません/.test(text)) return '読み取り';
   if(/削除|戻せない|消す/.test(text)) return '削除/破壊';
   if(/書き込|作成|変更|編集|上書き/.test(text)) return 'ファイル変更';
   if(/PCの外|外部|通信|検索語|URL|送信/.test(text)) return '外部通信';
-  if(/読み取|表示|変更しません|作成・変更・削除はしません/.test(text)) return '読み取り';
   return '要確認';
 }
 function renderLiveNarration(s,g){
@@ -1742,8 +1730,10 @@ function renderCompanion(status, thinking){
   if(stage.dataset.state !== mood.state) stage.dataset.state = mood.state;
   $('companion-status').textContent = mood.label;
   $('companion-copy').textContent = mood.text;
-  $('companion-mark').textContent = mood.mark;
-  $('companion').alt = mood.label + 'のBouncerロボット犬';
+  const companion = $('companion');
+  const nextSrc = '/companion-' + encodeURIComponent(mood.state) + '.png?t=' + encodeURIComponent(T);
+  if(companion.getAttribute('src') !== nextSrc) companion.setAttribute('src', nextSrc);
+  companion.alt = mood.label + 'のBouncerロボット犬';
 }
 
 function renderProfile(s,g){
