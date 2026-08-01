@@ -262,6 +262,47 @@ test('resolved-config parser accepts JSON attached directly to a non-JSON status
   assert.deepStrictEqual(parseResolvedConfigOutput(output), intact);
 });
 
+test('resolved-config parser tolerates raw mojibake markdown fields from Windows debug config', () => {
+  const intact = intactConfig({ enableWebSearch: true });
+  intact.agent.sensei = {
+    name: 'sensei',
+    description: 'ignored',
+    mode: 'primary',
+    tools: { bash: false, edit: false, task: false },
+    prompt: 'ignored',
+    options: {},
+    permission: {
+      bash: 'deny',
+      edit: 'deny',
+      task: 'deny',
+      webfetch: 'deny',
+    },
+  };
+
+  const brokenCommand = [
+    '  "command": {',
+    '    "縺ｪ縺翫＠縺ｦ": {',
+    '      "description": "繧ｨ繝ｩ繝ｼ譁・,',
+    '      "template": "譁・ｭ怜喧縺励◆繝・Φ繝励Ξ,',
+    '    }',
+    '  },',
+  ].join('\r\n');
+  let output = JSON.stringify(intact, null, 2).replace('{\n', `{\r\n${brokenCommand}\r\n`);
+  output = output.replace(
+    '      "prompt": "ignored",',
+    '      "prompt": "縺帙ｓ縺帙＞ の長い本文\r\n本文の末尾が生改行のまま出る,',
+  );
+  output = output.replace(
+    '    "description": "ignored",',
+    '    "description": "縺帙ｓ縺帙＞ の説明,',
+  );
+
+  const parsed = parseResolvedConfigOutput(output);
+  assert.deepStrictEqual(verifyResolvedConfig(parsed), []);
+  assert.strictEqual(parsed.permission.websearch, 'ask');
+  assert.strictEqual(parsed.agent.sensei.permission.bash, 'deny');
+});
+
 test('resolved-config parser ignores structured JSON logs and selects the one config object', () => {
   const intact = intactConfig();
   const output = [

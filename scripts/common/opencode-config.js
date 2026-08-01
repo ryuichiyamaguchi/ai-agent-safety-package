@@ -475,6 +475,68 @@ function parseArgs(argv) {
 // または設定らしい JSON が複数ある曖昧な出力は拒否する。これにより、先に安全な偽設定を
 // 出してから弱めた実設定を続ける形では起動前検査を通せない。単なる構造化ログや、設定内の
 // agent/provider の子オブジェクトは候補に数えない。
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function dropResolvedCommandBlock(value) {
+  return String(value).replace(
+    /(^\{\r?\n|,\r?\n)  "command"\s*:\s*\{[\s\S]*?(?=\r?\n  "[^"\r\n]+"\s*:|\r?\n\})/,
+    '$1  "command": {},',
+  );
+}
+
+function maskResolvedTextField(value, key) {
+  const source = String(value);
+  const startPattern = new RegExp(`(^[ \\t]*"${escapeRegExp(key)}"\\s*:\\s*")`, 'gm');
+  let output = '';
+  let lastIndex = 0;
+  let match;
+
+  while ((match = startPattern.exec(source)) !== null) {
+    const indent = (match[0].match(/^[ \t]*/) || [''])[0];
+    const contentStart = match.index + match[0].length;
+    const nextSiblingPattern = new RegExp(`\\r?\\n${escapeRegExp(indent)}(?:"[^"\\r\\n]+"\\s*:|\\})`, 'g');
+    nextSiblingPattern.lastIndex = contentStart;
+    const nextSibling = nextSiblingPattern.exec(source);
+    if (!nextSibling) continue;
+
+    const removed = source.slice(contentStart, nextSibling.index);
+    const comma = removed.trimEnd().endsWith(',');
+    output += source.slice(lastIndex, match.index);
+    output += `${indent}"${key}": ""${comma ? ',' : ''}`;
+    lastIndex = nextSibling.index;
+    startPattern.lastIndex = nextSibling.index;
+  }
+
+  return output + source.slice(lastIndex);
+}
+
+function parseResolvedConfigOutputLenient(raw) {
+  let candidate = String(raw ?? '');
+  const configStartCandidates = [
+    candidate.indexOf('{\r\n  "agent"'),
+    candidate.indexOf('{\n  "agent"'),
+    candidate.indexOf('{\r\n  "$schema"'),
+    candidate.indexOf('{\n  "$schema"'),
+  ].filter((index) => index >= 0);
+  if (configStartCandidates.length > 0) {
+    const start = Math.min(...configStartCandidates);
+    const end = candidate.lastIndexOf('}');
+    if (end > start) candidate = candidate.slice(start, end + 1);
+  }
+
+  // OpenCode debug config on Windows can emit harness markdown fields as raw,
+  // mojibake text instead of escaped JSON strings. These fields are not part of
+  // the security floor we verify, so discard only their values and keep the
+  // permission/plugin/provider structure intact.
+  candidate = dropResolvedCommandBlock(candidate);
+  for (const key of ['description', 'prompt', 'template']) {
+    candidate = maskResolvedTextField(candidate, key);
+  }
+  return JSON.parse(candidate);
+}
+
 function parseResolvedConfigOutput(value) {
   let raw = String(value ?? '');
   if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
@@ -555,8 +617,16 @@ function parseResolvedConfigOutput(value) {
     }
   }
 
-  if (candidates.length !== 1) throw new SyntaxError('resolved config JSON is not unique');
-  return candidates[0].parsed;
+  if (candidates.length === 1) return candidates[0].parsed;
+
+  try {
+    const parsed = parseResolvedConfigOutputLenient(raw);
+    if (looksLikeResolvedConfig(parsed)) return parsed;
+  } catch {
+    // Fall through to the generic parser error below.
+  }
+
+  throw new SyntaxError('resolved config JSON is not unique');
 }
 
 module.exports = {
