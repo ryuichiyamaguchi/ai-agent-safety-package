@@ -106,6 +106,8 @@ test('Bouncer state shows a pending OpenCode approval instead of a stale Claude 
   assert.match(page, /全コマンドを開いて見返せます/, '履歴の再閲覧機能を案内する');
   assert.match(page, /history-detail/, '各履歴を展開するUIを備える');
   assert.match(page, /openHistoryKeys/, '履歴の展開状態をポーリング後も保持する');
+  assert.match(page, /判定パイプライン/, '技術詳細は固定ルールの判定パイプラインを出す');
+  assert.match(page, /rule matches/, '技術詳細はマッチしたルール名を出す');
   assert.match(page, /companion-wait[.]png/, '犬は実画像の待機ポーズから表示する');
   assert.match(page, /companion-' \+ encodeURIComponent\(mood[.]state\) \+ '[.]png/, '犬は状態ごとにPNGポーズを切り替える');
   assert.doesNotMatch(page, /<svg\b/, '犬やブランド表示にインラインSVGを使わない');

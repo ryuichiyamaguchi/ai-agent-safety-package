@@ -865,6 +865,33 @@ function approvalGuide(st) {
       outbound: '—',
       checks: ['AIに頼んだ内容と一致しているか', '対象のファイルや送信先に心当たりがあるか'],
       why: 'この画面は判断を助けます。実際の許可・拒否はAIツール側で選びます。',
+      technical: {
+        pipeline: [
+          'engine=monitor-server.approvalGuide',
+          'mode=deterministic-local-rules',
+          'llm=false',
+          'status=wait',
+        ],
+        parsed: [
+          'input.hasCard=false',
+          'command.chars=0',
+        ],
+        flags: [
+          'readTool=false',
+          'writeTool=false',
+          'network=false',
+          'destructive=false',
+          'protectedData=false',
+          'privilege=false',
+        ],
+        rules: [
+          'no-action-card: now.html / opencode approval log に action-cmd 相当の承認イベントがないため wait',
+        ],
+        boundaries: [
+          'Bouncer monitor-server はコマンドを実行しない。観測済みログを読むだけ。',
+          '非公開の推論本文は対象外。表示するのは安全ログ・tool call・承認イベント由来の情報だけ。',
+        ],
+      },
     };
   }
 
@@ -907,9 +934,34 @@ function approvalGuide(st) {
   const hasDanger = Array.isArray(st.dangers) && st.dangers.some((x) => String(x).trim());
 
   let status = 'review';
-  if (generatedCleanup) status = 'review';
-  else if (risk === 'high' || destructive || remoteExec || publishes || protectedData || privilege || blocked) status = 'deny';
-  else if (risk === 'low' && !hasDanger && !singleDelete && (readTool || readCommand) && !network) status = 'allow';
+  const matchedRules = [];
+  if (generatedCleanup) {
+    status = 'review';
+    matchedRules.push('generated-cleanup: rm -r node_modules/build/dist/coverage 等は再生成可能な生成物整理として review');
+    if (risk === 'high') matchedRules.push('risk-high-preserved: ガード側の risk=high は why に残して格下げ理由を明示');
+  } else if (risk === 'high' || destructive || remoteExec || publishes || protectedData || privilege || blocked) {
+    status = 'deny';
+    if (risk === 'high') matchedRules.push('risk-high: meta risk=high');
+    if (destructive) matchedRules.push(findDestructive ? 'destructive-find: find -delete/-exec 系' : 'destructive-command: rm/remove-item/del/format/dd 系');
+    if (singleDelete) matchedRules.push('single-delete: rm/unlink/del/erase');
+    if (remoteExec) matchedRules.push('remote-exec: curl/wget/iwr/irm 等の取得結果を shell/interpreter にパイプ');
+    if (publishes) matchedRules.push('publish-or-force-push: git push --force / package publish 系');
+    if (protectedData) matchedRules.push('protected-data: .env/.ssh/.aws/.kube/private key/API key/password/credential 系');
+    if (privilege) matchedRules.push('privilege-escalation: sudo/runas/chmod wide permission/Windows ACL grant/set-executionpolicy 系');
+    if (blocked) matchedRules.push('already-blocked: upstream guard/plugin が block/blocked を報告');
+  } else if (risk === 'low' && !hasDanger && !singleDelete && (readTool || readCommand) && !network) {
+    status = 'allow';
+    matchedRules.push('low-risk-readonly: risk=low + read tool/read command + network=false + dangers=0');
+  } else {
+    if (packageInstall) matchedRules.push('package-install: dependency registry access + node_modules/package manifest/lock mutation');
+    if (writeTool) matchedRules.push('write-tool: write/edit/multiedit/notebookedit or command kind=write');
+    if (network) matchedRules.push('network: URL/WebSearch/WebFetch/curl/wget/git push/package registry 等の外部通信');
+    if (readTool || readCommand) matchedRules.push('read-signal-but-not-green: read 系シグナルはあるが risk/dangers/network 等で allow 条件を満たさない');
+    if (singleDelete) matchedRules.push('single-delete-review: recursive ではない削除も戻せないため allow しない');
+    if (hasDanger) matchedRules.push('danger-text-present: guard が dangers を返している');
+    if (risk === 'medium') matchedRules.push('risk-medium: meta risk=medium');
+    if (!matchedRules.length) matchedRules.push('default-review: 安全と証明できないため review');
+  }
 
   let impact = '影響範囲を自動では特定できません';
   let reversible = '分からないため、変更前の確認が必要';
@@ -1031,7 +1083,48 @@ function approvalGuide(st) {
     },
   }[status];
 
-  return { status, subject: operationSubject(tool, cmd), ...copy, summary, impact, reversible, outbound, checks: checks.slice(0, 2), why };
+  const technical = {
+    pipeline: [
+      'engine=monitor-server.approvalGuide',
+      'mode=deterministic-local-rules',
+      'llm=false',
+      `status=${status}`,
+      `risk=${risk}`,
+    ],
+    parsed: [
+      `tool=${tool || 'unknown'}`,
+      `metaTool=${metaTool || 'none'}`,
+      `labelTool=${labelTool || 'none'}`,
+      `command.kind=${concrete.kind || 'unknown'}`,
+      `command.chars=${cmd.length}`,
+      `meta=${meta || '(empty)'}`,
+    ],
+    flags: [
+      `readTool=${readTool}`,
+      `readCommand=${readCommand}`,
+      `writeTool=${writeTool}`,
+      `network=${network}`,
+      `packageInstall=${packageInstall}`,
+      `destructive=${destructive}`,
+      `singleDelete=${singleDelete}`,
+      `remoteExec=${remoteExec}`,
+      `publishes=${publishes}`,
+      `protectedData=${protectedData}`,
+      `privilege=${privilege}`,
+      `blocked=${blocked}`,
+      `hasDanger=${hasDanger}`,
+      `generatedCleanup=${generatedCleanup}`,
+      `findDestructive=${findDestructive}`,
+    ],
+    rules: matchedRules,
+    boundaries: [
+      'この判定は LLM ではなく monitor-server.js の固定ルール。Gemini API キー未登録でも同じ結果になる。',
+      'Bouncer monitor-server はコマンドを実行しない。now.html / opencode-approval.json / opencode-current-tool.json 等の観測ログを読む。',
+      '非公開の推論本文は表示しない。tool call 名、tool input の要約、ガードが残した meta/risk/dangers を材料にする。',
+    ],
+  };
+
+  return { status, subject: operationSubject(tool, cmd), ...copy, summary, impact, reversible, outbound, checks: checks.slice(0, 2), why, technical };
 }
 
 const NO_COACH_CONTEXT_MSG =
@@ -1430,6 +1523,15 @@ function renderPage() {
 	.ctitle{font-size:16px;font-weight:800;margin:0 0 5px}
 	.cmeta{font:500 10px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted);margin-bottom:9px}
 	.action-cmd{margin:0;font:500 12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--green);white-space:pre-wrap;word-break:break-all;background:#0b100f;border:1px solid var(--line);border-radius:8px;padding:10px 11px}
+	.tech-layout{display:grid;gap:10px;margin-top:12px}
+	.tech-section{border:1px solid #2f3f39;border-radius:10px;background:#0c1210;overflow:hidden}
+	.tech-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-bottom:1px solid #263630;color:#dce7e1;font-size:11px;font-weight:850}
+	.tech-heading code{color:var(--green);font:700 10px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace}
+	.tech-list{display:grid;gap:0;margin:0;padding:0;list-style:none}
+	.tech-list li{padding:7px 10px;border-top:1px solid rgba(255,255,255,.04);color:#b8c7bf;font:600 10px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}
+	.tech-list li:first-child{border-top:0}
+	.tech-list.rules li{color:#d0d9d4}
+	.tech-code{margin:8px 10px 10px;padding:9px;border-radius:8px;background:#060907;color:#c8d7d0;font:600 10px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-all}
 	.answer-text{margin:0;font-size:13px;white-space:pre-wrap;word-break:break-word;background:#0b100f;border-radius:8px;padding:11px;border:1px solid var(--line)}
 	.whatdo{margin-top:10px;padding:10px 11px;background:#17211c;border-radius:8px}
 	.whatdo .lab{font-weight:800;color:var(--green);font-size:12px}
@@ -1898,22 +2000,66 @@ async function saveKey(){
 	  $('judgement-kicker').textContent = ({allow:'目安: 今回だけ',review:'目安: 追加確認',deny:'目安: 拒否',wait:'待機中'})[status];
 	}
 
+function appendTechSection(parent, title, code, items, className){
+  const section=document.createElement('section'); section.className='tech-section';
+  const heading=document.createElement('div'); heading.className='tech-heading';
+  const span=document.createElement('span'); span.textContent=title;
+  const codeEl=document.createElement('code'); codeEl.textContent=code || '';
+  heading.append(span,codeEl); section.append(heading);
+  const values=Array.isArray(items) && items.length ? items : ['(none)'];
+  const list=document.createElement('ul'); list.className='tech-list' + (className ? ' '+className : '');
+  values.forEach((item)=>{
+    const li=document.createElement('li');
+    li.textContent=String(item);
+    list.append(li);
+  });
+  section.append(list);
+  parent.append(section);
+}
+
+function appendTechCode(parent, title, code, value){
+  const section=document.createElement('section'); section.className='tech-section';
+  const heading=document.createElement('div'); heading.className='tech-heading';
+  const span=document.createElement('span'); span.textContent=title;
+  const codeEl=document.createElement('code'); codeEl.textContent=code || '';
+  heading.append(span,codeEl); section.append(heading);
+  const pre=document.createElement('pre'); pre.className='tech-code';
+  pre.textContent=value || '(empty)';
+  section.append(pre);
+  parent.append(section);
+}
+
+function renderTechnicalDetails(card, s, g){
+  const tech=(g&&g.technical)||{};
+  const layout=document.createElement('div'); layout.className='tech-layout';
+  appendTechSection(layout, '判定パイプライン', 'pipeline', tech.pipeline);
+  appendTechSection(layout, '正規化済み入力', 'parsed input', tech.parsed);
+  appendTechSection(layout, '判定フラグ', 'boolean feature vector', tech.flags);
+  appendTechSection(layout, 'マッチした固定ルール', 'rule matches', tech.rules, 'rules');
+  appendTechSection(layout, 'データ境界', 'data boundary', tech.boundaries);
+  appendTechCode(layout, '観測された raw command / tool input', 'observed payload', (s&&s.cmd)||'');
+  card.append(layout);
+}
+
 	function renderEventCard(s){
   const card = $('card');
+  const g = (s && s.approval) || {};
   if(!s.hasCard){
     card.className='card wait'; card.innerHTML='';
-    const a=document.createElement('div'); a.className='ctitle'; a.textContent='待機中…';
-    const b=document.createElement('div'); b.className='cmeta'; b.textContent='危険操作や確認が必要な安全イベントが出ると、ここに内容が出ます。';
+    const a=document.createElement('div'); a.className='ctitle'; a.textContent='技術詳細: 待機中';
+    const b=document.createElement('div'); b.className='cmeta'; b.textContent='source=monitor-server/state ・ hasCard=false ・ action-cmd=absent';
     card.append(a,b);
+    renderTechnicalDetails(card, s, g);
     return;
   }
   card.className = 'card ' + riskClass(s.meta||'');
   card.innerHTML='';
-  const t=document.createElement('div'); t.className='ctitle'; t.textContent=s.title||'操作'; card.append(t);
+  const t=document.createElement('div'); t.className='ctitle'; t.textContent='技術詳細: '+(s.title||'操作'); card.append(t);
   const m=document.createElement('div'); m.className='cmeta'; m.textContent=s.meta||''; card.append(m);
   if(s.cmd){ const pre=document.createElement('pre'); pre.className='action-cmd'; pre.textContent=s.cmd; card.append(pre); }
-  if(s.whatdo){ const w=document.createElement('div'); w.className='whatdo'; const l=document.createElement('div'); l.className='lab'; l.textContent='📂 これは何をする？（自動解析）'; const p=document.createElement('div'); p.textContent=s.whatdo; w.append(l,p); card.append(w); }
+  if(s.whatdo){ const w=document.createElement('div'); w.className='whatdo'; const l=document.createElement('div'); l.className='lab'; l.textContent='自動解析 summary'; const p=document.createElement('div'); p.textContent=s.whatdo; w.append(l,p); card.append(w); }
   (s.dangers||[]).forEach(d=>{ const p=document.createElement('div'); p.className='danger'; p.textContent=d; card.append(p); });
+  renderTechnicalDetails(card, s, g);
 }
 
 function renderAnswerCard(s){

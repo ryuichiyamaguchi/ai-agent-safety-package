@@ -136,6 +136,8 @@ async function main() {
     assert.equal(read.status, 'allow', '既知の低リスク読み取りは今回だけ許可の目安');
     assert.match(read.impact, /読み取/);
     assert.match(read.action, /今回だけ許可/);
+    assert.match(read.technical.rules.join('\n'), /low-risk-readonly/, '技術詳細には allow の根拠ルールを出す');
+    assert.match(read.technical.flags.join('\n'), /readTool=true/, '技術詳細には判定フラグを出す');
 
     const write = srv.approvalGuide({
       hasCard: true,
@@ -148,6 +150,7 @@ async function main() {
     assert.equal(write.status, 'review', '書き込みは内容確認なしに安全扱いしない');
     assert.match(write.reversible, /Git|バックアップ/);
     assert.equal(write.checks.length, 2);
+    assert.match(write.technical.rules.join('\n'), /write-tool/, '技術詳細には write 判定の根拠を出す');
 
     const remove = srv.approvalGuide({
       hasCard: true,
@@ -183,6 +186,7 @@ async function main() {
     });
     assert.equal(remote.status, 'deny', '低リスクの誤ったカードでも remote exec は deny に引き上げる');
     assert.match(remote.outbound, /あり/);
+    assert.match(remote.technical.rules.join('\n'), /remote-exec/, '技術詳細には remote exec の根拠を出す');
 
     const secret = srv.approvalGuide({
       hasCard: true,
@@ -255,6 +259,11 @@ async function main() {
     assert.match(packageApproval.subject, /bash: npm install example-package/);
     assert.match(packageApproval.summary, /依存|パッケージ|node_modules/);
     assert.match(packageApproval.outbound, /レジストリ/);
+    assert.match(packageApproval.technical.pipeline.join('\n'), /engine=monitor-server[.]approvalGuide/);
+    assert.match(packageApproval.technical.parsed.join('\n'), /command[.]kind=package-install/);
+    assert.match(packageApproval.technical.flags.join('\n'), /packageInstall=true/);
+    assert.match(packageApproval.technical.rules.join('\n'), /package-install/);
+    assert.match(packageApproval.technical.boundaries.join('\n'), /LLM ではなく monitor-server[.]js の固定ルール/);
   }
 
   // OpenCode standard はローカルLLM不要だが、DeepSeek送信検査Gatewayは必須。
@@ -322,6 +331,10 @@ async function main() {
     assert.match(page, /承認判断票/, 'page should place the approval guide before technical details');
     assert.match(page, /何が変わる？/, 'page should explain impact in plain language');
     assert.match(page, /確認するのは、この2点だけ/, 'page should limit beginner checks to two');
+    assert.match(page, /判定パイプライン/, 'technical details should expose the deterministic decision pipeline');
+    assert.match(page, /boolean feature vector/, 'technical details should expose classifier flags');
+    assert.match(page, /rule matches/, 'technical details should expose matched rule names');
+    assert.match(page, /data boundary/, 'technical details should expose observation and non-execution boundaries');
     assert.match(page, /AIコーチを使わなくても表示されます/, 'page should explain that the guide works without an AI key');
     assert.match(page, /Bouncer/, 'page should expose the Bouncer product identity');
     assert.match(page, /あなたの判断/, 'page should keep the three decision guides separate from AI tool controls');
