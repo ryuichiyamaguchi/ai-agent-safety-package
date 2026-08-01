@@ -238,6 +238,45 @@ test('止めたコマンドに含まれる鍵は履歴に残さない', async (t
   assert.match(audit, /\[REDACTED\]/);
 });
 
+test('OpenCodeの実行前tool callを監視画面用に残す', async (t) => {
+  const logDir = useSandbox(t);
+  const { BouncerApprovalMonitor } = await import(pluginUrl);
+  const hooks = await BouncerApprovalMonitor({ directory: '/work/customer-project', candidates: [currentPolicy] });
+
+  await hooks['tool.execute.before'](
+    { tool: 'read', sessionID: 'session-secret', callID: 'call-secret' },
+    { args: { filePath: '/work/customer-project/src/app.js', content: 'secret file body should not be shown' } },
+  );
+
+  const current = JSON.parse(fs.readFileSync(path.join(logDir, 'opencode-current-tool.json'), 'utf8'));
+  assert.equal(current.status, 'running');
+  assert.equal(current.tool, 'read');
+  assert.equal(current.detail, '/work/customer-project/src/app.js');
+  assert.doesNotMatch(JSON.stringify(current), /secret file body|session-secret|call-secret/);
+
+  const audit = fs.readFileSync(path.join(logDir, `events-${new Date().toLocaleDateString('sv-SE')}.jsonl`), 'utf8');
+  assert.match(audit, /OpenCodeのtool呼び出し/);
+  assert.match(audit, /src\/app[.]js/);
+  assert.doesNotMatch(audit, /secret file body|session-secret|call-secret/);
+});
+
+test('OpenCodeの書き込みtool callは本文全文ではなく対象と長さだけを残す', async (t) => {
+  const logDir = useSandbox(t);
+  const { BouncerApprovalMonitor } = await import(pluginUrl);
+  const hooks = await BouncerApprovalMonitor({ directory: '/work/customer-project', candidates: [currentPolicy] });
+
+  await hooks['tool.execute.before'](
+    { tool: 'write', sessionID: 's1', callID: 'c1' },
+    { args: { filePath: '/work/customer-project/notes.md', content: 'TOP_SECRET_BODY'.repeat(20) } },
+  );
+
+  const current = JSON.parse(fs.readFileSync(path.join(logDir, 'opencode-current-tool.json'), 'utf8'));
+  assert.equal(current.tool, 'write');
+  assert.match(current.detail, /\/work\/customer-project\/notes[.]md/);
+  assert.match(current.detail, /content: \d+文字/);
+  assert.doesNotMatch(JSON.stringify(current), /TOP_SECRET_BODY/);
+});
+
 test('ready マーカーにポリシーの読み込み結果が載る', async (t) => {
   const logDir = useSandbox(t);
   await bashHook();

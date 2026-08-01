@@ -101,3 +101,57 @@ test('Bouncer state shows a pending OpenCode approval instead of a stale Claude 
   assert.match(page, /全コマンドを開いて見返せます/, '履歴の再閲覧機能を案内する');
   assert.match(page, /history-detail/, '各履歴を展開するUIを備える');
 });
+
+test('Bouncer state shows the latest OpenCode tool call when no approval is pending', async (t) => {
+  const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-monitor-current-'));
+  t.after(() => fs.rmSync(logDir, { recursive: true, force: true }));
+
+  fs.writeFileSync(path.join(logDir, 'opencode-current-tool.json'), JSON.stringify({
+    version: 1,
+    ts: new Date().toISOString(),
+    status: 'running',
+    tool: 'read',
+    detail: '/work/project/src/app.js',
+    directory: '/work/project',
+    reason: 'OpenCodeのtool呼び出し',
+  }));
+
+  const date = new Date().toLocaleDateString('sv-SE');
+  fs.writeFileSync(path.join(logDir, `events-${date}.jsonl`), [
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      mode: 'opencode-tool',
+      decision: 'allow',
+      reason: 'OpenCodeのtool呼び出し',
+      observed: JSON.stringify({
+        hook_event_name: 'OpenCodeTool',
+        tool_name: 'read',
+        tool_input: { command: '/work/project/src/app.js' },
+      }),
+    }),
+  ].join('\n') + '\n');
+
+  const proc = spawn(process.execPath, [serverPath], {
+    env: {
+      ...process.env,
+      AI_SAFE_AGENT: 'opencode',
+      AI_SAFE_LOG_DIR: logDir,
+      AI_SAFE_MONITOR_INTERVAL: '1',
+      GEMINI_API_KEY: '',
+      GOOGLE_API_KEY: '',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  t.after(() => proc.kill('SIGTERM'));
+
+  const rawUrl = await waitForUrl(proc);
+  const url = new URL(rawUrl);
+  const state = await fetch(new URL(`/state${url.search}`, url.origin)).then((res) => res.json());
+
+  assert.equal(state.hasCard, true);
+  assert.equal(state.title, 'OpenCode が tool を使っています');
+  assert.equal(state.cmd, '/work/project/src/app.js');
+  assert.equal(state.label, 'read を使用');
+  assert.equal(state.events.length, 1);
+  assert.equal(state.events[0].command, '/work/project/src/app.js');
+});

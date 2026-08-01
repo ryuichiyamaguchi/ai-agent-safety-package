@@ -180,6 +180,31 @@ function readOpenCodeApproval() {
   }
 }
 
+function readOpenCodeCurrentTool() {
+  try {
+    const file = path.join(LOG_DIR, 'opencode-current-tool.json');
+    const stat = fs.statSync(file);
+    const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (Date.now() - stat.mtimeMs > 10 * 60 * 1000) return null;
+    const tool = String(value.tool || 'unknown').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'unknown';
+    const detail = String(value.detail || '').trim().slice(0, 12000);
+    const blocked = value.status === 'blocked';
+    return {
+      title: blocked ? 'Bouncer が OpenCode の操作を止めました' : 'OpenCode が tool を使っています',
+      meta: `${String(value.ts || '')} ・ tool=${tool} ・ risk=${blocked ? 'high' : 'low'} ・ card=opencode-tool`,
+      cmd: detail || '操作内容を取得できませんでした',
+      label: `${tool} を使用`,
+      whatdo: blocked
+        ? (String(value.reason || '').trim() || '安全ルールに当たったため、実行前に止めました。')
+        : 'OpenCode がこの tool を呼び出しました。内容が依頼と合っているか確認できます。',
+      dangers: blocked ? [String(value.reason || '').trim()].filter(Boolean) : [],
+      hasCard: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // d-claude（DeepSeek 駆動 claude）セッションかを判定する。
 // d-claude は会話本文が DeepSeek（中国管轄）に流れる経路で、ここで AI コーチに相談すると
 // コマンド本文が DeepSeek に加えて Google(Gemini) にも届く＝送信先が増える。
@@ -209,7 +234,7 @@ function readState() {
   if (profile.agent !== 'opencode') {
     try { html = fs.readFileSync(path.join(LOG_DIR, 'now.html'), 'utf8'); } catch { /* not yet */ }
   }
-  const openCode = profile.agent === 'opencode' ? readOpenCodeApproval() : null;
+  const openCode = profile.agent === 'opencode' ? (readOpenCodeApproval() || readOpenCodeCurrentTool()) : null;
   const state = openCode || {
     title: pickOne(html, /<div class="ctitle">([\s\S]*?)<\/div>/),
     meta: pickOne(html, /<div class="cmeta">([\s\S]*?)<\/div>/),

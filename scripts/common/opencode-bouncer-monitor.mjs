@@ -397,6 +397,119 @@ function sanitize(value, maxLength = MAX_FIELD) {
     .slice(0, maxLength);
 }
 
+function sanitizeTool(value) {
+  return sanitize(value || 'unknown').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'unknown';
+}
+
+const DIRECT_DETAIL_KEYS = [
+  'command',
+  'filePath',
+  'filepath',
+  'file_path',
+  'path',
+  'notebook_path',
+  'url',
+  'query',
+  'pattern',
+  'include',
+];
+const BODY_DETAIL_KEYS = ['content', 'new_string', 'old_string', 'prompt', 'text', 'body', 'value'];
+
+function findStringByKeys(value, keys, depth = 0) {
+  if (!value || depth > 5) return '';
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findStringByKeys(item, keys, depth + 1);
+      if (found) return found;
+    }
+    return '';
+  }
+  if (typeof value !== 'object') return '';
+  for (const key of keys) {
+    const child = value[key];
+    if (typeof child === 'string' && child.trim()) return child.trim();
+  }
+  for (const child of Object.values(value)) {
+    const found = findStringByKeys(child, keys, depth + 1);
+    if (found) return found;
+  }
+  return '';
+}
+
+function bodySummary(value, depth = 0) {
+  if (!value || depth > 5) return '';
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = bodySummary(item, depth + 1);
+      if (found) return found;
+    }
+    return '';
+  }
+  if (typeof value !== 'object') return '';
+  for (const key of BODY_DETAIL_KEYS) {
+    const child = value[key];
+    if (typeof child === 'string' && child.length) return `${key}: ${child.length}文字`;
+  }
+  for (const child of Object.values(value)) {
+    const found = bodySummary(child, depth + 1);
+    if (found) return found;
+  }
+  return '';
+}
+
+function detailParts(value, depth = 0, out = []) {
+  if (!value || depth > 4 || out.length >= 4) return out;
+  if (Array.isArray(value)) {
+    for (const item of value) detailParts(item, depth + 1, out);
+    return out;
+  }
+  if (typeof value !== 'object') return out;
+  for (const [key, child] of Object.entries(value)) {
+    if (out.length >= 4) break;
+    if (DIRECT_DETAIL_KEYS.includes(key) && typeof child === 'string' && child.trim()) {
+      out.push(`${key}: ${sanitize(child.trim(), 300)}`);
+    } else if (BODY_DETAIL_KEYS.includes(key) && typeof child === 'string' && child.length) {
+      out.push(`${key}: ${child.length}文字`);
+    } else if (!/^(?:id|sessionID|callID|messageID|requestID|permissionID|apiKey|token|password|secret)$/i.test(key)) {
+      detailParts(child, depth + 1, out);
+    }
+  }
+  return out;
+}
+
+function detailFromToolCall(tool, args, input = {}, output = {}) {
+  const lower = String(tool || '').toLowerCase();
+  const source = { args, input, output };
+
+  if (lower === 'bash' || lower === 'shell' || lower === 'powershell') {
+    return sanitize(findStringByKeys(source, ['command']) || '内容を取得できない操作', MAX_DETAIL);
+  }
+  if (['read', 'notebookread', 'fileread', 'ls'].includes(lower)) {
+    return sanitize(findStringByKeys(source, ['filePath', 'filepath', 'file_path', 'path', 'notebook_path']) || '読み取り対象を取得できない操作', MAX_DETAIL);
+  }
+  if (['grep', 'glob', 'search'].includes(lower)) {
+    const pattern = findStringByKeys(source, ['pattern', 'query']);
+    const target = findStringByKeys(source, ['path', 'include']);
+    return sanitize([pattern, target && `場所: ${target}`].filter(Boolean).join(' / ') || '検索条件を取得できない操作', MAX_DETAIL);
+  }
+  if (['websearch', 'web_search'].includes(lower)) {
+    return sanitize(findStringByKeys(source, ['query']) || '検索語を取得できない操作', MAX_DETAIL);
+  }
+  if (['webfetch', 'web_fetch', 'fetch'].includes(lower)) {
+    return sanitize(findStringByKeys(source, ['url']) || 'URLを取得できない操作', MAX_DETAIL);
+  }
+  if (['write', 'edit', 'multiedit', 'notebookedit'].includes(lower)) {
+    const target = findStringByKeys(source, ['filePath', 'filepath', 'file_path', 'path', 'notebook_path']);
+    const body = bodySummary(source);
+    return sanitize([target, body].filter(Boolean).join(' / ') || '書き込み内容を取得できない操作', MAX_DETAIL);
+  }
+
+  const direct = findStringByKeys(source, DIRECT_DETAIL_KEYS);
+  if (direct) return sanitize(direct, MAX_DETAIL);
+  const parts = detailParts(source);
+  return sanitize(parts.join(' / ') || '内容を取得できない操作', MAX_DETAIL);
+}
+
 function eventProperties(event) {
   return event && typeof event === 'object'
     ? (event.properties || event.data || {})
@@ -412,7 +525,8 @@ function detailFrom(properties) {
     ? properties.patterns
     : (Array.isArray(properties.pattern) ? properties.pattern : [properties.pattern]);
   const detail = patterns.filter((item) => typeof item === 'string' && item.trim()).join(' / ');
-  return sanitize(detail || properties.permission || properties.type || '内容を取得できない操作', MAX_DETAIL);
+  if (detail) return sanitize(detail, MAX_DETAIL);
+  return detailFromToolCall(properties.permission || properties.type || 'unknown', properties, {}, {});
 }
 
 function writeJsonAtomic(file, value) {
@@ -426,9 +540,9 @@ function appendAudit(logDir, value) {
   fs.appendFileSync(file, `${JSON.stringify(value)}\n`, { encoding: 'utf8', mode: 0o600 });
 }
 
-function observed(tool, detail) {
+function observed(tool, detail, hookEventName = 'OpenCodePermission') {
   return JSON.stringify({
-    hook_event_name: 'OpenCodePermission',
+    hook_event_name: hookEventName,
     tool_name: tool,
     tool_input: { command: detail },
   });
@@ -450,6 +564,7 @@ function observed(tool, detail) {
 export const BouncerApprovalMonitor = async ({ directory, candidates } = {}) => {
   const logDir = process.env.AI_SAFE_LOG_DIR || path.join(os.homedir(), '.ai-safety', 'logs');
   const approvalFile = path.join(logDir, 'opencode-approval.json');
+  const currentToolFile = path.join(logDir, 'opencode-current-tool.json');
   fs.mkdirSync(logDir, { recursive: true, mode: 0o700 });
   const floor = loadDenyFloor({ candidates });
   writeJsonAtomic(path.join(logDir, READY_MARKER_NAME), {
@@ -461,8 +576,31 @@ export const BouncerApprovalMonitor = async ({ directory, candidates } = {}) => 
     denyPatterns: floor.dangerous.length + floor.protectedPaths.length,
   });
 
+  const writeCurrentTool = (tool, detail, status = 'running', reason = 'OpenCodeのtool呼び出し') => {
+    writeJsonAtomic(currentToolFile, {
+      version: 1,
+      ts: new Date().toISOString(),
+      status,
+      tool: sanitizeTool(tool),
+      detail: sanitize(detail, MAX_DETAIL),
+      directory: sanitize(directory),
+      reason: sanitize(reason, MAX_FIELD),
+    });
+  };
+
+  const appendToolAudit = (tool, detail, decision = 'allow', reason = 'OpenCodeのtool呼び出し') => {
+    appendAudit(logDir, {
+      ts: new Date().toISOString(),
+      mode: 'opencode-tool',
+      decision,
+      reason,
+      observed: observed(sanitizeTool(tool), sanitize(detail, MAX_DETAIL), 'OpenCodeTool'),
+    });
+  };
+
   const block = (tool, detail, reason) => {
     try {
+      writeCurrentTool(tool, detail, 'blocked', reason);
       appendAudit(logDir, {
         ts: new Date().toISOString(),
         mode: 'opencode-deny',
@@ -479,16 +617,26 @@ export const BouncerApprovalMonitor = async ({ directory, candidates } = {}) => 
     'tool.execute.before': async (input, output) => {
       if (!input) return;
       const args = (output && output.args) || {};
-      if (input.tool === 'bash') {
+      const tool = sanitizeTool(input.tool).toLowerCase();
+      const detail = detailFromToolCall(tool, args, input, output);
+      if (tool === 'bash') {
         const command = args.command;
         const reason = denyReason(command, floor);
         if (reason) block('bash', command, reason);
+        try {
+          writeCurrentTool('bash', detail);
+          appendToolAudit('bash', detail);
+        } catch { /* 表示用ログに失敗しても実行は妨げない */ }
         return;
       }
-      if (input.tool === 'grep') {
+      if (tool === 'grep') {
         const reason = grepDenyReason(args, floor);
-        if (reason) block('grep', `${args.pattern || ''} ${args.path || ''} ${args.include || ''}`.trim(), reason);
+        if (reason) block('grep', detail, reason);
       }
+      try {
+        writeCurrentTool(tool, detail);
+        appendToolAudit(tool, detail);
+      } catch { /* 表示用ログに失敗しても実行は妨げない */ }
     },
     // grep は「実行させない」だけでは足りない（作業フォルダ全体の検索でも .env の中身が
     // 一致行として返る）。結果からその塊を取り除いてからモデルへ渡す。ここで書き換えた
