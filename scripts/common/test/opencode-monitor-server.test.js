@@ -85,11 +85,14 @@ test('Bouncer state shows a pending OpenCode approval instead of a stale Claude 
   const state = await fetch(new URL(`/state${url.search}`, url.origin)).then((res) => res.json());
 
   assert.equal(state.hasCard, true);
-  assert.equal(state.title, 'OpenCode が承認を求めています');
+  assert.equal(state.title, 'OpenCode: bash の承認');
   assert.equal(state.cmd, 'npm install example-package');
+  assert.match(state.whatdo, /example-package.*取得・追加/);
   assert.equal(state.profile.agent, 'opencode');
   assert.doesNotMatch(JSON.stringify(state), /古いClaudeカード|stale[.]txt/);
   assert.equal(state.approval.status, 'review');
+  assert.match(state.approval.subject, /bash: npm install example-package/);
+  assert.match(state.approval.summary, /依存|パッケージ|node_modules/);
   assert.equal(state.events.length, 2, '履歴には検知した各コマンドを残す');
   const grepEvent = state.events.find((event) => event.command === firstCommand);
   assert.ok(grepEvent, '履歴APIは省略していない完全なコマンドを返す');
@@ -98,8 +101,12 @@ test('Bouncer state shows a pending OpenCode approval instead of a stale Claude 
   assert.match(grepEvent.outbound, /送信しません/);
 
   const page = await fetch(rawUrl).then((res) => res.text());
+  assert.match(page, /LIVE TRACE/, '現在のOpenCode操作をライブ解説する');
+  assert.match(page, /推論本文ではなく/, '非公開推論ではなく観測ログの説明であることを明示する');
   assert.match(page, /全コマンドを開いて見返せます/, '履歴の再閲覧機能を案内する');
   assert.match(page, /history-detail/, '各履歴を展開するUIを備える');
+  assert.match(page, /openHistoryKeys/, '履歴の展開状態をポーリング後も保持する');
+  assert.match(page, /companion-tail/, '犬は画像全体ではなく差分パーツを動かす');
 });
 
 test('Bouncer state shows the latest OpenCode tool call when no approval is pending', async (t) => {
@@ -149,7 +156,7 @@ test('Bouncer state shows the latest OpenCode tool call when no approval is pend
   const state = await fetch(new URL(`/state${url.search}`, url.origin)).then((res) => res.json());
 
   assert.equal(state.hasCard, true);
-  assert.equal(state.title, 'OpenCode が tool を使っています');
+  assert.equal(state.title, 'OpenCode: read を実行中');
   assert.equal(state.cmd, '/work/project/src/app.js');
   assert.equal(state.label, 'read を使用');
   assert.equal(state.events.length, 1);

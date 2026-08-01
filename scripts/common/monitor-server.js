@@ -158,6 +158,12 @@ function htmlUnescape(s) {
 function pickOne(html, re) { const m = html.match(re); return m ? htmlUnescape(m[1]).trim() : ''; }
 function pickAll(html, re) { return [...html.matchAll(re)].map((m) => htmlUnescape(m[1]).trim()).filter(Boolean); }
 
+function operationSubject(tool, detail) {
+  const toolName = String(tool || 'unknown').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'unknown';
+  const text = String(detail || '').trim().replace(/\s+/g, ' ');
+  return text ? `${toolName}: ${clip(text, 120)}` : `${toolName}: 操作内容を取得できませんでした`;
+}
+
 function readOpenCodeApproval() {
   try {
     const file = path.join(LOG_DIR, 'opencode-approval.json');
@@ -166,12 +172,13 @@ function readOpenCodeApproval() {
     if (value.status !== 'pending' || Date.now() - stat.mtimeMs > 2 * 60 * 60 * 1000) return null;
     const tool = String(value.tool || 'unknown').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'unknown';
     const detail = String(value.detail || '').trim().slice(0, 12000);
+    const meaning = explainCommand(detail, tool);
     return {
-      title: 'OpenCode が承認を求めています',
+      title: `OpenCode: ${tool} の承認`,
       meta: `${String(value.ts || '')} ・ tool=${tool} ・ risk=medium ・ card=opencode-permission`,
       cmd: detail || '操作内容を取得できませんでした',
       label: `${tool} を使用`,
-      whatdo: 'OpenCode がこの操作を実行する前に、あなたの許可を待っています。',
+      whatdo: detail ? meaning.summary : '操作内容を取得できなかったため、許可せず内容を確認してください。',
       dangers: [],
       hasCard: true,
     };
@@ -189,14 +196,15 @@ function readOpenCodeCurrentTool() {
     const tool = String(value.tool || 'unknown').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'unknown';
     const detail = String(value.detail || '').trim().slice(0, 12000);
     const blocked = value.status === 'blocked';
+    const meaning = explainCommand(detail, tool);
     return {
-      title: blocked ? 'Bouncer が OpenCode の操作を止めました' : 'OpenCode が tool を使っています',
+      title: blocked ? `Bouncer が OpenCode の ${tool} を止めました` : `OpenCode: ${tool} を実行中`,
       meta: `${String(value.ts || '')} ・ tool=${tool} ・ risk=${blocked ? 'high' : 'low'} ・ card=opencode-tool`,
       cmd: detail || '操作内容を取得できませんでした',
       label: `${tool} を使用`,
       whatdo: blocked
         ? (String(value.reason || '').trim() || '安全ルールに当たったため、実行前に止めました。')
-        : 'OpenCode がこの tool を呼び出しました。内容が依頼と合っているか確認できます。',
+        : (detail ? meaning.summary : 'OpenCode が tool を呼び出しましたが、対象を取得できませんでした。'),
       dangers: blocked ? [String(value.reason || '').trim()].filter(Boolean) : [],
       hasCard: true,
     };
@@ -680,6 +688,10 @@ function isReadOnlyPipeline(cmd) {
 function explainCommand(command, toolName) {
   const cmd = String(command || '').trim();
   const tool = String(toolName || '').toLowerCase();
+  const packageInstall = /^\s*(?:npm|pnpm|yarn|bun)\s+(?:install|add)\b/i.test(cmd);
+  const webSearchTool = /^(?:websearch|web_search|searchweb|web-search)$/i.test(tool);
+  const webFetchTool = /^(?:webfetch|web_fetch|fetch|fetchurl|web-read)$/i.test(tool);
+  const writeTool = /^(?:write|edit|multiedit|notebookedit|filewrite|fileedit)$/i.test(tool);
   const fallback = {
     kind: 'unknown',
     summary: cmd
@@ -690,6 +702,49 @@ function explainCommand(command, toolName) {
     outbound: '外部送信の有無を特定できません',
   };
   if (!cmd) return fallback;
+
+  if (packageInstall) {
+    const manager = (cmd.match(/^\s*(npm|pnpm|yarn|bun)\b/i) || [])[1] || 'package manager';
+    const pkgText = cmd
+      .replace(/^\s*(?:npm|pnpm|yarn|bun)\s+(?:install|add)\b/i, '')
+      .trim()
+      .replace(/\s+/g, ' ');
+    const target = pkgText ? `「${clip(pkgText, 120)}」` : 'package.json に書かれた依存パッケージ';
+    return {
+      kind: 'package-install',
+      summary: `${manager}で${target}を取得・追加します。外部レジストリへ通信し、node_modules や lock ファイルが変わる可能性があります。`,
+      impact: '依存パッケージを取得し、node_modules / package.json / lock ファイルが作成・変更される可能性があります',
+      reversible: 'Git差分や lock ファイルは戻せますが、取得済みの依存関係を整理する必要が出る場合があります',
+      outbound: 'あり：パッケージ名と環境情報が外部レジストリへ送られます',
+    };
+  }
+  if (webSearchTool) {
+    return {
+      kind: 'network',
+      summary: `Web検索で「${clip(cmd, 160)}」を調べます。検索語がPCの外へ送られます。`,
+      impact: 'ローカルファイルは変更しませんが、検索サービスへ問い合わせます',
+      reversible: '送信した検索語は取り消せません',
+      outbound: 'あり：検索語が外部サービスへ送られます',
+    };
+  }
+  if (webFetchTool) {
+    return {
+      kind: 'network',
+      summary: `WebページやURL「${clip(cmd, 160)}」を取得します。アクセス先へ通信します。`,
+      impact: 'ローカルファイルは変更しませんが、外部サイトから内容を取得します',
+      reversible: '通信後のアクセス事実は取り消せません',
+      outbound: 'あり：URLやリクエスト情報が外部サイトへ送られます',
+    };
+  }
+  if (writeTool) {
+    return {
+      kind: 'write',
+      summary: `「${clip(cmd, 180)}」を対象に、ファイルを作成・編集します。差分を確認してから許可してください。`,
+      impact: '対象ファイルが作成・変更されます',
+      reversible: 'Gitやバックアップがあれば戻せる可能性があります',
+      outbound: 'PCの外へ送る操作は検出していません',
+    };
+  }
 
   const grep = cmd.match(/^\s*(?:grep|egrep|fgrep|rg)\b/i);
   // 区切り（改行・単一の & を含む）・書き込みリダイレクト・置換をシェル走査で判定する。
@@ -737,7 +792,12 @@ function explainCommand(command, toolName) {
     };
   }
   if (/https?:\/\/|\b(?:curl|wget|iwr|irm|ssh|scp|sftp|rsync)\b/i.test(cmd)) {
-    return { ...fallback, kind: 'network', outbound: 'PCの外へ通信します。URLと送信内容の確認が必要です' };
+    return {
+      ...fallback,
+      kind: 'network',
+      summary: `「${clip(cmd, 180)}」で外部サイトや別PCへ通信します。URL・送信先・送る内容の確認が必要です。`,
+      outbound: 'PCの外へ通信します。URLと送信内容の確認が必要です',
+    };
   }
   if (/^(?:read|notebookread|fileread|glob|grep|search|ls)$/i.test(tool)) {
     return {
@@ -785,6 +845,7 @@ function approvalGuide(st) {
   if (!st || !st.hasCard) {
     return {
       status: 'wait',
+      subject: '監視中: 新しい安全イベントはありません',
       eyebrow: '承認判断票',
       headline: 'AIの操作を待っています',
       action: '承認画面が出たら、この場所を見てください',
@@ -824,8 +885,12 @@ function approvalGuide(st) {
   const windowsAclGrant = WINDOWS_ACL_GRANT_RE.test(text);
   const privilege = Boolean(chmodWorldWritable) || windowsAclGrant
     || /\bsudo\b|\brunas\b|\bset-executionpolicy\b/i.test(text);
-  const network = /web\s*access|webfetch|websearch|https?:\/\/|\b(?:curl|wget|iwr|irm|ssh|scp|sftp|rsync|nc|ncat|netcat)\b|\bgit\s+push\b/i.test(lower);
-  const writeTool = /^(write|edit|multiedit)$/.test(tool) || /ファイル書き込み|書き込|上書き|作成/.test(text);
+  const packageInstall = concrete.kind === 'package-install'
+    || /^\s*(?:npm|pnpm|yarn|bun)\s+(?:install|add)\b/i.test(cmd);
+  const network = packageInstall
+    || concrete.kind === 'network'
+    || /web\s*access|webfetch|websearch|https?:\/\/|\b(?:curl|wget|iwr|irm|ssh|scp|sftp|rsync|nc|ncat|netcat)\b|\bgit\s+push\b/i.test(lower);
+  const writeTool = /^(write|edit|multiedit|notebookedit)$/.test(tool) || concrete.kind === 'write' || /ファイル書き込み|書き込|上書き|作成/.test(text);
   const readTool = /^(read|notebookread|fileread|glob|grep|search|ls)$/.test(tool);
   const readCommand = concrete.kind === 'read';
   const blocked = /ブロック|遮断|拒否/.test(title) || /(?:^|\s)block(?:ed)?(?:\s|$)/i.test(meta);
@@ -882,6 +947,13 @@ function approvalGuide(st) {
     outbound = 'あり：外部サービスへ送信します';
     summary = summary || '外部リポジトリや配布先へ内容を送る操作です。';
     checks = ['公開先・ブランチ・パッケージ名が正しいか', '秘密情報と未確認の変更が含まれていないか'];
+  } else if (packageInstall) {
+    impact = concrete.impact;
+    reversible = concrete.reversible;
+    outbound = concrete.outbound;
+    summary = summary || concrete.summary;
+    checks = ['パッケージ名が依頼内容と一致しているか', 'package.json / lock ファイルの差分を後で確認できるか'];
+    why = '外部レジストリからコードを取得し、プロジェクト内の依存関係が変わるため確認します。';
   } else if (protectedData) {
     impact = '認証情報や秘密ファイルに触れる可能性があります';
     reversible = writeTool ? '漏洩・上書き後は完全には戻せません' : '読み取りでも外部送信につながる可能性があります';
@@ -949,7 +1021,7 @@ function approvalGuide(st) {
     },
   }[status];
 
-  return { status, ...copy, summary, impact, reversible, outbound, checks: checks.slice(0, 2), why };
+  return { status, subject: operationSubject(tool, cmd), ...copy, summary, impact, reversible, outbound, checks: checks.slice(0, 2), why };
 }
 
 const NO_COACH_CONTEXT_MSG =
@@ -1246,12 +1318,13 @@ function renderPage() {
 	<style>
 	:root{--ink:#edf3ef;--muted:#97a59d;--paper:#111816;--paper-2:#151e1b;--sky:#090d0c;--line:#2a3631;--line-strong:#3b4b43;--green:#a9dd7d;--green-deep:#6ea855;--mint:#bdf6c7;--amber:#e1b94a;--red:#ed6b58;--blue:#91c6ba;--shadow:0 18px 50px rgba(0,0,0,.34)}
 	*{box-sizing:border-box}
-	html{color-scheme:dark}
-	body{margin:0;padding:14px;font-family:"BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;background:radial-gradient(circle at 50% -30%,#1b2823 0,transparent 45%),var(--sky);color:var(--ink);line-height:1.6;overflow-wrap:anywhere;-webkit-font-smoothing:antialiased}
+	html{color-scheme:dark;max-width:100%;overflow-x:hidden}
+	body{max-width:100%;margin:0;padding:14px;font-family:"BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;background:radial-gradient(circle at 50% -30%,#1b2823 0,transparent 45%),var(--sky);color:var(--ink);line-height:1.6;overflow-x:hidden;overflow-wrap:anywhere;-webkit-font-smoothing:antialiased}
 	body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.15;background-image:linear-gradient(rgba(169,221,125,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(169,221,125,.07) 1px,transparent 1px);background-size:34px 34px;mask-image:linear-gradient(to bottom,black,transparent 72%)}
-	.wrap{position:relative;max-width:1580px;margin:0 auto}
+	.wrap{position:relative;width:100%;max-width:1580px;margin:0 auto}
 	.dashboard{display:grid;grid-template-columns:minmax(220px,.72fr) minmax(540px,1.7fr) minmax(300px,1fr);gap:14px;align-items:start}
-	.shell{border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,rgba(21,30,27,.98),rgba(12,18,16,.98));box-shadow:var(--shadow)}
+	.dashboard>*{min-width:0}
+	.shell{max-width:100%;border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,rgba(21,30,27,.98),rgba(12,18,16,.98));box-shadow:var(--shadow)}
 	.brand-rail{position:sticky;top:14px;min-height:calc(100vh - 28px);padding:22px;display:flex;flex-direction:column;overflow:hidden}
 	.brand{display:flex;align-items:center;gap:12px}
 	.brand-shield{width:44px;height:48px;flex:none;color:var(--green);filter:drop-shadow(0 0 12px rgba(169,221,125,.16))}
@@ -1266,20 +1339,23 @@ function renderPage() {
 	.companion-stage[data-state="review"]{--companion-signal:var(--amber)}
 	.companion-stage[data-state="deny"]{--companion-signal:var(--red)}
 	.companion-stage[data-state="thinking"]{--companion-signal:var(--blue)}
-	.companion{display:block;width:100%;aspect-ratio:1;object-fit:cover;object-position:center;border-radius:20px;mix-blend-mode:screen;transform-origin:52% 78%;will-change:transform,filter}
-	.companion-stage[data-state="wait"] .companion{animation:companion-breathe 4.2s ease-in-out infinite}
-	.companion-stage[data-state="allow"] .companion{animation:companion-nod 3.4s ease-in-out infinite}
-	.companion-stage[data-state="review"] .companion{animation:companion-attend 2.3s ease-in-out infinite;filter:drop-shadow(0 8px 18px rgba(225,185,74,.12))}
-	.companion-stage[data-state="deny"] .companion{animation:companion-guard 1.4s ease-in-out infinite alternate;filter:drop-shadow(0 8px 20px rgba(237,107,88,.16))}
-	.companion-stage[data-state="thinking"] .companion{animation:companion-think 2s ease-in-out infinite;filter:drop-shadow(0 8px 18px rgba(145,198,186,.14))}
+	.companion{display:block;width:100%;aspect-ratio:1;object-fit:cover;object-position:center;border-radius:20px;mix-blend-mode:screen;filter:drop-shadow(0 8px 18px color-mix(in srgb,var(--companion-signal) 14%,transparent));transition:filter .35s ease}
 	.companion-mark{position:absolute;right:7%;top:9%;display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--companion-signal);border-radius:50%;background:#111916;color:var(--companion-signal);font-size:17px;font-weight:900;box-shadow:0 0 0 5px color-mix(in srgb,var(--companion-signal) 8%,transparent);transition:color .35s ease,border-color .35s ease}
 	.companion-orbit{position:absolute;inset:12%;border:1px dashed color-mix(in srgb,var(--companion-signal) 45%,transparent);border-radius:50%;opacity:0;transform:scale(.88)}
 	.companion-stage[data-state="thinking"] .companion-orbit{opacity:.65;animation:companion-orbit 7s linear infinite}
-	@keyframes companion-breathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-4px) scale(1.008)}}
-	@keyframes companion-nod{0%,68%,100%{transform:translateY(0) rotate(0)}76%{transform:translateY(3px) rotate(-1.8deg)}84%{transform:translateY(-3px) rotate(1.3deg)}92%{transform:translateY(0) rotate(0)}}
-	@keyframes companion-attend{0%,100%{transform:translateY(0) rotate(-1deg)}50%{transform:translateY(-5px) rotate(1.5deg)}}
-	@keyframes companion-guard{from{transform:translateY(1px) scale(1.01)}to{transform:translateY(-5px) scale(1.035)}}
-	@keyframes companion-think{0%,100%{transform:translateY(0) rotate(-1.8deg)}50%{transform:translateY(-4px) rotate(2.2deg)}}
+	.companion-part{position:absolute;pointer-events:none;color:var(--companion-signal);opacity:.82;transition:opacity .2s ease,color .35s ease,transform .35s ease}
+	.companion-ear{left:32%;top:21%;width:18px;height:24px;border:2px solid currentColor;border-right:0;border-bottom:0;border-radius:12px 0 0 0;transform-origin:100% 100%}
+	.companion-tail{right:15%;top:55%;width:36px;height:11px;border-top:3px solid currentColor;border-radius:50%;transform-origin:0 50%;opacity:.72}
+	.companion-scan{left:31%;right:31%;top:39%;height:2px;background:linear-gradient(90deg,transparent,currentColor,transparent);box-shadow:0 0 10px currentColor;opacity:0}
+	.companion-stage[data-state="wait"] .companion-ear{animation:ear-listen 5.2s ease-in-out infinite}
+	.companion-stage[data-state="allow"] .companion-tail{animation:tail-wag 1.4s ease-in-out infinite}
+	.companion-stage[data-state="review"] .companion-ear{animation:ear-twitch 1.8s ease-in-out infinite}
+	.companion-stage[data-state="deny"] .companion-scan{opacity:.88;animation:scan-line 1.35s ease-in-out infinite}
+	.companion-stage[data-state="thinking"] .companion-scan{opacity:.78;animation:scan-line 1.1s ease-in-out infinite}
+	@keyframes ear-listen{0%,86%,100%{transform:rotate(0)}91%{transform:rotate(-9deg)}96%{transform:rotate(4deg)}}
+	@keyframes tail-wag{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(13deg)}}
+	@keyframes ear-twitch{0%,100%{transform:rotate(-4deg)}46%{transform:rotate(12deg)}58%{transform:rotate(-9deg)}}
+	@keyframes scan-line{0%,100%{transform:translateY(-10px)}50%{transform:translateY(12px)}}
 	@keyframes companion-orbit{to{transform:scale(.88) rotate(360deg)}}
 	.guard-overview{margin-top:auto;padding:16px;border:1px solid #44533e;border-radius:14px;background:rgba(169,221,125,.035)}
 	.guard-overview h2,.rail-panel h2{font-size:14px;margin:0 0 11px}
@@ -1310,6 +1386,17 @@ function renderPage() {
 	button:focus-visible,input:focus-visible,summary:focus-visible,.check-item:focus-within{outline:3px solid rgba(169,221,125,.34);outline-offset:2px}
 	button:disabled{opacity:.45;cursor:default}
 	.panel[hidden]{display:none}
+	.live-narration{margin:0 0 14px;padding:14px 15px;border:1px solid #3d514a;border-radius:14px;background:linear-gradient(135deg,rgba(145,198,186,.09),rgba(255,255,255,.018));box-shadow:inset 0 0 0 1px rgba(255,255,255,.018)}
+	.live-title-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}
+	.live-eyebrow{color:var(--blue);font:850 9px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.16em}
+	.live-source{color:var(--muted);font:650 10px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;text-align:right}
+	.live-subject{font-size:clamp(18px,2.1vw,28px);font-weight:850;line-height:1.25;margin-bottom:6px;overflow-wrap:anywhere}
+	.live-note{margin:0 0 11px;color:#d7e0db;font-size:13px;font-weight:650}
+	.live-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+	.live-step{min-width:0;padding:10px 11px;border:1px solid var(--line);border-radius:10px;background:#0d1412}
+	.live-label{display:block;margin-bottom:3px;color:var(--muted);font-size:9px;font-weight:750;letter-spacing:.06em}
+	.live-value{display:block;color:var(--ink);font-size:12px;font-weight:800;line-height:1.45;overflow-wrap:anywhere}
+	.live-boundary{margin:9px 0 0;color:var(--muted);font-size:10px}
 	.decision{--signal:var(--blue);position:relative;overflow:hidden;border:1px solid var(--line-strong);border-radius:16px;background:rgba(8,13,11,.42);margin:0 0 14px}
 	.decision.allow{--signal:var(--green)}
 	.decision.review{--signal:var(--amber)}
@@ -1422,8 +1509,8 @@ function renderPage() {
 	.footer-note{grid-column:1/-1;margin:0;padding:10px 14px;color:var(--muted);font-size:10px;text-align:center;border:1px solid var(--line);border-radius:12px;background:#0d1311}
 	@media(max-width:1220px){.dashboard{grid-template-columns:220px minmax(0,1fr)}.right-rail{grid-column:1/-1;grid-template-columns:repeat(3,minmax(0,1fr))}.events{border-radius:18px}.brand-rail{min-height:720px}}
 	@media(max-width:900px){body{padding:10px}.dashboard{grid-template-columns:minmax(0,1fr)}.brand-rail{position:static;min-height:0;display:grid;grid-template-columns:1fr 170px;align-items:center}.brand,.brand-kicker,.companion-message,.guard-overview{grid-column:1}.companion-stage{grid-column:2;grid-row:1/5;max-width:170px}.right-rail{grid-column:auto;grid-template-columns:minmax(0,1fr)}}
-		@media(max-width:620px){body{padding:7px}.shell,.events{border-radius:14px}.brand-rail,.center-shell,.rail-panel,.events{padding:13px}.brand-rail{grid-template-columns:minmax(0,1fr) 92px}.brand-rail>*{min-width:0}.brand-shield{width:35px;height:38px}.brand-name{font-size:26px}.brand-kicker{margin-left:47px;font-size:8px}.companion-message{margin-top:18px}.companion-stage{max-width:92px}.companion-mark{width:25px;height:25px;font-size:12px}.topbar{align-items:flex-start;flex-wrap:wrap}.topbar>div:first-child{min-width:0}.topbar-copy{display:none}.live{font-size:9px;padding:6px 8px}.profile-strip{grid-template-columns:36px minmax(0,1fr)}.profile-mark{width:34px;height:34px}.profile-speed{grid-column:1/-1;width:max-content;max-width:100%;white-space:normal}.tabs{width:100%}.tab{flex:1;min-width:0}.decision-signal{grid-template-columns:36px minmax(0,1fr);padding:16px 14px 14px}.decision-symbol{width:34px;height:34px;border-radius:9px}.decision-headline{font-size:22px;word-break:normal;overflow-wrap:anywhere}.decision-action{grid-column:1/-1}.decision-body{padding:14px}.fact{grid-template-columns:30px minmax(0,1fr)}.fact-value{grid-column:2}.qrow,.ks-row{flex-direction:column}.qrow button,.ks-row button{width:100%}.btns button{flex:1;min-width:130px}.footer-note{font-size:9px}}
-	@media(prefers-reduced-motion:reduce){.live-dot,.companion,.companion-orbit{animation:none!important}.choice-card{transition:none}}
+		@media(max-width:620px){body{padding:7px}.shell,.events{width:100%;border-radius:14px}.brand-rail,.center-shell,.rail-panel,.events{padding:13px}.brand-rail{display:block}.brand-rail>*{min-width:0}.brand-shield{width:35px;height:38px}.brand-name{font-size:26px}.brand-kicker{margin-left:47px;font-size:8px}.companion-message{margin-top:18px;overflow:hidden}.companion-copy,.profile-summary,.live-note{word-break:break-word;overflow-wrap:anywhere}.companion-stage{max-width:118px;margin:8px auto 0}.companion-mark{width:25px;height:25px;font-size:12px}.topbar{align-items:flex-start;flex-wrap:wrap}.topbar>div:first-child{min-width:0}.topbar-copy{display:none}.live{flex:1 1 100%;max-width:100%;white-space:normal;font-size:9px;padding:6px 8px}.profile-strip{grid-template-columns:36px minmax(0,1fr);overflow:hidden}.profile-mark{width:34px;height:34px}.profile-speed{grid-column:1/-1;width:max-content;max-width:100%;white-space:normal}.tabs{width:100%}.tab{flex:1;min-width:0}.live-title-row{align-items:flex-start;flex-direction:column}.live-source{text-align:left}.live-subject{font-size:20px;word-break:break-word}.live-steps{grid-template-columns:minmax(0,1fr)}.decision-signal{grid-template-columns:36px minmax(0,1fr);padding:16px 14px 14px}.decision-symbol{width:34px;height:34px;border-radius:9px}.decision-headline{font-size:22px;word-break:break-word;overflow-wrap:anywhere}.decision-action{grid-column:1/-1}.decision-body{padding:14px}.fact{grid-template-columns:30px minmax(0,1fr)}.fact-value{grid-column:2}.qrow,.ks-row{flex-direction:column}.qrow button,.ks-row button{width:100%}.btns button{flex:1;min-width:130px}.footer-note{font-size:9px}}
+	@media(prefers-reduced-motion:reduce){.live-dot,.companion-orbit,.companion-part{animation:none!important}.choice-card{transition:none}}
 	</style></head>
 	<body><div class="wrap">
 	<main class="dashboard">
@@ -1440,6 +1527,9 @@ function renderPage() {
 	    <div id="companion-stage" class="companion-stage" data-state="wait">
 	      <span class="companion-orbit" aria-hidden="true"></span>
 	      <img id="companion" class="companion" alt="待機中のBouncerロボット犬" />
+	      <span class="companion-part companion-ear" aria-hidden="true"></span>
+	      <span class="companion-part companion-tail" aria-hidden="true"></span>
+	      <span class="companion-part companion-scan" aria-hidden="true"></span>
 	      <span id="companion-mark" class="companion-mark" aria-hidden="true">•</span>
 	    </div>
 	    <section class="guard-overview">
@@ -1467,12 +1557,26 @@ function renderPage() {
 	    </div>
 
 	    <div id="event-panel" class="panel" role="tabpanel" aria-labelledby="tab-event">
+	      <section class="live-narration" aria-label="AIの現在の動き">
+	        <div class="live-title-row">
+	          <span class="live-eyebrow">LIVE TRACE</span>
+	          <span id="live-source" class="live-source">観測: 安全ログ</span>
+	        </div>
+	        <div id="live-subject" class="live-subject">OpenCodeのtool callを待っています</div>
+	        <p id="live-summary" class="live-note">安全イベントを検知したら、AIが何を触ろうとしているかをここに出します。</p>
+	        <div class="live-steps">
+	          <div class="live-step"><span class="live-label">TOOL</span><strong id="live-tool" class="live-value">待機中</strong></div>
+	          <div class="live-step"><span class="live-label">対象/操作</span><strong id="live-target" class="live-value">安全イベントなし</strong></div>
+	          <div class="live-step"><span class="live-label">分類</span><strong id="live-kind" class="live-value">監視中</strong></div>
+	        </div>
+	        <p id="live-boundary" class="live-boundary">表示しているのは非公開の推論ではなく、Bouncerが観測したtool callからの説明です。</p>
+	      </section>
 	      <section id="decision" class="decision wait" aria-live="polite" aria-label="承認判断票">
 	        <div class="decision-signal">
 	          <div id="decision-symbol" class="decision-symbol" aria-hidden="true">•</div>
 	          <div>
 	            <div id="decision-eyebrow" class="decision-eyebrow">承認判断票</div>
-	            <div id="decision-headline" class="decision-headline">AIの操作を待っています</div>
+	            <div id="decision-headline" class="decision-headline">安全イベントはありません</div>
 	          </div>
 	          <div id="decision-action" class="decision-action">承認画面が出たら、この場所を見てください</div>
 	        </div>
@@ -1480,7 +1584,7 @@ function renderPage() {
 	          <p id="decision-summary" class="decision-summary">操作を検知すると、許可する前に見るポイントをここへまとめます。</p>
 	          <div class="command-box">
 	            <span class="command-label">AIが実行しようとしている内容</span>
-	            <pre id="decision-command" class="command-value">操作を待っています</pre>
+	            <pre id="decision-command" class="command-value">検知した操作はありません</pre>
 	          </div>
 	          <div class="fact-grid">
 	            <div class="fact"><span class="fact-icon" aria-hidden="true">◇</span><span class="fact-label">何が変わる？</span><span id="decision-impact" class="fact-value">まだ操作はありません</span></div>
@@ -1584,8 +1688,52 @@ let activeTarget = 'event';
 let currentState = null;
 let keyPanelOpen = false; // 登録済みでもユーザーが「変更する」を押したら開く
 let coachBusy = false;
+let openHistoryKeys = new Set();
 
 function riskClass(meta){ if(/risk=high/.test(meta))return'high'; if(/risk=medium/.test(meta))return'medium'; return ''; }
+function compactText(v){ return String(v||'').replace(/\s+/g,' ').trim(); }
+function clipClient(v,n){ const s=String(v||''); return s.length>n ? s.slice(0,n)+'…' : s; }
+function metaToolName(meta){
+  const m=String(meta||'').match(/(?:^|[・\s])tool=([A-Za-z0-9_-]+)/);
+  return m ? m[1] : '';
+}
+function activeToolName(s){
+  if(!s) return '';
+  const metaTool=metaToolName(s.meta);
+  if(metaTool && metaTool !== 'observe') return metaTool;
+  const labelTool=(String(s.label||'').match(/^([A-Za-z0-9_-]+)/)||[])[1];
+  return labelTool || metaTool || '操作';
+}
+function subjectLine(s,g){
+  if(g && g.subject) return g.subject;
+  const tool=activeToolName(s);
+  const target=compactText(s && s.cmd);
+  return target ? tool + ': ' + clipClient(target,120) : tool + ': 操作内容を取得できませんでした';
+}
+function activityKind(g){
+  const text=String(((g&&g.summary)||'')+' '+((g&&g.impact)||'')+' '+((g&&g.outbound)||''));
+  if(/依存|パッケージ|node_modules|レジストリ/.test(text)) return '依存追加 + 外部通信';
+  if(/削除|戻せない|消す/.test(text)) return '削除/破壊';
+  if(/書き込|作成|変更|編集|上書き/.test(text)) return 'ファイル変更';
+  if(/PCの外|外部|通信|検索語|URL|送信/.test(text)) return '外部通信';
+  if(/読み取|表示|変更しません|作成・変更・削除はしません/.test(text)) return '読み取り';
+  return '要確認';
+}
+function renderLiveNarration(s,g){
+  const has=!!(s&&s.hasCard);
+  const source=(s&&s.profile&&s.profile.agent&&s.profile.agent!=='unknown') ? s.profile.agent : '安全ログ';
+  $('live-subject').textContent = has ? subjectLine(s,g) : '安全イベントはありません';
+  $('live-summary').textContent = has
+    ? ((g&&g.summary)||s.whatdo||'表示中の操作について、影響範囲を確認してから判断してください。')
+    : 'Bouncerがtool callと承認イベントを監視しています。検知した内容だけをここに出します。';
+  $('live-tool').textContent = has ? activeToolName(s) : 'なし';
+  $('live-target').textContent = has ? clipClient(compactText(s.cmd),140) : '検知した操作はありません';
+  $('live-kind').textContent = has ? activityKind(g) : '監視中';
+  $('live-source').textContent = has ? ('観測: '+source+' / 推定: 固定ルール解析') : '観測: 安全ログ';
+  $('live-boundary').textContent = has
+    ? 'これは非公開の推論本文ではなく、Bouncerが観測したtool callからの行動解説です。'
+    : '推論本文は表示しません。表示できるのは、安全ログに残ったtool callと承認イベントです。';
+}
 
 function renderCompanion(status, thinking){
   const key = thinking ? 'thinking' : (COMPANION_STATES[status] ? status : 'wait');
@@ -1723,15 +1871,17 @@ async function saveKey(){
 	  const g = (s && s.approval) || {};
 	  const allowed = ['allow','review','deny','wait'];
 	  const status = allowed.includes(g.status) ? g.status : 'review';
+	  const subject = (s && s.hasCard) ? subjectLine(s,g) : '安全イベントはありません';
+	  renderLiveNarration(s,g);
 	  renderCompanion(status, coachBusy);
 	  const box = $('decision');
 	  box.className = 'decision ' + status;
 	  $('decision-symbol').textContent = ({allow:'✓',review:'!',deny:'×',wait:'•'})[status];
 	  $('decision-eyebrow').textContent = g.eyebrow || 'いま押すなら';
-	  $('decision-headline').textContent = g.headline || '内容を確認してください';
+	  $('decision-headline').textContent = subject;
 	  $('decision-action').textContent = g.action || '分からない時は「許可しない」を選ぶ';
 	  $('decision-summary').textContent = g.summary || '表示中の操作について、影響範囲を確認してから判断してください。';
-	  $('decision-command').textContent = (s && s.cmd) ? s.cmd : '操作を待っています';
+	  $('decision-command').textContent = (s && s.cmd) ? s.cmd : '検知した操作はありません';
 	  $('decision-impact').textContent = g.impact || '分かりません';
 	  $('decision-reversible').textContent = g.reversible || '分かりません';
 	  $('decision-outbound').textContent = g.outbound || '分かりません';
@@ -1826,7 +1976,14 @@ async function poll(){
     if(changed){ lastCmd=s.cmd; lastAnswerText=answerText; updateCoachControls(s, true); }
     else { updateCoachControls(s, false); }
     // events
-    const tb=$('events-body'); tb.innerHTML='';
+    const tb=$('events-body');
+    tb.querySelectorAll('details.history-detail').forEach((d)=>{
+      const key=d.dataset.key||'';
+      if(!key) return;
+      if(d.open) openHistoryKeys.add(key);
+      else openHistoryKeys.delete(key);
+    });
+    tb.innerHTML='';
     $('event-count').textContent=String((s.events||[]).length)+'件';
     (s.events||[]).forEach(e=>{
       const tr=document.createElement('tr');
@@ -1850,6 +2007,13 @@ async function poll(){
       const cmd=document.createElement('div'); cmd.className='ev-cmd'; cmd.textContent=sm.detail||'(内容なし)'; tdBody.append(cmd);
       if(sm.detail){
         const details=document.createElement('details'); details.className='history-detail';
+        const historyKey=[e.ts||'',e.mode||'',e.decision||'',sm.tool||'',sm.detail||''].join('|').slice(0,500);
+        details.dataset.key=historyKey;
+        details.open=openHistoryKeys.has(historyKey);
+        details.addEventListener('toggle',()=>{
+          if(details.open) openHistoryKeys.add(historyKey);
+          else openHistoryKeys.delete(historyKey);
+        });
         const summary=document.createElement('summary'); summary.textContent='コマンド全体と意味を見る';
         const body=document.createElement('div'); body.className='history-body';
         const full=document.createElement('pre'); full.className='history-command'; full.textContent=sm.detail; body.append(full);

@@ -123,6 +123,7 @@ async function main() {
 
     const waiting = srv.approvalGuide({ hasCard: false });
     assert.equal(waiting.status, 'wait');
+    assert.match(waiting.subject, /安全イベント/);
 
     const read = srv.approvalGuide({
       hasCard: true,
@@ -213,6 +214,22 @@ async function main() {
     assert.match(searched.impact, /変更しません/, '読み取り専用であることを明示する');
     assert.match(searched.outbound, /送信しません/, '外部送信しないことを明示する');
 
+    const install = srv.explainCommand('npm install example-package', 'bash');
+    assert.equal(install.kind, 'package-install');
+    assert.match(install.summary, /example-package.*取得・追加/);
+    assert.match(install.impact, /node_modules|lock/);
+    assert.match(install.outbound, /外部レジストリ/);
+
+    const webSearch = srv.explainCommand('opencode tool call details', 'websearch');
+    assert.equal(webSearch.kind, 'network');
+    assert.match(webSearch.summary, /Web検索/);
+    assert.match(webSearch.outbound, /検索語/);
+
+    const fileWrite = srv.explainCommand('/work/app.js', 'write');
+    assert.equal(fileWrite.kind, 'write');
+    assert.match(fileWrite.summary, /ファイルを作成・編集/);
+    assert.match(fileWrite.impact, /作成・変更/);
+
     const pipedRead = srv.approvalGuide({
       hasCard: true,
       meta: '2026-07-26 18:43:24 ・ tool=bash ・ risk=medium ・ card=opencode-permission',
@@ -224,6 +241,20 @@ async function main() {
     });
     assert.match(pipedRead.summary, /[.]claude.*JSON.*検索/, '承認待ちの定型文ではなく、具体的な意味を最上段に出す');
     assert.match(pipedRead.impact, /変更しません/);
+
+    const packageApproval = srv.approvalGuide({
+      hasCard: true,
+      meta: '2026-07-26 18:43:24 ・ tool=bash ・ risk=medium ・ card=opencode-permission',
+      title: 'OpenCode: bash の承認',
+      label: 'bash を使用',
+      cmd: 'npm install example-package',
+      whatdo: 'npmでexample-packageを取得・追加します。',
+      dangers: [],
+    });
+    assert.equal(packageApproval.status, 'review');
+    assert.match(packageApproval.subject, /bash: npm install example-package/);
+    assert.match(packageApproval.summary, /依存|パッケージ|node_modules/);
+    assert.match(packageApproval.outbound, /レジストリ/);
   }
 
   // OpenCode standard はローカルLLM不要だが、DeepSeek送信検査Gatewayは必須。
@@ -284,6 +315,8 @@ async function main() {
     const url = new URL(rawUrl);
     const page = await fetch(rawUrl).then((res) => res.text());
     assert.match(page, /安全イベント \/ AI回答モニター/, 'page title should expose both monitor targets');
+    assert.match(page, /LIVE TRACE/, 'page should lead with live tool-call narration');
+    assert.match(page, /Bouncerが観測したtool call/, 'page should explain observable behavior without claiming private reasoning');
     assert.match(page, /AI回答/, 'page should include the AI answer tab');
     assert.match(page, /検索や会話の中身は表示されない場合があります/, 'page should disclose monitor coverage limits');
     assert.match(page, /承認判断票/, 'page should place the approval guide before technical details');
@@ -294,9 +327,13 @@ async function main() {
     assert.match(page, /あなたの判断/, 'page should keep the three decision guides separate from AI tool controls');
     assert.match(page, /bouncer-companion|companion/, 'page should include the local companion asset');
     assert.match(page, /id="companion-stage"/, 'dog should be a stateful motion stage rather than a static image');
+    assert.match(page, /companion-tail/, 'dog motion should use small overlay parts instead of moving the whole image');
+    assert.match(page, /companion-scan/, 'dog should have state-specific differential motion parts');
     assert.match(page, /id="companion-copy"/, 'speech bubble copy should update with the current Bouncer state');
     assert.match(page, /renderCompanion/, 'dog state should be synchronized with approval and coach states');
     assert.match(page, /prefers-reduced-motion/, 'dog motion should respect reduced-motion preferences');
+    assert.match(page, /openHistoryKeys/, 'history details should keep their open state across polling');
+    assert.match(page, /dataset[.]key/, 'history detail rows should have stable keys');
     assert.match(page, /現在の保護モード/, 'page should make the active convenience profile visible');
     assert.match(page, /ローカルGateway/, 'page should disclose whether the local gateway is in the request path');
 
