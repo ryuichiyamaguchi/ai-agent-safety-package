@@ -131,9 +131,9 @@ try {
             $deepseekKey = ([System.IO.File]::ReadAllText($authFile)).Trim()
             if (-not $deepseekKey) { throw 'DeepSeek APIキーの登録ファイルが空です。登録し直してください。' }
             $env:ANTHROPIC_AUTH_TOKEN = $deepseekKey
-            $env:ANTHROPIC_MODEL = 'deepseek-v4-pro[1m]'
-            $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'deepseek-v4-pro[1m]'
-            $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'deepseek-v4-pro[1m]'
+            $env:ANTHROPIC_MODEL = 'deepseek-v4-flash[1m]'
+            $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'deepseek-v4-flash[1m]'
+            $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'deepseek-v4-flash[1m]'
             $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'deepseek-v4-flash'
             $env:CLAUDE_CODE_SUBAGENT_MODEL = 'deepseek-v4-flash'
             $env:CLAUDE_CODE_EFFORT_LEVEL = 'max'

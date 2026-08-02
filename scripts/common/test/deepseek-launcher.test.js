@@ -135,9 +135,9 @@ test('macOS integrated launcher includes monitored d-claude through the existing
   assert.match(script, /bash "\$consent" --consent-only/);
   assert.match(script, /deepseek[/]launch-deepseek-gateway[.]sh/);
   assert.match(script, /ANTHROPIC_AUTH_TOKEN/);
-  assert.match(script, /ANTHROPIC_MODEL="deepseek-v4-pro\[1m\]"/);
-  assert.match(script, /ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro\[1m\]"/);
-  assert.match(script, /ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro\[1m\]"/);
+  assert.match(script, /ANTHROPIC_MODEL="deepseek-v4-flash\[1m\]"/);
+  assert.match(script, /ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-flash\[1m\]"/);
+  assert.match(script, /ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-flash\[1m\]"/);
   assert.match(script, /ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"/);
   assert.match(script, /CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash"/);
   assert.match(script, /CLAUDE_CODE_EFFORT_LEVEL="max"/);
@@ -193,9 +193,9 @@ test('macOS integrated d-claude starts monitor, consent gate, and safe gateway t
     fs.writeFileSync(path.join(hooks, 'deepseek', 'launch-deepseek-gateway.sh'), [
       '#!/usr/bin/env bash',
       '[ -n "$ANTHROPIC_AUTH_TOKEN" ] || exit 8',
-      '[ "$ANTHROPIC_MODEL" = "deepseek-v4-pro[1m]" ] || exit 7',
-      '[ "$ANTHROPIC_DEFAULT_OPUS_MODEL" = "deepseek-v4-pro[1m]" ] || exit 10',
-      '[ "$ANTHROPIC_DEFAULT_SONNET_MODEL" = "deepseek-v4-pro[1m]" ] || exit 11',
+      '[ "$ANTHROPIC_MODEL" = "deepseek-v4-flash[1m]" ] || exit 7',
+      '[ "$ANTHROPIC_DEFAULT_OPUS_MODEL" = "deepseek-v4-flash[1m]" ] || exit 10',
+      '[ "$ANTHROPIC_DEFAULT_SONNET_MODEL" = "deepseek-v4-flash[1m]" ] || exit 11',
       '[ "$ANTHROPIC_DEFAULT_HAIKU_MODEL" = "deepseek-v4-flash" ] || exit 12',
       '[ "$CLAUDE_CODE_SUBAGENT_MODEL" = "deepseek-v4-flash" ] || exit 13',
       '[ "$CLAUDE_CODE_EFFORT_LEVEL" = "max" ] || exit 14',

@@ -280,7 +280,7 @@ function buildOpenCodeConfig({
   }
   const config = {
     $schema: 'https://opencode.ai/config.json',
-    model: 'bouncer-deepseek/deepseek-v4-pro',
+    model: 'bouncer-deepseek/deepseek-v4-flash',
     small_model: 'bouncer-deepseek/deepseek-v4-flash',
     default_agent: 'bouncer',
     share: 'disabled',
@@ -297,7 +297,7 @@ function buildOpenCodeConfig({
       bouncer: {
         description: 'Bouncer-protected primary coding agent',
         mode: 'primary',
-        model: 'bouncer-deepseek/deepseek-v4-pro',
+        model: 'bouncer-deepseek/deepseek-v4-flash',
         permission: {
           task: {
             '*': 'deny',

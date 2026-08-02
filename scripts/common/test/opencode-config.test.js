@@ -36,7 +36,7 @@ test('OpenCode runtime config forces DeepSeek through the loopback inspection ga
   });
   const provider = config.provider['bouncer-deepseek'];
 
-  assert.strictEqual(config.model, 'bouncer-deepseek/deepseek-v4-pro');
+  assert.strictEqual(config.model, 'bouncer-deepseek/deepseek-v4-flash');
   assert.strictEqual(config.small_model, 'bouncer-deepseek/deepseek-v4-flash');
   assert.strictEqual(config.default_agent, 'bouncer');
   assert.strictEqual(config.share, 'disabled');
@@ -52,7 +52,7 @@ test('OpenCode runtime config forces DeepSeek through the loopback inspection ga
   ]);
   assert.deepStrictEqual(provider.models['deepseek-v4-pro'].limit, { context: 1048576, output: 393216 });
   assert.deepStrictEqual(provider.models['deepseek-v4-flash'].limit, { context: 1048576, output: 393216 });
-  assert.strictEqual(config.agent.bouncer.model, 'bouncer-deepseek/deepseek-v4-pro');
+  assert.strictEqual(config.agent.bouncer.model, 'bouncer-deepseek/deepseek-v4-flash');
   assert.strictEqual(config.agent['bouncer-helper'].mode, 'subagent');
   assert.strictEqual(config.agent['bouncer-helper'].model, 'bouncer-deepseek/deepseek-v4-flash');
   assert.strictEqual(config.agent.bouncer.permission.task['*'], 'deny');

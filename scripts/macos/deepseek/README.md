@@ -40,7 +40,7 @@ Windows 版（`scripts/windows/deepseek/`）の Mac 対等版です。
    少額だけ Top up → API keys → Create new API key → すぐコピー。
 2. **`登録-初回だけ.command` をダブルクリック** → キーを貼り付けて Enter（入力は非表示）。
 3. **`起動-Claude-DeepSeek.command` をダブルクリック** → 赤枠の同意ゲートで `yes` →
-   Claude Code が起動。画面のモデル表示が **`deepseek-v4-pro[1m]`** ならOK。
+   Claude Code が起動。画面のモデル表示が **`deepseek-v4-flash[1m]`** ならOK。
 4. **授業後：** `キー削除.command` をダブルクリック ＋ DeepSeek 管理画面でもキーを Delete。
 
 > 初回ダブルクリック時に Gatekeeper が「開発元を確認できません」と出たら、
@@ -50,7 +50,7 @@ Windows 版（`scripts/windows/deepseek/`）の Mac 対等版です。
 
 ## 「本当に DeepSeek が動いている」確認
 
-- 画面のモデル名が `deepseek-v4-pro[1m]`。
+- 画面のモデル名が `deepseek-v4-flash[1m]`。
 - 数回質問後、https://platform.deepseek.com/ の Usage / Billing で**残高が減っていれば確実**。
 
 ---
@@ -59,7 +59,7 @@ Windows 版（`scripts/windows/deepseek/`）の Mac 対等版です。
 
 ### ① モデル名で「無効」エラー（GitHub Issue #56990）
 `起動-Claude-DeepSeek.command` の `ANTHROPIC_MODEL` を差し替え：
-- **A案**：`export ANTHROPIC_CUSTOM_MODEL_OPTION="deepseek-v4-pro[1m]"`（検証スキップ）
+- **A案**：`export ANTHROPIC_CUSTOM_MODEL_OPTION="deepseek-v4-flash[1m]"`（検証スキップ）
 - **B案**：`ANTHROPIC_MODEL` 行を消し、起動後 `/model` で opus を選ぶ。
 
 ### ②「あなたは誰？」で「私は Claude」と答える
