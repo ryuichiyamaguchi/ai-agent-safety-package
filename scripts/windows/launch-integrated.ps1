@@ -22,6 +22,12 @@ if ($Agent -eq 'd-claude' -and $SafetyProfile -ne 'standard') { throw 'd-claude 
 if ($WebSearch -and $Agent -ne 'opencode') { throw '-WebSearch は OpenCode だけで指定できます。' }
 if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw "作業フォルダが見つかりません: $Workspace" }
 
+# どのボタン(スタート等)から呼ばれても、AI は必ず作業フォルダを起点に起動する。
+# Claude Code は起動時の cwd を CLAUDE_PROJECT_DIR とし、配布 settings のフックを
+# $env:CLAUDE_PROJECT_DIR\.ai-safety\... から解決するため、cwd が workspace の外だと
+# ガード欠落(fail-closed)で全プロンプトがブロックされる。
+Set-Location -LiteralPath $Workspace
+
 if ($env:AI_SAFE_DRY_RUN -eq '1') {
     if ($SafetyProfile -eq 'maximum' -and -not (Test-Path -LiteralPath (Join-Path $root 'bouncer\scripts\run-local.ps1'))) {
         throw "ローカルBouncer Gatewayが見つかりません: $(Join-Path $root 'bouncer')"

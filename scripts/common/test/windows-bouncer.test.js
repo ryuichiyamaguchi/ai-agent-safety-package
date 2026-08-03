@@ -44,6 +44,20 @@ test('Windows integrated launcher has standard no-LLM and maximum local-Bouncer 
   assert.match(script, /CLAUDE_CODE_EFFORT_LEVEL = 'max'/);
 });
 
+test('integrated launchers pin cwd to the workspace before starting any agent', () => {
+  // スタート等 workspace 外のフォルダから起動すると、Claude Code は cwd を
+  // CLAUDE_PROJECT_DIR にしてフックを cwd\.ai-safety\... から解決するため、
+  // ガード欠落(fail-closed)で全プロンプトがブロックされる(2026-08-03 学校実機)。
+  const win = read('scripts/windows/launch-integrated.ps1');
+  assert.match(win, /Set-Location -LiteralPath \$Workspace/);
+  // Set-Location はエージェント起動(dry-run 分岐含む)より前に置くこと。
+  assert.ok(
+    win.indexOf('Set-Location -LiteralPath $Workspace') < win.indexOf('AI_SAFE_DRY_RUN'),
+    'Set-Location must run before agents launch');
+  const mac = read('scripts/macos/launch-integrated.sh');
+  assert.match(mac, /^cd "\$workspace"$/m);
+});
+
 test('Windows legacy start buttons route through integrated standard mode', () => {
   const codex = read('workspace-template/スタート/2_セーフCodexを起動.bat');
   const claude = read('workspace-template/スタート/3_セーフClaudeを起動.bat');

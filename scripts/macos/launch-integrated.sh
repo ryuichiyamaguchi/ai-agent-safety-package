@@ -68,6 +68,11 @@ if [ ! -d "$workspace" ]; then
 fi
 
 workspace="$(cd "$workspace" && pwd)"
+# どのボタン(スタート等)から呼ばれても、AI は必ず作業フォルダを起点に起動する。
+# Claude Code は起動時の cwd を CLAUDE_PROJECT_DIR とし、配布 settings のフックを
+# $CLAUDE_PROJECT_DIR/.ai-safety/... から解決するため、cwd が workspace の外だと
+# ガード欠落(fail-closed)で全プロンプトがブロックされる。
+cd "$workspace"
 root="$workspace/.ai-safety"
 hooks="$root/hooks/macos"
 log_dir="${AI_SAFE_LOG_DIR:-$HOME/.ai-safety/logs}"
