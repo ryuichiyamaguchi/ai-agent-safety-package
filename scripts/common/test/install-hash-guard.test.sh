@@ -74,6 +74,23 @@ run_install() {
 # (d) 無改変なら成功する（受講者の導入を止めない）
 run_install ok "無改変のパッケージは導入できる"
 
+# Finder / Archive Utility が ZIP 内の「あんぜん.md」を「せ + 結合濁点」の
+# UTF-8-MAC (NFD) で展開しても、NFC で記録したハッシュ行と照合できること。
+if command -v iconv >/dev/null 2>&1 \
+   && printf 'test' | iconv -f UTF-8 -t UTF-8-MAC >/dev/null 2>&1; then
+  NFC_NAME='あんぜん.md'
+  NFD_NAME="$(printf '%s' "$NFC_NAME" | iconv -f UTF-8 -t UTF-8-MAC)"
+  if [ "$NFC_NAME" != "$NFD_NAME" ]; then
+    mv "$HARNESS_DIR/commands/$NFC_NAME" "$HARNESS_DIR/commands/$NFD_NAME"
+    run_install ok "macOS展開で濁点がNFDになった日本語指示書も導入できる"
+    cp "$HARNESS_DIR/commands/$NFD_NAME" "$TMP/nfd-orig.md"
+    printf '\n改ざんされた 1 行\n' >> "$HARNESS_DIR/commands/$NFD_NAME"
+    run_install abort "NFD名でも指示書の改ざんを検知して中止する"
+    cp "$TMP/nfd-orig.md" "$HARNESS_DIR/commands/$NFD_NAME"
+    mv "$HARNESS_DIR/commands/$NFD_NAME" "$HARNESS_DIR/commands/$NFC_NAME"
+  fi
+fi
+
 # (a) 指示書にハッシュ行の無い .md が混入
 EXTRA="$HARNESS_DIR/commands/よぶんな指示.md"
 printf 'これは配布物に混入した未登録の指示書です。\n' > "$EXTRA"

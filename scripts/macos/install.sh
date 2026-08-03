@@ -88,6 +88,23 @@ echo "Installing for platform: $PLATFORM"
 # 旧 AI_SAFETY_STRICT=1 は「既定で中止」に統合され不要になった（既定が常に strict）。
 versions_file="$package_root/docs/tested_versions.md"
 
+# macOS の Finder / Archive Utility は、ZIP 展開時に日本語ファイル名の濁点を
+# 分離形 (NFD / UTF-8-MAC) にすることがある。Git と docs/tested_versions.md は
+# 合成形 (NFC) のため、パスをそのまま grep すると同じ見た目でも「未登録」になる。
+# 実ファイルの読み込みは元パス、一覧照合だけ NFC に正規化する。
+normalize_hash_rel_path() {
+  local input_path="$1"
+  local normalized_path=""
+  if command -v iconv >/dev/null 2>&1; then
+    normalized_path="$(printf '%s' "$input_path" | iconv -f UTF-8-MAC -t UTF-8 2>/dev/null || true)"
+    if [ -n "$normalized_path" ]; then
+      printf '%s' "$normalized_path"
+      return 0
+    fi
+  fi
+  printf '%s' "$input_path"
+}
+
 # 検証表そのものが欠けていると、以下のハッシュ検証が 1 件残らずスキップされる
 # （＝改ざんに気付けないまま全部配置してしまう）。「表が無い＝検証できない＝配布物が
 # 壊れている」ので既定で中止する。開発者/講師が承知の上で進めるときだけ
@@ -107,6 +124,7 @@ fi
 
 verify_hash() {
   rel_path="$1"
+  lookup_rel_path="$(normalize_hash_rel_path "$rel_path")"
   abs_path="$package_root/$rel_path"
   [ -f "$abs_path" ] || return 0
   [ -f "$versions_file" ] || return 0
@@ -114,7 +132,7 @@ verify_hash() {
   # 行が無いファイルは検証対象外として素通しする。`set -o pipefail` 下では grep の
   # 「見つからない=1」がそのまま代入の失敗になり、set -e で install ごと落ちるため
   # `|| true` で受ける（ハッシュ不一致のときの中止は下の比較でそのまま行う）。
-  expected="$(grep -F "| $rel_path |" "$versions_file" 2>/dev/null | head -n1 | awk -F'|' '{gsub(/ /,"",$3); print $3}' || true)"
+  expected="$(grep -F "| $lookup_rel_path |" "$versions_file" 2>/dev/null | head -n1 | awk -F'|' '{gsub(/ /,"",$3); print $3}' || true)"
   [ -n "$expected" ] || return 0
   actual="$(shasum -a 256 "$abs_path" | awk '{print $1}')"
   if [ "$actual" != "$expected" ]; then
@@ -181,8 +199,9 @@ hash_listing_required() {
 
 verify_hash_listed() {
   rel_path="$1"
+  lookup_rel_path="$(normalize_hash_rel_path "$rel_path")"
   if [ -f "$package_root/$rel_path" ] && [ -f "$versions_file" ] \
-     && ! grep -qF "| $rel_path |" "$versions_file" 2>/dev/null; then
+     && ! grep -qF "| $lookup_rel_path |" "$versions_file" 2>/dev/null; then
     if hash_listing_required "$rel_path" && [ "${AI_SAFE_ALLOW_UNLISTED_HARNESS:-0}" != "1" ]; then
       echo "エラー: このファイルは改ざん検知の一覧に登録されていません: $rel_path" >&2
       echo "  AI に読ませる指示書は実質コード相当のため、未検証のまま配置せずに中止します。" >&2
