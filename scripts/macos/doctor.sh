@@ -316,6 +316,9 @@ fi
 # ときだけ FAIL にする。未構成環境では SKIP として集計から除外する。
 gw_launcher="$workspace/.ai-safety/hooks/macos/deepseek/launch-deepseek-gateway.sh"
 gw_js="$workspace/.ai-safety/hooks/common/ds-gateway.js"
+# 合言葉の共有ファイルを管理する。これが欠けるとランチャーは合言葉を用意できず、
+# OpenCode も d-claude も起動しない（fail-closed）ので、診断で見えるようにしておく。
+gw_token="$workspace/.ai-safety/hooks/common/gateway-token.js"
 gw_patterns="$workspace/.ai-safety/hooks/common/secret-patterns.js"
 
 if [ -f "$gw_launcher" ]; then
@@ -333,6 +336,14 @@ if [ -f "$gw_launcher" ]; then
     pass=$((pass + 1))
   else
     echo "FAIL gateway ds-gateway.js missing: $gw_js (reinstall the safety package)"
+    fail=$((fail + 1))
+  fi
+  # gateway-token.js が配置されているか
+  if [ -f "$gw_token" ]; then
+    echo "PASS gateway gateway-token.js present"
+    pass=$((pass + 1))
+  else
+    echo "FAIL gateway gateway-token.js missing: $gw_token (reinstall the safety package)"
     fail=$((fail + 1))
   fi
   # secret-patterns.js が配置されているか

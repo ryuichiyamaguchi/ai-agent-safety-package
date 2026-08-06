@@ -325,6 +325,9 @@ if (Test-Path -LiteralPath $policyPath) {
 # 未構成環境では SKIP として集計から除外する。
 $gwLauncher = Join-Path $Workspace ".ai-safety\hooks\windows\deepseek\launch-deepseek-gateway.ps1"
 $gwJs       = Join-Path $Workspace ".ai-safety\hooks\common\ds-gateway.js"
+# 合言葉の共有ファイルを管理する。これが欠けるとランチャーは合言葉を用意できず、
+# OpenCode も d-claude も起動しない (fail-closed) ので、診断で見えるようにしておく。
+$gwToken    = Join-Path $Workspace ".ai-safety\hooks\common\gateway-token.js"
 $gwPatterns = Join-Path $Workspace ".ai-safety\hooks\common\secret-patterns.js"
 
 if (Test-Path -LiteralPath $gwLauncher) {
@@ -332,6 +335,7 @@ if (Test-Path -LiteralPath $gwLauncher) {
     $nodeDetail = if ($null -ne $nodeCmd) { $nodeCmd.Source } else { "node not found — DeepSeek Gateway requires Node.js (https://nodejs.org)" }
     Add-Result "gateway node present" ($null -ne $nodeCmd) $nodeDetail
     Add-Result "gateway ds-gateway.js present"      (Test-Path -LiteralPath $gwJs)       $gwJs
+    Add-Result "gateway gateway-token.js present"   (Test-Path -LiteralPath $gwToken)    $gwToken
     Add-Result "gateway secret-patterns.js present" (Test-Path -LiteralPath $gwPatterns) $gwPatterns
 } else {
     Add-Skip "gateway checks" "DeepSeek Gateway not installed in this workspace"

@@ -10,7 +10,7 @@ unset AI_SAFE_POLICY AI_SAFE_ROOT
 usage() {
   cat <<'EOF'
 Usage:
-  launch-integrated.sh [workspace] [codex|claude|opencode|d-claude] [standard|assisted|maximum] [--websearch]
+  launch-integrated.sh [workspace] [codex|claude|opencode|d-claude] [standard|assisted|maximum] [--websearch] [--resume]
 
 Profiles:
   standard  Safety hooks + approval monitor. No local LLM is required.
@@ -30,7 +30,10 @@ EOF
 workspace="${1:-$(pwd)}"
 agent="${2:-codex}"
 profile="${3:-standard}"
+# 第 4・第 5 引数は OpenCode 用のフラグ。--resume は前回のセッションを開き直す。
+# 配列にしないのは macOS 標準の bash 3.2 では set -u と空配列展開の相性が悪いため。
 extra="${4:-}"
+extra2="${5:-}"
 
 case "$agent" in
   codex|claude|opencode|d-claude) ;;
@@ -57,10 +60,21 @@ if [ "$agent" = "d-claude" ] && [ "$profile" != "standard" ]; then
   echo "d-claude は standard モードで起動してください。" >&2
   exit 2
 fi
-if [ -n "$extra" ] && { [ "$agent" != "opencode" ] || [ "$extra" != "--websearch" ]; }; then
-  echo "第4引数 --websearch は OpenCode だけで指定できます。" >&2
-  exit 2
-fi
+for _flag in "$extra" "$extra2"; do
+  case "$_flag" in
+    "") ;;
+    --websearch|--resume)
+      if [ "$agent" != "opencode" ]; then
+        echo "--websearch / --resume は OpenCode だけで指定できます。" >&2
+        exit 2
+      fi
+      ;;
+    *)
+      echo "第4引数以降に指定できるのは --websearch / --resume だけです。" >&2
+      exit 2
+      ;;
+  esac
+done
 
 if [ ! -d "$workspace" ]; then
   echo "作業フォルダが見つかりません: $workspace" >&2
@@ -162,7 +176,7 @@ case "$agent:$profile" in
     bash "$hooks/launch-claude-safe.sh" "$workspace"
     ;;
   opencode:standard)
-    bash "$hooks/opencode/launch-opencode-deepseek.sh" "$workspace" "$extra"
+    bash "$hooks/opencode/launch-opencode-deepseek.sh" "$workspace" "$extra" "$extra2"
     ;;
   d-claude:standard)
     consent="$hooks/launch-deepseek-safe.sh"

@@ -10,6 +10,7 @@ const { URL } = require('node:url');
 const { maskText } = require('./secret-patterns.js');
 const { createTokenMap } = require('./token-map.js');
 const { loadDenylistResult } = require('./denylist.js');
+const { recordGatewayStart } = require('./gateway-token.js');
 
 const DEFAULT_PORT = Number(process.env.DS_GATEWAY_PORT || 8788);
 const DEFAULT_UPSTREAM = process.env.DS_GATEWAY_UPSTREAM || 'https://api.deepseek.com/anthropic';
@@ -78,6 +79,81 @@ function isAuthorizedCaller(headers, expectedHash) {
     if (crypto.timingSafeEqual(sha256(candidate), expectedHash)) ok = true;
   }
   return ok;
+}
+
+// 401（呼び出し元の合言葉が合わない）を記録する。
+//
+// もとは 401 をどこにも残していなかったため、「受講者の画面に Unauthorized が出た」以外の
+// 手がかりが無く、原因（合言葉を持たない別プロセスなのか、古い合言葉のまま残った窓なのか、
+// gateway が立て直されたのか）を実機で切り分けられなかった。ここで最低限の素性だけ残す。
+//
+// 合言葉そのものは絶対に書かない。書くのは sha256 の先頭 8 桁（指紋）だけで、
+// 「提示された合言葉と、こちらが期待している合言葉が同じか違うか」を突き合わせるのに使う。
+const UNAUTHORIZED_LOG_WINDOW_MS = 10000;
+const unauthorizedLogState = new Map();
+
+// gateway の出来事を 1 本の追記ファイルに残す。Windows の Start-Process は標準出力の
+// リダイレクトが毎回上書きになり「何回・いつ立ち上がったか」が追えなかったため、
+// OS に依存しないこちらへ寄せる（起動の記録と 401 の記録が同じ時系列で並ぶ）。
+function gatewayEventLogPath() {
+  const dir = process.env.AI_SAFE_LOG_DIR || path.join(os.homedir(), '.ai-safety', 'logs');
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return path.join(dir, 'ds-gateway-events.jsonl');
+}
+
+function logGatewayEvent(event, extra) {
+  try {
+    const ev = {
+      ts: new Date().toISOString(),
+      event,
+      source: 'ds-gateway',
+      gateway_pid: process.pid,
+      ...(extra || {}),
+    };
+    fs.appendFileSync(gatewayEventLogPath(), `${JSON.stringify(ev)}\n`, { mode: 0o600 });
+  } catch (_) { /* ログ失敗で起動は止めない */ }
+}
+
+function fingerprintOf(value) {
+  return sha256(value).toString('hex').slice(0, 8);
+}
+
+function logUnauthorized(req, expectedHash, gatewayStartedAt) {
+  try {
+    const headers = req.headers || {};
+    const presented = presentedTokens(headers);
+    const presentedFp = presented.length ? fingerprintOf(presented[0]) : '';
+    const reqPath = String(req.url || '').split('?')[0];
+    const key = `${presentedFp}|${reqPath}`;
+    const now = Date.now();
+    const prev = unauthorizedLogState.get(key);
+    // 同じ相手が同じ場所を叩き続けるとログが膨らむので間引く。
+    // 抑制した件数は次に書くときに載せるので、頻度は失われない。
+    if (prev && now - prev.at < UNAUTHORIZED_LOG_WINDOW_MS) {
+      prev.suppressed += 1;
+      return;
+    }
+    const suppressed = prev ? prev.suppressed : 0;
+    unauthorizedLogState.set(key, { at: now, suppressed: 0 });
+
+    const ev = {
+      ts: new Date().toISOString(),
+      event: 'unauthorized_caller',
+      source: 'ds-gateway',
+      method: String(req.method || ''),
+      path: reqPath,
+      has_authorization: typeof headers.authorization === 'string' && !!headers.authorization.trim(),
+      has_x_api_key: typeof headers['x-api-key'] === 'string' && !!headers['x-api-key'].trim(),
+      has_api_key: typeof headers['api-key'] === 'string' && !!headers['api-key'].trim(),
+      presented_fp: presentedFp,
+      expected_fp: expectedHash.toString('hex').slice(0, 8),
+      user_agent: String(headers['user-agent'] || '').slice(0, 64),
+      gateway_pid: process.pid,
+      gateway_started_at: gatewayStartedAt || '',
+      suppressed_since_last: suppressed,
+    };
+    fs.appendFileSync(gatewayEventLogPath(), `${JSON.stringify(ev)}\n`, { mode: 0o600 });
+  } catch (_) { /* ログ失敗で応答は止めない */ }
 }
 
 function cloneStatus(value) {
@@ -320,6 +396,8 @@ function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT,
     maxBody,
     upstreamAuthorization,
     authTokenHash,
+    // 401 のログに載せる。「どの gateway が拒否したか」を、立て直しをまたいで見分けるため。
+    startedAt: new Date().toISOString(),
     activity: createActivity(workspace),
   };
   const server = http.createServer((req, res) => {
@@ -339,6 +417,7 @@ function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT,
     }
     // 転送経路は全て呼び出し元認証を通す（欠落・不一致は 401・upstream へは出さない）。
     if (!isAuthorizedCaller(req.headers, session.authTokenHash)) {
+      logUnauthorized(req, session.authTokenHash, session.startedAt);
       req.resume();
       res.writeHead(401, { 'content-type': 'application/json' });
       res.end('{"error":"ds-gateway: unauthorized caller; not forwarded (fail-closed)"}');
@@ -825,6 +904,17 @@ if (require.main === module) {
     process.exit(1);
   }
   gateway.listen().then((s) => {
-    console.log(`listening on 127.0.0.1:${s.address().port}`);
+    const boundPort = s.address().port;
+    // 「今 listen している gateway の素性（合言葉・本体の指紋・PID・ポート・起動時刻）」を
+    // 共有ファイルに残す。次に起動するランチャーはこれを見て、生きている gateway を
+    // そのまま使う（＝合言葉を作り直して立て直さない）判断ができる。
+    logGatewayEvent('gateway_started', { port: boundPort, upstream: String(DEFAULT_UPSTREAM || '') });
+    try {
+      recordGatewayStart({ gatewayPath: __filename, port: boundPort, pid: process.pid });
+    } catch (e) {
+      // 記録に失敗しても検査そのものは働くので起動は止めない（次の起動が立て直すだけ）。
+      console.error(`ds-gateway: could not record gateway info: ${e && e.message ? e.message : e}`);
+    }
+    console.log(`listening on 127.0.0.1:${boundPort} pid=${process.pid} started=${new Date().toISOString()}`);
   });
 }

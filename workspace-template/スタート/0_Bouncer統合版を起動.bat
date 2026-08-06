@@ -27,10 +27,12 @@ echo  4 Claude  最大保護モード（ローカルGemmaが必要）
 echo  5 OpenCode + DeepSeek V4 Pro（送信検査・Web検索OFF）
 echo  6 OpenCode + DeepSeek V4 Pro（Web検索を確認制でON）
 echo  7 d-claude + DeepSeek V4 Pro（Claudeの操作感・送信検査・監視ON）
+echo  8 OpenCode + DeepSeek V4 Pro（前回の続きから開く）
 echo ============================================================
 echo.
-choice /c 1234567 /n /m "番号を選んでください [1-7]: "
+choice /c 12345678 /n /m "番号を選んでください [1-8]: "
 
+if errorlevel 8 goto opencode_resume
 if errorlevel 7 goto d_claude
 if errorlevel 6 goto opencode_web
 if errorlevel 5 goto opencode
@@ -39,6 +41,9 @@ if errorlevel 3 goto claude_assisted
 if errorlevel 2 goto claude
 goto codex
 
+:opencode_resume
+powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent opencode -Profile standard -Resume
+goto done
 :d_claude
 powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent d-claude -Profile standard
 goto done

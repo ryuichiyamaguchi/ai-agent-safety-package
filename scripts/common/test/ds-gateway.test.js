@@ -1053,3 +1053,70 @@ test('audit log includes new PII category counts without raw values (§8)', asyn
   assert.strictEqual(ev.counts.email, 1, 'email count logged');
   assert.ok(!line.includes('user@example.com'), 'raw PII value must not be logged');
 });
+
+// ── 401（呼び出し元の合言葉が合わない）を記録する ────────────────────────
+// もとは 401 をどこにも残していなかったため、受講者の画面に Unauthorized が出ても
+// 原因（合言葉を持たない別プロセスなのか、古い合言葉のまま残った窓なのか）を
+// 実機で切り分けられなかった。合言葉そのものは書かず、指紋だけを残す。
+test('401 は診断ログに残るが、合言葉そのものは記録されない', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-401-'));
+  const prevLogDir = process.env.AI_SAFE_LOG_DIR;
+  process.env.AI_SAFE_LOG_DIR = tmp;
+  t.after(() => { if (prevLogDir === undefined) delete process.env.AI_SAFE_LOG_DIR; else process.env.AI_SAFE_LOG_DIR = prevLogDir; });
+
+  let forwarded = 0;
+  const up = await startUpstream((req, res) => {
+    forwarded += 1; req.resume();
+    res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}');
+  });
+  t.after(() => up.close());
+  const gw = createGateway({ upstream: `http://127.0.0.1:${up.address().port}`, port: 0, denylistTerms: [] });
+  const server = await gw.listen(); t.after(() => server.close());
+
+  const wrongToken = 'stale-token-from-an-older-window';
+  const res = await request(server.address().port, {
+    path: '/v1/messages', method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${wrongToken}` },
+    body: { messages: [{ role: 'user', content: 'hi' }] },
+  });
+  assert.strictEqual(res.status, 401);
+  assert.strictEqual(forwarded, 0, '401 は upstream へ届いてはいけない');
+
+  await new Promise((r) => setTimeout(r, 30));
+  const raw = fs.readFileSync(path.join(tmp, 'ds-gateway-events.jsonl'), 'utf8').trim();
+  const ev = JSON.parse(raw.split('\n').pop());
+  assert.strictEqual(ev.event, 'unauthorized_caller');
+  assert.strictEqual(ev.method, 'POST');
+  assert.strictEqual(ev.path, '/v1/messages');
+  assert.strictEqual(ev.has_authorization, true);
+  assert.match(ev.presented_fp, /^[0-9a-f]{8}$/, '提示された合言葉は指紋だけを記録する');
+  assert.match(ev.expected_fp, /^[0-9a-f]{8}$/);
+  assert.notStrictEqual(ev.presented_fp, ev.expected_fp);
+  assert.ok(ev.gateway_pid > 0);
+  assert.match(ev.gateway_started_at, /^\d{4}-\d{2}-\d{2}T/, 'どの gateway が拒否したか分かること');
+  assert.ok(!raw.includes(wrongToken), '合言葉そのものをログに書いてはいけない');
+  assert.ok(!raw.includes(TEST_TOKEN), '正しい合言葉もログに書いてはいけない');
+});
+
+test('401 の連打はログを溢れさせない（間引きつつ件数は残す）', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-401-flood-'));
+  const prevLogDir = process.env.AI_SAFE_LOG_DIR;
+  process.env.AI_SAFE_LOG_DIR = tmp;
+  t.after(() => { if (prevLogDir === undefined) delete process.env.AI_SAFE_LOG_DIR; else process.env.AI_SAFE_LOG_DIR = prevLogDir; });
+
+  const up = await startUpstream((req, res) => { req.resume(); res.writeHead(200); res.end('{}'); });
+  t.after(() => up.close());
+  const gw = createGateway({ upstream: `http://127.0.0.1:${up.address().port}`, port: 0, denylistTerms: [] });
+  const server = await gw.listen(); t.after(() => server.close());
+  const port = server.address().port;
+
+  for (let i = 0; i < 5; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await request(port, { path: '/v1/messages', method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer same-wrong-token' },
+      body: { messages: [] } });
+  }
+  await new Promise((r) => setTimeout(r, 30));
+  const lines = fs.readFileSync(path.join(tmp, 'ds-gateway-events.jsonl'), 'utf8').trim().split('\n');
+  assert.strictEqual(lines.length, 1, '同じ相手・同じ宛先の連打は 1 行に間引く');
+});

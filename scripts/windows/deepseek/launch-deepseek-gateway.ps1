@@ -6,6 +6,7 @@ param([string]$Workspace = "$env:USERPROFILE\Documents\my-ai-workspace")
 $ErrorActionPreference = 'Stop'
 $hooks = Join-Path $Workspace '.ai-safety\hooks'
 $gatewayJs = Join-Path $hooks 'common\ds-gateway.js'
+$gatewayTokenJs = Join-Path $hooks 'common\gateway-token.js'
 $launchClaude = Join-Path $hooks 'windows\launch-claude-safe.ps1'
 $port = if ($env:DS_GATEWAY_PORT) { $env:DS_GATEWAY_PORT } else { '8788' }
 $keyFile = Join-Path $env:USERPROFILE '.deepseek-claude\auth'
@@ -19,6 +20,9 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 if (-not (Test-Path $gatewayJs)) {
   Write-Host "[ERROR] ds-gateway.js not found: $gatewayJs"; exit 1
 }
+if (-not (Test-Path $gatewayTokenJs)) {
+  Write-Host "[ERROR] gateway-token.js not found: $gatewayTokenJs"; exit 1
+}
 if (-not (Test-Path $launchClaude)) {
   Write-Host "[ERROR] launch-claude-safe.ps1 not found: $launchClaude"; exit 1
 }
@@ -29,18 +33,48 @@ if (-not (Test-Path -LiteralPath $keyFile -PathType Leaf) -or (Get-Item -Literal
   exit 1
 }
 
-# 呼び出し元認証トークンを起動ごとに採番する。127.0.0.1 で待つだけでは同一 PC の
-# 任意プロセスや DNS リバインディングを踏んだブラウザから叩けてしまうため、
-# 「この起動で立てた Claude Code だけが通れる」合言葉を毎回作り直す。
-# コマンドライン引数には載せない (プロセス一覧に出るため)。環境変数だけで扱う。
-# RandomNumberGenerator の静的 GetBytes は .NET Framework に無いため Create() 経由
-# (PowerShell 5.1 と 7 の両方で動く書き方)。
-$tokenBytes = New-Object byte[] 32
-$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-try { $rng.GetBytes($tokenBytes) } finally { $rng.Dispose() }
-$gatewayToken = -join ($tokenBytes | ForEach-Object { $_.ToString('x2') })
+# 呼び出し元認証の合言葉は、この PC の共有ファイル (実キーと同じ置き場) から取る。
+# 127.0.0.1 で待つだけでは同一 PC の任意プロセスや DNS リバインディングを踏んだブラウザから
+# 叩けてしまうため、合言葉自体は必須のまま。以前は起動ごとに採番していたが、それだと
+# OpenCode と d-claude を併用したときに後発が先発の gateway を殺し、先に開いていた窓が
+# 古い合言葉のまま 401 になっていたので、PC 単位の共有に変えた。
+# コマンドライン引数には載せない (プロセス一覧に出るため)。標準出力で受け取る。
+$gatewayToken = (& node $gatewayTokenJs '--ensure' '--gateway' $gatewayJs | Out-String).Trim()
 if (-not $gatewayToken) {
-  Write-Host "【エラー】Gateway の合言葉を生成できませんでした (fail-closed)。"; exit 1
+  Write-Host "【エラー】Gateway の合言葉を用意できませんでした (fail-closed)。"; exit 1
+}
+
+# そのポートを握っているのが「自分たちの ds-gateway.js」かを、実行中のコマンドラインで確かめる。
+# 見つからなければ 0 を返す (＝再利用しない)。
+function Get-OurGatewayPid {
+  param([string]$Port, [string]$GatewayJs)
+
+  $gatewayPath = (Resolve-Path -LiteralPath $GatewayJs).Path.Replace('/', '\').ToLowerInvariant()
+  try {
+    $listeners = @(Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort ([int]$Port) -State Listen -ErrorAction SilentlyContinue)
+  } catch {
+    $listeners = @()
+  }
+  foreach ($listener in $listeners) {
+    $processId = $listener.OwningProcess
+    if (-not $processId) { continue }
+    try {
+      $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction Stop
+    } catch {
+      continue
+    }
+    $cmd = ([string]$proc.CommandLine).Replace('/', '\').ToLowerInvariant()
+    if ($cmd.Contains($gatewayPath)) { return [int]$processId }
+  }
+  return 0
+}
+
+# 稼働中の gateway をそのまま使えるかを判定する (生きている＋中身が今と同じ)。
+function Test-GatewayReusable {
+  param([string]$Port, [string]$GatewayJs, [string]$GatewayTokenJs)
+  if ((Get-OurGatewayPid -Port $Port -GatewayJs $GatewayJs) -le 0) { return $false }
+  & node $GatewayTokenJs '--probe' '--gateway' $GatewayJs '--port' $Port 2>$null | Out-Null
+  return ($LASTEXITCODE -eq 0)
 }
 
 function Stop-StaleGateway {
@@ -70,14 +104,21 @@ function Stop-StaleGateway {
   }
 }
 
-Stop-StaleGateway -Port $port -GatewayJs $gatewayJs
-
-$env:DS_GATEWAY_PORT = $port
-# 実キーと合言葉は gateway 子プロセスにだけ渡し、spawn 後は自分の環境から消す。
-$env:DS_GATEWAY_TOKEN = $gatewayToken
-$env:DS_GATEWAY_AUTH_FILE = $keyFile
-$gw = Start-Process node -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden
-Remove-Item Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_AUTH_FILE -ErrorAction SilentlyContinue
+# 既に動いている gateway が「自分たちのプロセス」かつ「中身が今と同じ」なら、そのまま使う。
+# 中身が違う (＝更新後に古い gateway が居座っている) ときだけ停止して立て直す。
+$gw = $null
+$gatewayReused = Test-GatewayReusable -Port $port -GatewayJs $gatewayJs -GatewayTokenJs $gatewayTokenJs
+if ($gatewayReused) {
+  Write-Host "稼働中の送信検査 Gateway をそのまま使います (127.0.0.1:$port)。"
+} else {
+  Stop-StaleGateway -Port $port -GatewayJs $gatewayJs
+  $env:DS_GATEWAY_PORT = $port
+  # 実キーと合言葉は gateway 子プロセスにだけ渡し、spawn 後は自分の環境から消す。
+  $env:DS_GATEWAY_TOKEN = $gatewayToken
+  $env:DS_GATEWAY_AUTH_FILE = $keyFile
+  $gw = Start-Process node -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden
+  Remove-Item Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_AUTH_FILE -ErrorAction SilentlyContinue
+}
 try {
   $ok = $false
   for ($i = 0; $i -lt 50; $i++) {
@@ -85,6 +126,14 @@ try {
       $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/healthz" -UseBasicParsing -TimeoutSec 1
       if ($r.Content -match '"status":"ok"') { $ok = $true; break }
     } catch { Start-Sleep -Milliseconds 100 }
+    if ($gw -and $gw.HasExited) { break }
+  }
+  # 自分で立てた gateway が落ちている場合、二つの窓を同時に開いてポートを取り合い、
+  # こちらが負けた可能性がある。相手が正しい gateway なら、それをそのまま使って続行する。
+  if ($gw -and $gw.HasExited -and (Test-GatewayReusable -Port $port -GatewayJs $gatewayJs -GatewayTokenJs $gatewayTokenJs)) {
+    $gw = $null
+    $gatewayReused = $true
+    $ok = $true
   }
   if (-not $ok) {
     Write-Host "[ERROR] Gateway health check failed. Not launching without send-side inspection (fail-closed)."
@@ -92,7 +141,12 @@ try {
   }
   # health OK かつ spawn した node が生存していれば、そのポートは確実に自プロセスのもの。
   # foreign process がポートを占有していれば自 node は bind 失敗で即終了している。
-  if ($gw.HasExited) {
+  # 共用時は、そのポートを握っているのが自分たちの gateway であることを直接確かめる。
+  if ($gw -and $gw.HasExited) {
+    Write-Host "[ERROR] Gateway process is not alive (port may be in use). Not launching without send-side inspection (fail-closed)."
+    exit 1
+  }
+  if ($gatewayReused -and (Get-OurGatewayPid -Port $port -GatewayJs $gatewayJs) -le 0) {
     Write-Host "[ERROR] Gateway process is not alive (port may be in use). Not launching without send-side inspection (fail-closed)."
     exit 1
   }

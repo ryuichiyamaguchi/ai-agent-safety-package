@@ -3,9 +3,9 @@
 set -euo pipefail
 
 WORKSPACE="${1:-$HOME/Documents/my-ai-workspace}"
-WEBSEARCH="${2:-}"
 HOOKS_DIR="$WORKSPACE/.ai-safety/hooks"
 GATEWAY_JS="$HOOKS_DIR/common/ds-gateway.js"
+GATEWAY_TOKEN_JS="$HOOKS_DIR/common/gateway-token.js"
 CONFIG_JS="$HOOKS_DIR/common/opencode-config.js"
 MONITOR_PLUGIN="$HOOKS_DIR/common/opencode-bouncer-monitor.mjs"
 PORT="${DS_GATEWAY_PORT:-8788}"
@@ -14,13 +14,23 @@ KEY_FILE="$KEY_DIR/auth"
 LOG_DIR="${AI_SAFE_LOG_DIR:-$HOME/.ai-safety/logs}"
 COACH_MARKER="$LOG_DIR/coach-engine"
 
-case "$WEBSEARCH" in
-  ""|--websearch) ;;
-  *) echo "使い方: $0 [workspace] [--websearch]" >&2; exit 2 ;;
-esac
+# 第 2 引数以降はフラグ。--resume は前回の続きから開く（OpenCode の --continue）。
+# 位置が入れ替わっても効くよう、順不同で受ける。
+WEBSEARCH=""
+RESUME=""
+shift || true
+for _arg in "$@"; do
+  case "$_arg" in
+    "") ;;
+    --websearch) WEBSEARCH="--websearch" ;;
+    --resume|--continue) RESUME="--continue" ;;
+    *) echo "使い方: $0 [workspace] [--websearch] [--resume]" >&2; exit 2 ;;
+  esac
+done
 
 [ -d "$WORKSPACE" ] || { echo "作業フォルダが見つかりません: $WORKSPACE" >&2; exit 2; }
 [ -f "$GATEWAY_JS" ] || { echo "送信検査 Gateway が見つかりません: $GATEWAY_JS" >&2; exit 2; }
+[ -f "$GATEWAY_TOKEN_JS" ] || { echo "送信検査 Gateway の合言葉管理が見つかりません: $GATEWAY_TOKEN_JS" >&2; exit 2; }
 [ -f "$CONFIG_JS" ] || { echo "OpenCode 安全設定が見つかりません: $CONFIG_JS" >&2; exit 2; }
 [ -f "$MONITOR_PLUGIN" ] || { echo "OpenCode承認モニターが見つかりません: $MONITOR_PLUGIN" >&2; exit 2; }
 
@@ -34,6 +44,11 @@ if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
     echo "  websearch: opt-in (approval required)"
   else
     echo "  websearch: off"
+  fi
+  if [ -n "$RESUME" ]; then
+    echo "  session:   continue last"
+  else
+    echo "  session:   new"
   fi
   exit 0
 fi
@@ -55,6 +70,20 @@ if ! node -e 'const m=require(process.argv[1]);process.exit(m.isSupportedVersion
   exit 1
 fi
 
+# そのポートを握っているのが「自分たちの ds-gateway.js」かどうかを、実行中のコマンドラインで
+# 確かめる。ポートに何かが応答するだけでは、それが本物の gateway とは限らないため。
+# lsof が無い環境では判定できない＝再利用しない（従来どおり立て直す）に倒す。
+our_gateway_pid() {
+  command -v lsof >/dev/null 2>&1 || return 1
+  for pid in $(lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true); do
+    cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    case "$cmd" in
+      *"$GATEWAY_JS"*) printf '%s' "$pid"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
 stop_stale_gateway() {
   command -v lsof >/dev/null 2>&1 || return 0
   for pid in $(lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true); do
@@ -65,26 +94,33 @@ stop_stale_gateway() {
   done
 }
 
-# 呼び出し元認証トークンを起動ごとに採番する。127.0.0.1 で待つだけでは同一 PC の
-# 任意プロセスや DNS リバインディングを踏んだブラウザが、実キーへ差し替えて転送する
-# gateway をそのまま叩けてしまうため、「この起動で立てた OpenCode だけが通れる」
-# 合言葉を毎回作り直す。コマンドライン引数には載せない（ps に出るため）。
-if command -v openssl >/dev/null 2>&1; then
-  GATEWAY_TOKEN="$(openssl rand -hex 32)"
-else
-  GATEWAY_TOKEN="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
-fi
-[ -n "$GATEWAY_TOKEN" ] || { echo "送信検査 Gateway の合言葉を生成できませんでした（fail-closed）。" >&2; exit 1; }
+# 呼び出し元認証の合言葉は、この PC の共有ファイル（実キーと同じ置き場・同じ権限）から取る。
+# 以前は起動ごとに採番して、動いている gateway を必ず停止して立て直していた。その方式だと
+# OpenCode を 2 枚開いたり d-claude と併用したりすると、後発が先発の gateway を殺すため、
+# 先に開いていた窓だけが古い合言葉のまま取り残されて全リクエストが 401 になっていた。
+# コマンドライン引数には載せない（ps に出るため）。標準出力で受け取る。
+GATEWAY_TOKEN="$(node "$GATEWAY_TOKEN_JS" --ensure --gateway "$GATEWAY_JS" 2>/dev/null || true)"
+[ -n "$GATEWAY_TOKEN" ] || { echo "送信検査 Gateway の合言葉を用意できませんでした（fail-closed）。" >&2; exit 1; }
 
 mkdir -p "$LOG_DIR"
-stop_stale_gateway
-DS_GATEWAY_PORT="$PORT" \
-DS_GATEWAY_UPSTREAM="https://api.deepseek.com" \
-DS_GATEWAY_AUTH_FILE="$KEY_FILE" \
-DS_GATEWAY_TOKEN="$GATEWAY_TOKEN" \
-DS_GATEWAY_WORKSPACE="$WORKSPACE" \
-  node "$GATEWAY_JS" >"$LOG_DIR/opencode-deepseek-gateway.log" 2>&1 &
-GW_PID=$!
+
+# 既に動いている gateway が「自分たちのプロセス」かつ「中身が今と同じ」なら、そのまま使う。
+# 中身が違う（＝更新後に古い gateway が居座っている）ときだけ停止して立て直す。
+GW_PID=""
+GATEWAY_REUSED=0
+if our_gateway_pid >/dev/null 2>&1 \
+   && node "$GATEWAY_TOKEN_JS" --probe --gateway "$GATEWAY_JS" --port "$PORT" >/dev/null 2>&1; then
+  GATEWAY_REUSED=1
+else
+  stop_stale_gateway
+  DS_GATEWAY_PORT="$PORT" \
+  DS_GATEWAY_UPSTREAM="https://api.deepseek.com" \
+  DS_GATEWAY_AUTH_FILE="$KEY_FILE" \
+  DS_GATEWAY_TOKEN="$GATEWAY_TOKEN" \
+  DS_GATEWAY_WORKSPACE="$WORKSPACE" \
+    node "$GATEWAY_JS" >>"$LOG_DIR/opencode-deepseek-gateway.log" 2>&1 &
+  GW_PID=$!
+fi
 
 WATCHDOG_PID=""
 # coach マーカーは d-claude と OpenCode が同じパスを共有する。並行起動時に片方の終了で
@@ -94,7 +130,9 @@ remove_own_coach_marker() {
   rm -f "$COACH_MARKER" 2>/dev/null || true
 }
 cleanup() {
-  kill "$GW_PID" 2>/dev/null || true
+  # 自分で立てた gateway だけを止める。共用中の gateway（GATEWAY_REUSED=1）を止めると、
+  # 同時に開いている別の窓の通信をこちらの終了で巻き添えにしてしまう。
+  [ -n "$GW_PID" ] && kill "$GW_PID" 2>/dev/null
   [ -n "$WATCHDOG_PID" ] && kill "$WATCHDOG_PID" 2>/dev/null
   remove_own_coach_marker
   return 0
@@ -107,10 +145,34 @@ for _i in $(seq 1 50); do
     ready=1
     break
   fi
-  kill -0 "$GW_PID" 2>/dev/null || break
+  # 自分で立てた場合だけ、その子プロセスの生存で早期に見切る。
+  if [ -n "$GW_PID" ]; then
+    kill -0 "$GW_PID" 2>/dev/null || break
+  fi
   sleep 0.1
 done
-if [ "$ready" -ne 1 ] || ! kill -0 "$GW_PID" 2>/dev/null; then
+# health OK かつ「自身が spawn した node が生存」なら、そのポートは確実に自プロセスのもの。
+# 共用時は起動前に our_gateway_pid で「そのポートを握っているのが自分たちの ds-gateway.js」
+# であることを確かめてあるので、ここでは生存の再確認だけ行う。
+gateway_alive=0
+if [ "$GATEWAY_REUSED" = "1" ]; then
+  our_gateway_pid >/dev/null 2>&1 && gateway_alive=1
+elif [ -n "$GW_PID" ] && kill -0 "$GW_PID" 2>/dev/null; then
+  gateway_alive=1
+fi
+# 自分で立てた gateway が落ちている場合、窓を二つ同時に開いてポートを取り合い、こちらが
+# 負けた可能性がある。相手が正しい gateway ならそれをそのまま使って続行する
+# （ここで止めると「同時にダブルクリックしたら片方が起動しない」になるため）。
+if [ "$gateway_alive" -ne 1 ] && [ -n "$GW_PID" ]; then
+  if our_gateway_pid >/dev/null 2>&1 \
+     && node "$GATEWAY_TOKEN_JS" --probe --gateway "$GATEWAY_JS" --port "$PORT" >/dev/null 2>&1; then
+    GW_PID=""
+    GATEWAY_REUSED=1
+    gateway_alive=1
+    ready=1
+  fi
+fi
+if [ "$ready" -ne 1 ] || [ "$gateway_alive" -ne 1 ]; then
   echo "送信検査 Gateway を確認できないため、OpenCode は起動しません（fail-closed）。" >&2
   echo "確認先: $LOG_DIR/opencode-deepseek-gateway.log" >&2
   exit 1
@@ -340,4 +402,11 @@ echo "Bouncer送信検査: 有効 / モデル: DeepSeek V4 Pro / 補助: V4 Flas
 echo "変更操作は確認、外部フォルダは禁止、Web検索は${WEBSEARCH:+許可時のみ}$( [ -n "$WEBSEARCH" ] || printf '無効' )です。"
 echo "危険なコマンド（まとめて削除・鍵の読み出し・ネットから拾った実行）は確認なしで止まります。"
 
-"$OPENCODE_BIN"
+# --resume が指定されたときは前回のセッションを開き直す。会話は OpenCode 自身が
+# ローカル（~/.local/share/opencode）に保存しているので、前の窓が落ちても続きから戻れる。
+if [ -n "$RESUME" ]; then
+  echo "前回の続きから開きます（新しく始めるときは「続きから」ではないボタンを使ってください）。"
+  "$OPENCODE_BIN" --continue
+else
+  "$OPENCODE_BIN"
+fi

@@ -32,6 +32,9 @@ function waitForExit(child) {
   });
 }
 
+// 素性が確かめられない gateway（合言葉の共有ファイルに記録が無い）は信用せず、
+// 停止してから自分で立て直す。ここが緩むと「中身の分からない gateway に実キーを預ける」
+// ことになるため、共用を入れたあとも残す必要がある回帰。
 test('macOS DeepSeek launcher replaces a stale gateway from the same package path', async (t) => {
   const root = path.join(__dirname, '..', '..', '..');
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-launcher-'));
@@ -48,7 +51,7 @@ test('macOS DeepSeek launcher replaces a stale gateway from the same package pat
   fs.mkdirSync(path.join(hooks, 'macos', 'deepseek'), { recursive: true });
   fs.mkdirSync(path.join(hooks, 'macos'), { recursive: true });
 
-  for (const file of ['ds-gateway.js', 'secret-patterns.js', 'token-map.js', 'denylist.js']) {
+  for (const file of ['ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js']) {
     fs.copyFileSync(path.join(root, 'scripts', 'common', file), path.join(hooks, 'common', file));
   }
   fs.copyFileSync(
@@ -57,8 +60,16 @@ test('macOS DeepSeek launcher replaces a stale gateway from the same package pat
   );
   fs.writeFileSync(path.join(hooks, 'macos', 'launch-claude-safe.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
 
+  // 「素性の記録が無い gateway」を装う。合言葉の共有ファイルは実 HOME を汚さないよう
+  // 使い捨ての場所に向ける（ランチャー側は fakeHome を見るので、記録は見つからない）。
   const stale = spawn(process.execPath, [path.join(hooks, 'common', 'ds-gateway.js')], {
-    env: { ...process.env, DS_GATEWAY_PORT: '8799', DS_GATEWAY_TOKEN: 'stale-gateway-token' },
+    env: {
+      ...process.env,
+      DS_GATEWAY_PORT: '8799',
+      DS_GATEWAY_TOKEN: 'stale-gateway-token',
+      DS_GATEWAY_TOKEN_FILE: path.join(workspace, 'stale-gateway-token.json'),
+      AI_SAFE_LOG_DIR: path.join(workspace, 'stale-logs'),
+    },
     stdio: 'ignore',
   });
   t.after(() => {
@@ -100,7 +111,7 @@ test('macOS DeepSeek launcher is fail-closed when the DeepSeek key is not regist
   const hooks = path.join(workspace, '.ai-safety', 'hooks');
   fs.mkdirSync(path.join(hooks, 'common'), { recursive: true });
   fs.mkdirSync(path.join(hooks, 'macos', 'deepseek'), { recursive: true });
-  for (const file of ['ds-gateway.js', 'secret-patterns.js', 'token-map.js', 'denylist.js']) {
+  for (const file of ['ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js']) {
     fs.copyFileSync(path.join(root, 'scripts', 'common', file), path.join(hooks, 'common', file));
   }
   fs.copyFileSync(
@@ -217,4 +228,71 @@ test('macOS integrated d-claude starts monitor, consent gate, and safe gateway t
     fs.rmSync(workspace, { recursive: true, force: true });
     fs.rmSync(fakeHome, { recursive: true, force: true });
   }
+});
+
+// 素性が確かめられる gateway（自分たちの ds-gateway.js・中身も同じ）が既に動いていれば、
+// 停止せずそのまま使う。これが無いと、2 枚目の窓を開いた時点で 1 枚目の合言葉が無効になり、
+// 先に開いていた窓が「Unauthorized」で全部止まる（教室で頻発した事象）。
+test('macOS DeepSeek launcher reuses a healthy gateway instead of restarting it', async (t) => {
+  const { ensureToken } = require('../gateway-token.js');
+  const root = path.join(__dirname, '..', '..', '..');
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-reuse-'));
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-reuse-home-'));
+  t.after(() => {
+    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  });
+  fs.mkdirSync(path.join(fakeHome, '.deepseek-claude'), { recursive: true });
+  fs.writeFileSync(path.join(fakeHome, '.deepseek-claude', 'auth'), 'ds-test-key-never-log\n', { mode: 0o600 });
+
+  const hooks = path.join(workspace, '.ai-safety', 'hooks');
+  fs.mkdirSync(path.join(hooks, 'common'), { recursive: true });
+  fs.mkdirSync(path.join(hooks, 'macos', 'deepseek'), { recursive: true });
+  for (const file of ['ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js']) {
+    fs.copyFileSync(path.join(root, 'scripts', 'common', file), path.join(hooks, 'common', file));
+  }
+  fs.copyFileSync(
+    path.join(root, 'scripts', 'macos', 'deepseek', 'launch-deepseek-gateway.sh'),
+    path.join(hooks, 'macos', 'deepseek', 'launch-deepseek-gateway.sh'),
+  );
+  fs.writeFileSync(path.join(hooks, 'macos', 'launch-claude-safe.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+
+  // 先に開いている窓の gateway を再現する（合言葉は共有ファイルから取る＝ランチャーと同じ経路）。
+  const gatewayJs = path.join(hooks, 'common', 'ds-gateway.js');
+  const tokenFile = path.join(fakeHome, '.deepseek-claude', 'gateway-token');
+  const shared = ensureToken({ file: tokenFile, gatewayPath: gatewayJs });
+  const running = spawn(process.execPath, [gatewayJs], {
+    env: {
+      ...process.env,
+      HOME: fakeHome,
+      DS_GATEWAY_PORT: '8797',
+      DS_GATEWAY_TOKEN: shared.token,
+      DS_GATEWAY_AUTH_FILE: path.join(fakeHome, '.deepseek-claude', 'auth'),
+      AI_SAFE_LOG_DIR: path.join(fakeHome, 'logs'),
+    },
+    stdio: 'ignore',
+  });
+  t.after(() => { if (!running.killed) running.kill('SIGKILL'); });
+  await waitForHealth(8797);
+
+  const launcher = spawn('bash', [path.join(hooks, 'macos', 'deepseek', 'launch-deepseek-gateway.sh'), workspace], {
+    env: {
+      ...process.env,
+      HOME: fakeHome,
+      DS_GATEWAY_PORT: '8797',
+      AI_SAFE_LOG_DIR: path.join(fakeHome, 'logs'),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let out = '';
+  let err = '';
+  launcher.stdout.on('data', (c) => { out += c; });
+  launcher.stderr.on('data', (c) => { err += c; });
+  const code = await waitForExit(launcher);
+
+  assert.strictEqual(code, 0, `stdout:\n${out}\nstderr:\n${err}`);
+  assert.match(out, /稼働中の送信検査 Gateway をそのまま使います/, '動いている gateway は立て直さない');
+  assert.strictEqual(running.exitCode, null, '先に開いていた窓の gateway を停止してはいけない');
+  assert.doesNotMatch(out + err, /ds-test-key-never-log/, 'キー本文を出力しない');
+  assert.doesNotMatch(out + err, /[0-9a-f]{64}/, '合言葉を出力しない');
 });

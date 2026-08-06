@@ -109,7 +109,7 @@ async function buildLauncherFixture(t) {
   fs.mkdirSync(path.join(workspace, '.ai-safety', 'policy'), { recursive: true });
   fs.copyFileSync(path.join(root, 'policy/safety-policy.json'), path.join(workspace, '.ai-safety/policy/safety-policy.json'));
   for (const file of [
-    'ds-gateway.js', 'secret-patterns.js', 'token-map.js', 'denylist.js',
+    'ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js',
     'opencode-config.js', 'opencode-bouncer-monitor.mjs',
     'gemini-search-mcp.js', 'gemini-vision-mcp.js', 'pollinations-image-mcp.js', 'agy-image-mcp.js',
     'gemini-client.js',

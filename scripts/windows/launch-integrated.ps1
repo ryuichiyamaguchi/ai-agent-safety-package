@@ -7,7 +7,9 @@
     # 既存の呼び出し元 (スタート/*.bat, docs) は -Profile のまま使えるように別名を残す。
     [Alias('Profile')]
     [string]$SafetyProfile = 'standard',
-    [switch]$WebSearch
+    [switch]$WebSearch,
+    # OpenCode のみ。前回のセッションを開き直す。
+    [switch]$Resume
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +22,7 @@ if ($Agent -eq 'codex' -and $SafetyProfile -ne 'standard') { throw 'Codex は st
 if ($Agent -eq 'opencode' -and $SafetyProfile -ne 'standard') { throw 'OpenCode は standard モードで起動してください。' }
 if ($Agent -eq 'd-claude' -and $SafetyProfile -ne 'standard') { throw 'd-claude は standard モードで起動してください。' }
 if ($WebSearch -and $Agent -ne 'opencode') { throw '-WebSearch は OpenCode だけで指定できます。' }
+if ($Resume -and $Agent -ne 'opencode') { throw '-Resume は OpenCode だけで指定できます。' }
 if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw "作業フォルダが見つかりません: $Workspace" }
 
 # どのボタン(スタート等)から呼ばれても、AI は必ず作業フォルダを起点に起動する。
@@ -37,6 +40,9 @@ if ($env:AI_SAFE_DRY_RUN -eq '1') {
     Write-Output "  agent:     $Agent"
     Write-Output "  profile:   $SafetyProfile"
     Write-Output '  monitor:   enabled'
+    if ($Agent -eq 'opencode') {
+        Write-Output ('  session:   ' + $(if ($Resume) { 'continue last' } else { 'new' }))
+    }
     if ($SafetyProfile -eq 'maximum') {
         Write-Output '  gateway:   http://127.0.0.1:8787 (local only)'
     } elseif ($Agent -eq 'opencode' -or $Agent -eq 'd-claude') {
@@ -116,7 +122,7 @@ try {
             $exitCode = $LASTEXITCODE
         }
         'opencode:standard' {
-            & (Join-Path $hooks 'opencode\launch-opencode-deepseek.ps1') -Workspace $Workspace -WebSearch:$WebSearch
+            & (Join-Path $hooks 'opencode\launch-opencode-deepseek.ps1') -Workspace $Workspace -WebSearch:$WebSearch -Resume:$Resume
             $exitCode = $LASTEXITCODE
         }
         'd-claude:standard' {

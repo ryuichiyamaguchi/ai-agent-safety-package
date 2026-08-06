@@ -1,12 +1,15 @@
 ﻿param(
     [string]$Workspace = "$env:USERPROFILE\Documents\my-ai-workspace",
-    [switch]$WebSearch
+    [switch]$WebSearch,
+    # 前回のセッションを開き直す（OpenCode の --continue）。
+    [switch]$Resume
 )
 
 $ErrorActionPreference = 'Stop'
 $Workspace = [System.IO.Path]::GetFullPath($Workspace)
 $hooks = Join-Path $Workspace '.ai-safety\hooks'
 $gatewayJs = Join-Path $hooks 'common\ds-gateway.js'
+$gatewayTokenJs = Join-Path $hooks 'common\gateway-token.js'
 $configJs = Join-Path $hooks 'common\opencode-config.js'
 $monitorPlugin = Join-Path $hooks 'common\opencode-bouncer-monitor.mjs'
 $port = if ($env:DS_GATEWAY_PORT) { $env:DS_GATEWAY_PORT } else { '8788' }
@@ -17,6 +20,7 @@ $coachMarker = Join-Path $logDir 'coach-engine'
 
 if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw "作業フォルダが見つかりません: $Workspace" }
 if (-not (Test-Path -LiteralPath $gatewayJs -PathType Leaf)) { throw "送信検査 Gateway が見つかりません: $gatewayJs" }
+if (-not (Test-Path -LiteralPath $gatewayTokenJs -PathType Leaf)) { throw "送信検査 Gateway の合言葉管理が見つかりません: $gatewayTokenJs" }
 if (-not (Test-Path -LiteralPath $configJs -PathType Leaf)) { throw "OpenCode 安全設定が見つかりません: $configJs" }
 if (-not (Test-Path -LiteralPath $monitorPlugin -PathType Leaf)) { throw "OpenCode承認モニターが見つかりません: $monitorPlugin" }
 
@@ -27,6 +31,7 @@ if ($env:AI_SAFE_DRY_RUN -eq '1') {
     Write-Output '  config:    OPENCODE_CONFIG_CONTENT'
     Write-Output '  model:     DeepSeek V4 Pro / small: V4 Flash'
     Write-Output ('  websearch: ' + $(if ($WebSearch) { 'opt-in (approval required)' } else { 'off' }))
+    Write-Output ('  session:   ' + $(if ($Resume) { 'continue last' } else { 'new' }))
     exit 0
 }
 
@@ -53,6 +58,23 @@ if (-not $version) { throw 'OpenCode のバージョンを取得できません�
 & $node.Source -e 'const m=require(process.argv[1]);process.exit(m.isSupportedVersion(process.argv[2])?0:1)' $configJs $version
 if ($LASTEXITCODE -ne 0) { throw "OpenCode 1.14.24 以上が必要です（検出: $version）。" }
 
+# そのポートを握っているのが「自分たちの ds-gateway.js」かどうかを、実行中のコマンドラインで
+# 確かめる。ポートに何かが応答するだけでは、それが本物の gateway とは限らないため。
+# 見つからなければ 0 を返す（＝再利用しない）。
+function Get-OurGatewayPid {
+    param([string]$Port, [string]$GatewayJs)
+    $gatewayPath = (Resolve-Path -LiteralPath $GatewayJs).Path.Replace('/', '\').ToLowerInvariant()
+    try {
+        $listeners = @(Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort ([int]$Port) -State Listen -ErrorAction SilentlyContinue)
+    } catch { $listeners = @() }
+    foreach ($listener in $listeners) {
+        try { $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $($listener.OwningProcess)" -ErrorAction Stop } catch { continue }
+        $cmd = ([string]$proc.CommandLine).Replace('/', '\').ToLowerInvariant()
+        if ($cmd.Contains($gatewayPath)) { return [int]$listener.OwningProcess }
+    }
+    return 0
+}
+
 function Stop-StaleGateway {
     param([string]$Port, [string]$GatewayJs)
     $gatewayPath = (Resolve-Path -LiteralPath $GatewayJs).Path.Replace('/', '\').ToLowerInvariant()
@@ -69,29 +91,40 @@ function Stop-StaleGateway {
     }
 }
 
-# 呼び出し元認証トークンを起動ごとに採番する。127.0.0.1 で待つだけでは同一 PC の
-# 任意プロセスや DNS リバインディングを踏んだブラウザが、実キーへ差し替えて転送する
-# gateway をそのまま叩けてしまうため、「この起動で立てた OpenCode だけが通れる」
-# 合言葉を毎回作り直す。コマンドライン引数には載せない (プロセス一覧に出るため)。
-# RandomNumberGenerator の静的 GetBytes は .NET Framework に無いため Create() 経由
-# (PowerShell 5.1 と 7 の両方で動く書き方)。
-$tokenBytes = New-Object byte[] 32
-$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-try { $rng.GetBytes($tokenBytes) } finally { $rng.Dispose() }
-$gatewayToken = -join ($tokenBytes | ForEach-Object { $_.ToString('x2') })
-if (-not $gatewayToken) { throw '送信検査 Gateway の合言葉を生成できませんでした (fail-closed)。' }
+# 稼働中の gateway をそのまま使えるかを判定する（生きている＋中身が今と同じ）。
+function Test-GatewayReusable {
+    param([string]$Port, [string]$GatewayJs, [string]$GatewayTokenJs, [string]$NodePath)
+    if ((Get-OurGatewayPid -Port $Port -GatewayJs $GatewayJs) -le 0) { return $false }
+    & $NodePath $GatewayTokenJs '--probe' '--gateway' $GatewayJs '--port' $Port 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
+# 呼び出し元認証の合言葉は、この PC の共有ファイル (実キーと同じ置き場) から取る。
+# 以前は起動ごとに採番して、動いている gateway を必ず停止して立て直していた。その方式だと
+# OpenCode を 2 枚開いたり d-claude と併用したりすると、後発が先発の gateway を殺すため、
+# 先に開いていた窓だけが古い合言葉のまま取り残されて全リクエストが 401 になっていた。
+# コマンドライン引数には載せない (プロセス一覧に出るため)。標準出力で受け取る。
+$gatewayToken = (& $node.Source $gatewayTokenJs '--ensure' '--gateway' $gatewayJs | Out-String).Trim()
+if (-not $gatewayToken) { throw '送信検査 Gateway の合言葉を用意できませんでした (fail-closed)。' }
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-Stop-StaleGateway -Port $port -GatewayJs $gatewayJs
-$env:DS_GATEWAY_PORT = $port
-$env:DS_GATEWAY_UPSTREAM = 'https://api.deepseek.com'
-$env:DS_GATEWAY_AUTH_FILE = $keyFile
-$env:DS_GATEWAY_TOKEN = $gatewayToken
-$env:DS_GATEWAY_WORKSPACE = $Workspace
 $gatewayOut = Join-Path $logDir 'opencode-deepseek-gateway.log'
 $gatewayErr = Join-Path $logDir 'opencode-deepseek-gateway.err.log'
-$gw = Start-Process -FilePath $node.Source -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden -RedirectStandardOutput $gatewayOut -RedirectStandardError $gatewayErr
-Remove-Item Env:\DS_GATEWAY_AUTH_FILE, Env:\DS_GATEWAY_UPSTREAM, Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_WORKSPACE -ErrorAction SilentlyContinue
+
+# 既に動いている gateway が「自分たちのプロセス」かつ「中身が今と同じ」なら、そのまま使う。
+# 中身が違う (＝更新後に古い gateway が居座っている) ときだけ停止して立て直す。
+$gw = $null
+$gatewayReused = Test-GatewayReusable -Port $port -GatewayJs $gatewayJs -GatewayTokenJs $gatewayTokenJs -NodePath $node.Source
+if (-not $gatewayReused) {
+    Stop-StaleGateway -Port $port -GatewayJs $gatewayJs
+    $env:DS_GATEWAY_PORT = $port
+    $env:DS_GATEWAY_UPSTREAM = 'https://api.deepseek.com'
+    $env:DS_GATEWAY_AUTH_FILE = $keyFile
+    $env:DS_GATEWAY_TOKEN = $gatewayToken
+    $env:DS_GATEWAY_WORKSPACE = $Workspace
+    $gw = Start-Process -FilePath $node.Source -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden -RedirectStandardOutput $gatewayOut -RedirectStandardError $gatewayErr
+    Remove-Item Env:\DS_GATEWAY_AUTH_FILE, Env:\DS_GATEWAY_UPSTREAM, Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_WORKSPACE -ErrorAction SilentlyContinue
+}
 
 try {
     $ready = $false
@@ -100,9 +133,23 @@ try {
             $health = Invoke-WebRequest -Uri "http://127.0.0.1:$port/healthz" -UseBasicParsing -TimeoutSec 1
             if ($health.Content -match '"status":"ok"') { $ready = $true; break }
         } catch { Start-Sleep -Milliseconds 100 }
-        if ($gw.HasExited) { break }
+        if ($gw -and $gw.HasExited) { break }
     }
-    if (-not $ready -or $gw.HasExited) {
+    # 自分で立てた gateway が落ちている場合、二つの窓を同時に開いてポートを取り合い、
+    # こちらが負けた可能性がある。相手が正しい gateway なら、それをそのまま使って続行する
+    # (ここで止めると「同時にダブルクリックしたら片方が起動しない」になるため)。
+    if ($gw -and $gw.HasExited) {
+        if (Test-GatewayReusable -Port $port -GatewayJs $gatewayJs -GatewayTokenJs $gatewayTokenJs -NodePath $node.Source) {
+            $gw = $null
+            $gatewayReused = $true
+            $ready = $true
+        }
+    }
+    if (-not $ready -or ($gw -and $gw.HasExited)) {
+        throw "送信検査 Gateway を確認できないため、OpenCode は起動しません（fail-closed）。確認先: $gatewayErr"
+    }
+    # 共用している場合も、そのポートを握っているのが自分たちの gateway であることを再確認する。
+    if ($gatewayReused -and (Get-OurGatewayPid -Port $port -GatewayJs $gatewayJs) -le 0) {
         throw "送信検査 Gateway を確認できないため、OpenCode は起動しません（fail-closed）。確認先: $gatewayErr"
     }
 
@@ -342,7 +389,14 @@ try {
         Write-Host ('変更操作は確認、外部フォルダは禁止、Web検索は' + $(if ($WebSearch) { '許可時のみ' } else { '無効' }) + 'です。')
         Write-Host '危険なコマンド（まとめて削除・鍵の読み出し・ネットから拾った実行）は確認なしで止まります。'
 
-        & $openCode
+        # -Resume のときは前回のセッションを開き直す。会話は OpenCode 自身がローカルに
+        # 保存しているので、前の窓が落ちても続きから戻れる。
+        if ($Resume) {
+            Write-Host '前回の続きから開きます（新しく始めるときは「続きから」ではないボタンを使ってください）。'
+            & $openCode '--continue'
+        } else {
+            & $openCode
+        }
     } finally {
         Pop-Location
         if ($watchdog -and -not $watchdog.HasExited) { Stop-Process -Id $watchdog.Id -Force -ErrorAction SilentlyContinue }

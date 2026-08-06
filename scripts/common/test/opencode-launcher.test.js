@@ -161,3 +161,89 @@ test('legacy d-claude launchers remain present as an advanced compatibility rout
   assert.ok(fs.existsSync(path.join(root, 'scripts/windows/deepseek/launch-deepseek-gateway.ps1')));
   assert.ok(fs.existsSync(path.join(root, 'workspace-template/d-claude.cmd')));
 });
+
+// ── 送信検査 Gateway の共用（複数の窓を同時に開けるようにする） ──────────────
+// 以前は起動のたびに合言葉を採番し、動いている gateway を必ず停止して立て直していた。
+// そのため OpenCode を 2 枚開く / d-claude と併用すると、先に開いていた窓だけが古い
+// 合言葉のまま取り残されて全リクエストが 401 になっていた（教室で頻発）。
+const GATEWAY_LAUNCHERS = [
+  'scripts/macos/opencode/launch-opencode-deepseek.sh',
+  'scripts/windows/opencode/launch-opencode-deepseek.ps1',
+  'scripts/macos/deepseek/launch-deepseek-gateway.sh',
+  'scripts/windows/deepseek/launch-deepseek-gateway.ps1',
+];
+
+for (const rel of GATEWAY_LAUNCHERS) {
+  test(`${rel} は合言葉を共有ファイルから取り、使える gateway は立て直さない`, () => {
+    const script = read(rel);
+    assert.match(script, /gateway-token\.js/, '合言葉は共有ファイル経由で受け取ること');
+    assert.match(script, /--ensure/, '合言葉が無ければ作る');
+    assert.match(script, /--probe/, '動いている gateway を再利用できるか確かめる');
+    // 起動ごとの採番（＝先に開いた窓を 401 にする原因）が残っていないこと。
+    assert.ok(!/openssl rand -hex 32/.test(script), '起動ごとの合言葉採番は残さない');
+    assert.ok(!/RandomNumberGenerator/.test(script), '起動ごとの合言葉採番は残さない');
+  });
+}
+
+test('macOS ランチャーは共用中の gateway を自分の終了で巻き添えにしない', () => {
+  for (const rel of ['scripts/macos/opencode/launch-opencode-deepseek.sh',
+                     'scripts/macos/deepseek/launch-deepseek-gateway.sh']) {
+    const script = read(rel);
+    assert.match(script, /\[ -n "\$GW_PID" \] && kill "\$GW_PID"/,
+      '自分で立てた gateway のときだけ停止すること');
+    assert.match(script, /GATEWAY_REUSED/, '再利用しているかを持ち回ること');
+    assert.match(script, /our_gateway_pid/, 'そのポートを握っているのが自分たちの gateway か確かめること');
+  }
+});
+
+test('Windows ランチャーは共用中の gateway を自分の終了で巻き添えにしない', () => {
+  for (const rel of ['scripts/windows/opencode/launch-opencode-deepseek.ps1',
+                     'scripts/windows/deepseek/launch-deepseek-gateway.ps1']) {
+    const script = read(rel);
+    assert.match(script, /\$gw = \$null/, '再利用時は停止対象を持たないこと');
+    assert.match(script, /Get-OurGatewayPid/, 'そのポートを握っているのが自分たちの gateway か確かめること');
+    assert.match(script, /Test-GatewayReusable/, '再利用の可否を判定すること');
+    assert.match(script, /if \(\$gw -and -not \$gw\.HasExited\)/, '自分で立てたときだけ停止すること');
+  }
+});
+
+// ── 前回の続きから開く ────────────────────────────────────────────
+// 401 などで窓が落ちても作業を引き継げるようにする。会話は OpenCode 自身が
+// ローカルに保存しているので、--continue で戻れる。
+test('OpenCode ランチャーは --resume を受けて opencode --continue を起動する', () => {
+  const mac = read('scripts/macos/opencode/launch-opencode-deepseek.sh');
+  assert.match(mac, /--resume\|--continue\)\s*RESUME="--continue"/, 'mac: --resume を受けること');
+  assert.match(mac, /"\$OPENCODE_BIN" --continue/, 'mac: --continue で起動すること');
+
+  const win = read('scripts/windows/opencode/launch-opencode-deepseek.ps1');
+  assert.match(win, /\[switch\]\$Resume/, 'Windows: -Resume を受けること');
+  assert.match(win, /& \$openCode '--continue'/, 'Windows: --continue で起動すること');
+});
+
+test('統合ランチャーは「続きから」を OpenCode へ渡す', () => {
+  const mac = read('scripts/macos/launch-integrated.sh');
+  assert.match(mac, /--websearch\|--resume\)/, 'mac: --resume を受け付けること');
+  assert.match(mac, /launch-opencode-deepseek\.sh" "\$workspace" "\$extra" "\$extra2"/);
+
+  const win = read('scripts/windows/launch-integrated.ps1');
+  assert.match(win, /\[switch\]\$Resume/);
+  assert.match(win, /-Resume:\$Resume/);
+  assert.match(win, /-Resume は OpenCode だけで指定できます/);
+});
+
+test('起動メニューに「続きから」の番号がある（Mac / Windows とも）', () => {
+  const command = read('workspace-template/スタート/0_Bouncer統合版を起動.command');
+  assert.match(command, /8\) exec bash "\$LAUNCHER" "\$WORKSPACE" opencode standard --resume/);
+  assert.match(command, /前回の続きから開く/);
+  assert.match(command, /1〜8の番号/, '案内の番号範囲も更新すること');
+
+  // .bat は教室 PC の PowerShell 5.1 が読めるよう CP932 で配布する（UTF-8 だと文字化けして即閉じ）。
+  const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/0_Bouncer統合版を起動.bat'));
+  assert.ok(batBytes[0] !== 0xef, '.bat に BOM を付けない');
+  const bat = new TextDecoder('shift_jis').decode(batBytes);
+  assert.match(bat, /choice \/c 12345678 \/n \/m "番号を選んでください \[1-8\]: "/);
+  assert.match(bat, /if errorlevel 8 goto opencode_resume/);
+  assert.match(bat, /:opencode_resume/);
+  assert.match(bat, /-Agent opencode -Profile standard -Resume/);
+  assert.match(bat, /前回の続きから開く/, 'CP932 のまま日本語が壊れていないこと');
+});
