@@ -391,6 +391,25 @@ if [ "$install_global_claude" = "--global-claude" ]; then
   fi
 fi
 
+# --- ダウンロード検疫（quarantine）の解除 ------------------------------------
+# ZIP をブラウザで受け取ると、その中身すべてに com.apple.quarantine が付く。属性は
+# コピーで引き継がれるため、install が配置したボタン（スタート/*.command）にもそのまま
+# 移り、ダブルクリックのたびに「開発元を検証できません」で止まる。しかも更新するたび
+# 新しいファイルが来て再発するので、受講者は毎回この壁に当たっていた。
+#
+# 外す対象は「install が今この場で配置した自分の配布物」だけに限定する（ワークスペース
+# 全体や Downloads には触らない）。これらは上でファイルごとに SHA-256 照合を通しており、
+# 素性が確かめられているファイルに限る、という線引き。
+#
+# Gatekeeper の肝心な部分は残る: 配布物を最初に開くとき（install-one-click.command 自体）
+# のブロックはそのままなので、「知らない配布物を意図せず実行してしまう」ことは防がれる。
+if command -v xattr >/dev/null 2>&1; then
+  for _q in "$workspace/.ai-safety" "$workspace/スタート"; do
+    [ -e "$_q" ] || continue
+    xattr -dr com.apple.quarantine "$_q" 2>/dev/null || true
+  done
+fi
+
 echo "AI Safety package installed."
 echo "Workspace: $workspace"
 echo "Backups: $backup_dir"
