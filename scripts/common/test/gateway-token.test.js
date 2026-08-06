@@ -160,3 +160,28 @@ test('CLI: --probe は再利用できないとき非ゼロで終わる（＝ラ�
   assert.notStrictEqual(probe.status, 0);
   assert.strictEqual(probe.stdout, '', '再利用できないときに合言葉を出力してはいけない');
 });
+
+// gateway がどのポートで動いているかは、既定 8788 とは限らない（8788 が他のプログラムに
+// 取られていれば別のポートで立ち上がる）。ランチャーはこの記録を見て再利用先を知る。
+test('recordedPort: 記録が無ければ 0、起動記録があればそのポートを返す', () => {
+  const { recordedPort } = require('../gateway-token.js');
+  const file = tmpTokenFile('recorded-port');
+  ensureToken({ file, gatewayPath: GATEWAY_JS });
+  assert.strictEqual(recordedPort({ file }), 0, 'まだ gateway が動いていなければ 0');
+
+  recordGatewayStart({ file, gatewayPath: GATEWAY_JS, port: 8793, pid: 777 });
+  assert.strictEqual(recordedPort({ file }), 8793, '記録されたポートを返す');
+});
+
+test('CLI: --recorded-port は記録されたポートを標準出力に出す', () => {
+  const file = tmpTokenFile('cli-recorded-port');
+  const args = [TOKEN_TOOL, '--recorded-port', '--gateway', GATEWAY_JS, '--file', file];
+
+  const before = spawnSync(process.execPath, args, { encoding: 'utf8' });
+  assert.strictEqual(before.status, 0);
+  assert.strictEqual(before.stdout.trim(), '', '記録が無ければ空を返す');
+
+  recordGatewayStart({ file, gatewayPath: GATEWAY_JS, port: 8791, pid: 5 });
+  const after = spawnSync(process.execPath, args, { encoding: 'utf8' });
+  assert.strictEqual(after.stdout.trim(), '8791');
+});

@@ -247,3 +247,33 @@ test('起動メニューに「続きから」の番号がある（Mac / Windows 
   assert.match(bat, /-Agent opencode -Profile standard -Resume/);
   assert.match(bat, /前回の続きから開く/, 'CP932 のまま日本語が壊れていないこと');
 });
+
+// ── 既定ポートが他のプログラムに使われていても起動できる ──────────────────
+// 8788 を別プロジェクトの常駐サービスが握っている PC が実在し、決め打ちのままだと
+// gateway が bind できず「Gateway を確認できない」で起動そのものができなくなっていた。
+test('4 本のランチャーは 8788 が塞がっていたら別のポートへ自動で移る', () => {
+  for (const rel of GATEWAY_LAUNCHERS) {
+    const script = read(rel);
+    assert.match(script, /--recorded-port/, `${rel}: 動いている gateway のポートを記録から知ること`);
+    assert.match(script, /8797/, `${rel}: 8788 から 8797 までを候補にすること`);
+    assert.match(script, /DS_GATEWAY_PORT/, `${rel}: 明示指定があればそれを尊重すること`);
+  }
+});
+
+test('ポートを 1 つも確保できないときは、原因が分かる日本語で止まる', () => {
+  for (const rel of GATEWAY_LAUNCHERS) {
+    const script = read(rel);
+    assert.match(script, /他のプログラムが使っている可能性/,
+      `${rel}: 「ポートが埋まっている」と分かる文言を出すこと`);
+  }
+  // OpenCode 側は gateway が出した生のメッセージ（EADDRINUSE 等）も画面に出す。
+  assert.match(read('scripts/macos/opencode/launch-opencode-deepseek.sh'), /Gateway が出したメッセージ/);
+  assert.match(read('scripts/windows/opencode/launch-opencode-deepseek.ps1'), /Gateway が出したメッセージ/);
+});
+
+test('既定以外のポートを使ったときは利用者に伝える', () => {
+  for (const rel of GATEWAY_LAUNCHERS) {
+    assert.match(read(rel), /8788 は他のプログラムが使っていたため/,
+      `${rel}: 黙って別ポートへ逃げないこと`);
+  }
+});

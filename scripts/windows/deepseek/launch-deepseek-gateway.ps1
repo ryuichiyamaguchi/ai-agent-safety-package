@@ -104,42 +104,75 @@ function Stop-StaleGateway {
   }
 }
 
+# 使うポートを決める。DS_GATEWAY_PORT で明示指定されたときはその 1 つだけを使い (利用者の
+# 意図を尊重し、黙って別のポートへ逃げない)、未指定なら既定 8788 から順に空きを探す。
+# 8788 が他のプログラム (別プロジェクトの常駐サービス等) に取られている PC があるため。
+if ($env:DS_GATEWAY_PORT) { $portCandidates = @($env:DS_GATEWAY_PORT) } else { $portCandidates = @(8788..8797) }
+
 # 既に動いている gateway が「自分たちのプロセス」かつ「中身が今と同じ」なら、そのまま使う。
-# 中身が違う (＝更新後に古い gateway が居座っている) ときだけ停止して立て直す。
+# どのポートで動いているかは gateway 自身が合言葉ファイルへ記録しているのでそれを見る。
 $gw = $null
-$gatewayReused = Test-GatewayReusable -Port $port -GatewayJs $gatewayJs -GatewayTokenJs $gatewayTokenJs
-if ($gatewayReused) {
+$gatewayReused = $false
+$port = $null
+$recordedPort = (& node $gatewayTokenJs '--recorded-port' | Out-String).Trim()
+if ($recordedPort -and (Test-GatewayReusable -Port $recordedPort -GatewayJs $gatewayJs -GatewayTokenJs $gatewayTokenJs)) {
+  $port = $recordedPort
+  $gatewayReused = $true
   Write-Host "稼働中の送信検査 Gateway をそのまま使います (127.0.0.1:$port)。"
-} else {
-  Stop-StaleGateway -Port $port -GatewayJs $gatewayJs
-  $env:DS_GATEWAY_PORT = $port
-  # 実キーと合言葉は gateway 子プロセスにだけ渡し、spawn 後は自分の環境から消す。
-  $env:DS_GATEWAY_TOKEN = $gatewayToken
-  $env:DS_GATEWAY_AUTH_FILE = $keyFile
-  $gw = Start-Process node -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden
-  Remove-Item Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_AUTH_FILE -ErrorAction SilentlyContinue
+}
+
+# 再利用できないときは、候補ポートを順に試して自分で立てる。
+if (-not $gatewayReused) {
+  foreach ($candidate in $portCandidates) {
+    # 自分たちの gateway が中身違い (更新後に古いものが居座っている) で居るなら止める。
+    Stop-StaleGateway -Port $candidate -GatewayJs $gatewayJs
+    $env:DS_GATEWAY_PORT = $candidate
+    # 実キーと合言葉は gateway 子プロセスにだけ渡し、spawn 後は自分の環境から消す。
+    $env:DS_GATEWAY_TOKEN = $gatewayToken
+    $env:DS_GATEWAY_AUTH_FILE = $keyFile
+    $gw = Start-Process node -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden
+    Remove-Item Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_AUTH_FILE -ErrorAction SilentlyContinue
+
+    $ok = $false
+    for ($i = 0; $i -lt 50; $i++) {
+      try {
+        $r = Invoke-WebRequest -Uri "http://127.0.0.1:$candidate/healthz" -UseBasicParsing -TimeoutSec 1
+        if ($r.Content -match '"status":"ok"') { $ok = $true; break }
+      } catch { Start-Sleep -Milliseconds 100 }
+      if ($gw -and $gw.HasExited) { break }
+    }
+    if ($ok -and $gw -and -not $gw.HasExited) {
+      $port = $candidate
+      if ("$port" -ne '8788') {
+        Write-Host "ポート 8788 は他のプログラムが使っていたため、送信検査 Gateway は 127.0.0.1:$port で動かします。"
+      }
+      break
+    }
+    # 窓を二つ同時に開いてポートを取り合い、こちらが負けた可能性がある。
+    # 相手が正しい gateway なら、それをそのまま使って続行する。
+    if (Test-GatewayReusable -Port $candidate -GatewayJs $gatewayJs -GatewayTokenJs $gatewayTokenJs) {
+      if ($gw -and -not $gw.HasExited) { Stop-Process -Id $gw.Id -Force -ErrorAction SilentlyContinue }
+      $gw = $null
+      $port = $candidate
+      $gatewayReused = $true
+      break
+    }
+    if ($gw -and -not $gw.HasExited) { Stop-Process -Id $gw.Id -Force -ErrorAction SilentlyContinue }
+    $gw = $null
+  }
 }
 try {
-  $ok = $false
-  for ($i = 0; $i -lt 50; $i++) {
-    try {
-      $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/healthz" -UseBasicParsing -TimeoutSec 1
-      if ($r.Content -match '"status":"ok"') { $ok = $true; break }
-    } catch { Start-Sleep -Milliseconds 100 }
-    if ($gw -and $gw.HasExited) { break }
-  }
-  # 自分で立てた gateway が落ちている場合、二つの窓を同時に開いてポートを取り合い、
-  # こちらが負けた可能性がある。相手が正しい gateway なら、それをそのまま使って続行する。
-  if ($gw -and $gw.HasExited -and (Test-GatewayReusable -Port $port -GatewayJs $gatewayJs -GatewayTokenJs $gatewayTokenJs)) {
-    $gw = $null
-    $gatewayReused = $true
-    $ok = $true
-  }
-  if (-not $ok) {
-    Write-Host "[ERROR] Gateway health check failed. Not launching without send-side inspection (fail-closed)."
+  # ポートを 1 つも確保できなかった＝どの候補も他のプログラムに使われている。
+  if (-not $port) {
+    Write-Host "[ERROR] 送信検査 Gateway を起動できませんでした。送信検査なしでは起動しません (fail-closed)。"
+    if ($env:DS_GATEWAY_PORT) {
+      Write-Host "  指定されたポート $($env:DS_GATEWAY_PORT) を他のプログラムが使っている可能性があります。"
+    } else {
+      Write-Host "  ポート 8788〜8797 をすべて他のプログラムが使っている可能性があります。"
+    }
     exit 1
   }
-  # health OK かつ spawn した node が生存していれば、そのポートは確実に自プロセスのもの。
+  # spawn した node が生存していれば、そのポートは確実に自プロセスのもの。
   # foreign process がポートを占有していれば自 node は bind 失敗で即終了している。
   # 共用時は、そのポートを握っているのが自分たちの gateway であることを直接確かめる。
   if ($gw -and $gw.HasExited) {

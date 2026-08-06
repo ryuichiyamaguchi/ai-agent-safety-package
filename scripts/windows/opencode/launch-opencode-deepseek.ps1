@@ -27,7 +27,11 @@ if (-not (Test-Path -LiteralPath $monitorPlugin -PathType Leaf)) { throw "OpenCo
 if ($env:AI_SAFE_DRY_RUN -eq '1') {
     Write-Output 'OpenCode + DeepSeek dry-run'
     Write-Output "  workspace: $Workspace"
-    Write-Output "  gateway:   http://127.0.0.1:$port/v1 (mandatory)"
+    if ($env:DS_GATEWAY_PORT) {
+        Write-Output "  gateway:   http://127.0.0.1:$port/v1 (mandatory)"
+    } else {
+        Write-Output "  gateway:   http://127.0.0.1:8788/v1 (mandatory / 使用中なら 8789-8797 から自動選択)"
+    }
     Write-Output '  config:    OPENCODE_CONFIG_CONTENT'
     Write-Output '  model:     DeepSeek V4 Pro / small: V4 Flash'
     Write-Output ('  websearch: ' + $(if ($WebSearch) { 'opt-in (approval required)' } else { 'off' }))
@@ -111,46 +115,83 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $gatewayOut = Join-Path $logDir 'opencode-deepseek-gateway.log'
 $gatewayErr = Join-Path $logDir 'opencode-deepseek-gateway.err.log'
 
+# 使うポートを決める。DS_GATEWAY_PORT で明示指定されたときはその 1 つだけを使い (利用者の
+# 意図を尊重し、黙って別のポートへ逃げない)、未指定なら既定 8788 から順に空きを探す。
+# 8788 が他のプログラム (別プロジェクトの常駐サービス等) に取られている PC があり、
+# 決め打ちのままだと「Gateway を確認できない」で起動そのものができなくなるため。
+if ($env:DS_GATEWAY_PORT) { $portCandidates = @($env:DS_GATEWAY_PORT) } else { $portCandidates = @(8788..8797) }
+
 # 既に動いている gateway が「自分たちのプロセス」かつ「中身が今と同じ」なら、そのまま使う。
-# 中身が違う (＝更新後に古い gateway が居座っている) ときだけ停止して立て直す。
+# どのポートで動いているかは gateway 自身が合言葉ファイルへ記録しているのでそれを見る。
 $gw = $null
-$gatewayReused = Test-GatewayReusable -Port $port -GatewayJs $gatewayJs -GatewayTokenJs $gatewayTokenJs -NodePath $node.Source
+$gatewayReused = $false
+$port = $null
+$recordedPort = (& $node.Source $gatewayTokenJs '--recorded-port' | Out-String).Trim()
+if ($recordedPort -and (Test-GatewayReusable -Port $recordedPort -GatewayJs $gatewayJs -GatewayTokenJs $gatewayTokenJs -NodePath $node.Source)) {
+    $port = $recordedPort
+    $gatewayReused = $true
+}
+
+# 再利用できないときは、候補ポートを順に試して自分で立てる。
+# ポートを他に取られていれば gateway は即座に終了するので、次の候補へ進む。
 if (-not $gatewayReused) {
-    Stop-StaleGateway -Port $port -GatewayJs $gatewayJs
-    $env:DS_GATEWAY_PORT = $port
-    $env:DS_GATEWAY_UPSTREAM = 'https://api.deepseek.com'
-    $env:DS_GATEWAY_AUTH_FILE = $keyFile
-    $env:DS_GATEWAY_TOKEN = $gatewayToken
-    $env:DS_GATEWAY_WORKSPACE = $Workspace
-    $gw = Start-Process -FilePath $node.Source -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden -RedirectStandardOutput $gatewayOut -RedirectStandardError $gatewayErr
-    Remove-Item Env:\DS_GATEWAY_AUTH_FILE, Env:\DS_GATEWAY_UPSTREAM, Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_WORKSPACE -ErrorAction SilentlyContinue
+    foreach ($candidate in $portCandidates) {
+        # 自分たちの gateway が中身違い (更新後に古いものが居座っている) で居るなら止める。
+        Stop-StaleGateway -Port $candidate -GatewayJs $gatewayJs
+        $env:DS_GATEWAY_PORT = $candidate
+        $env:DS_GATEWAY_UPSTREAM = 'https://api.deepseek.com'
+        $env:DS_GATEWAY_AUTH_FILE = $keyFile
+        $env:DS_GATEWAY_TOKEN = $gatewayToken
+        $env:DS_GATEWAY_WORKSPACE = $Workspace
+        $gw = Start-Process -FilePath $node.Source -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden -RedirectStandardOutput $gatewayOut -RedirectStandardError $gatewayErr
+        Remove-Item Env:\DS_GATEWAY_AUTH_FILE, Env:\DS_GATEWAY_UPSTREAM, Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_WORKSPACE -ErrorAction SilentlyContinue
+
+        $ready = $false
+        for ($i = 0; $i -lt 50; $i++) {
+            try {
+                $health = Invoke-WebRequest -Uri "http://127.0.0.1:$candidate/healthz" -UseBasicParsing -TimeoutSec 1
+                if ($health.Content -match '"status":"ok"') { $ready = $true; break }
+            } catch { Start-Sleep -Milliseconds 100 }
+            if ($gw -and $gw.HasExited) { break }
+        }
+        if ($ready -and $gw -and -not $gw.HasExited) { $port = $candidate; break }
+
+        # 窓を二つ同時に開いてポートを取り合い、こちらが負けた可能性がある。
+        # 相手が正しい gateway なら、それをそのまま使って続行する。
+        if (Test-GatewayReusable -Port $candidate -GatewayJs $gatewayJs -GatewayTokenJs $gatewayTokenJs -NodePath $node.Source) {
+            if ($gw -and -not $gw.HasExited) { Stop-Process -Id $gw.Id -Force -ErrorAction SilentlyContinue }
+            $gw = $null
+            $port = $candidate
+            $gatewayReused = $true
+            break
+        }
+        if ($gw -and -not $gw.HasExited) { Stop-Process -Id $gw.Id -Force -ErrorAction SilentlyContinue }
+        $gw = $null
+    }
 }
 
 try {
-    $ready = $false
-    for ($i = 0; $i -lt 50; $i++) {
+    if (-not $port) {
+        # 原因の実物 (EADDRINUSE 等) を画面にも出す。ログを開かないと分からない状態にしない。
+        $hint = ''
         try {
-            $health = Invoke-WebRequest -Uri "http://127.0.0.1:$port/healthz" -UseBasicParsing -TimeoutSec 1
-            if ($health.Content -match '"status":"ok"') { $ready = $true; break }
-        } catch { Start-Sleep -Milliseconds 100 }
-        if ($gw -and $gw.HasExited) { break }
-    }
-    # 自分で立てた gateway が落ちている場合、二つの窓を同時に開いてポートを取り合い、
-    # こちらが負けた可能性がある。相手が正しい gateway なら、それをそのまま使って続行する
-    # (ここで止めると「同時にダブルクリックしたら片方が起動しない」になるため)。
-    if ($gw -and $gw.HasExited) {
-        if (Test-GatewayReusable -Port $port -GatewayJs $gatewayJs -GatewayTokenJs $gatewayTokenJs -NodePath $node.Source) {
-            $gw = $null
-            $gatewayReused = $true
-            $ready = $true
+            $lastLines = @(Get-Content -LiteralPath $gatewayOut -Tail 3 -ErrorAction Stop)
+            if ($lastLines.Count -gt 0) { $hint = " Gateway が出したメッセージ: " + ($lastLines -join ' / ') + "." }
+        } catch {}
+        if ($env:DS_GATEWAY_PORT) {
+            throw "送信検査 Gateway を起動できないため、OpenCode は起動しません（fail-closed）。指定されたポート $($env:DS_GATEWAY_PORT) を他のプログラムが使っている可能性があります。$hint 確認先: $gatewayErr"
         }
+        throw "送信検査 Gateway を起動できないため、OpenCode は起動しません（fail-closed）。ポート 8788〜8797 をすべて他のプログラムが使っている可能性があります。$hint 確認先: $gatewayErr"
     }
-    if (-not $ready -or ($gw -and $gw.HasExited)) {
-        throw "送信検査 Gateway を確認できないため、OpenCode は起動しません（fail-closed）。確認先: $gatewayErr"
-    }
-    # 共用している場合も、そのポートを握っているのが自分たちの gateway であることを再確認する。
+    # そのポートを握っているのが自分たちの gateway であることを最後に確かめる。
+    # 自分で立てた場合は子プロセスの生存で足りる (他プロセスが占有していれば bind 失敗で即終了)。
     if ($gatewayReused -and (Get-OurGatewayPid -Port $port -GatewayJs $gatewayJs) -le 0) {
         throw "送信検査 Gateway を確認できないため、OpenCode は起動しません（fail-closed）。確認先: $gatewayErr"
+    }
+    if ($gatewayReused) {
+        Write-Host "稼働中の送信検査 Gateway をそのまま使います (127.0.0.1:$port)。"
+    } elseif ("$port" -ne '8788') {
+        Write-Host "ポート 8788 は他のプログラムが使っていたため、送信検査 Gateway は 127.0.0.1:$port で動かします。"
     }
 
     # 実キーは Gateway 子プロセスだけが読み、OpenCode の環境には渡さない。

@@ -1,5 +1,5 @@
 {
-  "packageVersion": "1.14.8",
+  "packageVersion": "1.14.9",
   "hookApiVersion": "1",
   "_comment_testedClaudeCodeVersion": "動作確認済みの Claude Code の版（SSOT）。導入スクリプトはこの版を固定インストールし、launch-claude-safe.{sh,ps1} と 診断.ps1 が起動時/診断時に実版と照合して差異を日本語警告する。この値を変えたら docs/tested_versions.md の policy hash を更新すること。",
   "testedClaudeCodeVersion": "2.1.201",

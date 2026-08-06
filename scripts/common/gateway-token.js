@@ -124,6 +124,15 @@ function recordGatewayStart({ file, gatewayPath, port, pid } = {}) {
   return payload;
 }
 
+// 今 gateway が使っているポート。ランチャーはまずこれを見て「動いている gateway が
+// 居ないか」を確かめる。既定ポート(8788)が別のプログラムに取られていると gateway は
+// 別のポートで立ち上がるので、ポートを決め打ちで探すと再利用できなくなる。
+function recordedPort({ file } = {}) {
+  const info = readTokenFile(tokenFilePath(file));
+  const port = info && Number(info.port);
+  return Number.isInteger(port) && port > 0 ? port : 0;
+}
+
 function healthz(port, timeoutMs = 1000) {
   return new Promise((resolve) => {
     const req = http.get({ host: '127.0.0.1', port: Number(port), path: '/healthz', timeout: timeoutMs },
@@ -165,6 +174,7 @@ module.exports = {
   writeTokenFile,
   ensureToken,
   recordGatewayStart,
+  recordedPort,
   probeReusable,
   healthz,
 };
@@ -199,6 +209,11 @@ if (require.main === module) {
     }
     if (argv.includes('--fingerprint')) {
       process.stdout.write(gatewayFingerprint(gatewayPath));
+      process.exit(0);
+    }
+    if (argv.includes('--recorded-port')) {
+      const p = recordedPort({ file });
+      process.stdout.write(p ? String(p) : '');
       process.exit(0);
     }
     // 既定は --ensure
