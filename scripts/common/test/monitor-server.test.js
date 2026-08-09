@@ -406,3 +406,36 @@ main().catch((err) => {
   console.error(err && err.stack ? err.stack : err);
   process.exit(1);
 });
+
+// ── モニターは Gateway の「実際のポート」を見る ───────────────────────────
+// 既定 8788 が他のプログラムに取られている PC ではランチャーが別ポートで Gateway を
+// 立てる（v1.14.9）。ここを 8788 決め打ちにすると、モニターは何も取得できず画面が
+// 「要確認」のまま固まる（実機で発生）。実際のポートは Gateway が合言葉ファイルへ
+// 記録しているので、そこから読む。
+{
+  const { dsGatewayPort } = require(serverPath);
+  const { recordGatewayStart } = require(path.join(repo, 'scripts', 'common', 'gateway-token.js'));
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'monitor-port-'));
+  const tokenFile = path.join(tmpDir, 'gateway-token');
+  const prevFile = process.env.DS_GATEWAY_TOKEN_FILE;
+  const prevPort = process.env.DS_GATEWAY_PORT;
+  process.env.DS_GATEWAY_TOKEN_FILE = tokenFile;
+  delete process.env.DS_GATEWAY_PORT;
+
+  // 記録がまだ無ければ既定の 8788
+  assert.equal(dsGatewayPort(), 8788, '記録が無ければ既定の 8788 を使う');
+
+  // Gateway が 8791 で立ち上がったと記録されたら、そちらを見る
+  recordGatewayStart({ file: tokenFile, gatewayPath: path.join(repo, 'scripts', 'common', 'ds-gateway.js'), port: 8791, pid: 42 });
+  assert.equal(dsGatewayPort(), 8791, '記録された実ポートを見ること（8788 決め打ちにしない）');
+
+  // 明示指定があればそれが最優先（利用者の意図を尊重）
+  process.env.DS_GATEWAY_PORT = '8799';
+  assert.equal(dsGatewayPort(), 8799, 'DS_GATEWAY_PORT の明示指定が最優先');
+
+  if (prevFile === undefined) delete process.env.DS_GATEWAY_TOKEN_FILE; else process.env.DS_GATEWAY_TOKEN_FILE = prevFile;
+  if (prevPort === undefined) delete process.env.DS_GATEWAY_PORT; else process.env.DS_GATEWAY_PORT = prevPort;
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  console.log('ok - monitor follows the gateway port recorded by the gateway itself');
+}

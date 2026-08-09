@@ -146,13 +146,32 @@ if (-not $gatewayReused) {
         $gw = Start-Process -FilePath $node.Source -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden -RedirectStandardOutput $gatewayOut -RedirectStandardError $gatewayErr
         Remove-Item Env:\DS_GATEWAY_AUTH_FILE, Env:\DS_GATEWAY_UPSTREAM, Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_WORKSPACE -ErrorAction SilentlyContinue
 
+        # healthz の応答だけで判断してはいけない。ポートが他に取られていた場合、自分の gateway は
+        # bind に失敗して終了するが、その同じポートで「別の gateway」(例: 別ワークスペースから
+        # 起動されたもの) が動いていると healthz は正常に応答する。それを自分のものと取り違えると、
+        # 別の検査設定を通って通信することになる。
+        # 確実なのは gateway 自身が listen 直後に出す 1 行の照合:
+        #   listening on 127.0.0.1:<port> pid=<pid>
+        # ここの pid は自分が起動した node のプロセス ID そのもの。
         $ready = $false
+        $listenMark = "listening on 127.0.0.1:$candidate pid=$($gw.Id)"
         for ($i = 0; $i -lt 50; $i++) {
-            try {
-                $health = Invoke-WebRequest -Uri "http://127.0.0.1:$candidate/healthz" -UseBasicParsing -TimeoutSec 1
-                if ($health.Content -match '"status":"ok"') { $ready = $true; break }
-            } catch { Start-Sleep -Milliseconds 100 }
             if ($gw -and $gw.HasExited) { break }
+            $listened = $false
+            try {
+                foreach ($line in @(Get-Content -LiteralPath $gatewayOut -ErrorAction Stop)) {
+                    if ([string]$line -eq '') { continue }
+                    if (([string]$line).StartsWith($listenMark)) { $listened = $true; break }
+                }
+            } catch {}
+            if ($listened) {
+                try {
+                    $health = Invoke-WebRequest -Uri "http://127.0.0.1:$candidate/healthz" -UseBasicParsing -TimeoutSec 1
+                    if ($health.Content -match '"status":"ok"') { $ready = $true }
+                } catch {}
+                break
+            }
+            Start-Sleep -Milliseconds 100
         }
         if ($ready -and $gw -and -not $gw.HasExited) { $port = $candidate; break }
 

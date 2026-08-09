@@ -39,7 +39,27 @@ const COMPANION_FILES = Object.fromEntries(
   COMPANION_ASSET_STATES.map((state) => [state, path.join(__dirname, 'assets', `bouncer-companion-${state}.png`)])
 );
 const BOUNCER_PORT = Number(process.env.BOUNCER_PORT || 8787);
-const DS_GATEWAY_PORT = Number(process.env.DS_GATEWAY_PORT || 8788);
+
+// 送信検査 Gateway のポートは固定ではない。既定 8788 が他のプログラムに取られている PC が
+// あり、ランチャーは 8788→8797 の順に空きを探して起動するため（v1.14.9）。ここを 8788 で
+// 決め打ちにすると、Gateway が別のポートで動いているときにモニターは何も取得できず、
+// 画面が「要確認」のまま固まる（実機で発生）。
+//
+// 実際に使われているポートは Gateway 自身が合言葉ファイルへ記録しているので、そこから読む。
+// モニターは常駐して繰り返し問い合わせるため、値は毎回読み直す（Gateway が別ポートで
+// 立ち上がり直しても追随できるように）。
+function dsGatewayPort() {
+  if (process.env.DS_GATEWAY_PORT) {
+    const explicit = Number(process.env.DS_GATEWAY_PORT);
+    if (Number.isInteger(explicit) && explicit > 0) return explicit;
+  }
+  try {
+    // 置き場も毎回読む（既定値はモジュール読み込み時に固定されるため、ここで明示する）。
+    const recorded = require('./gateway-token.js').recordedPort({ file: process.env.DS_GATEWAY_TOKEN_FILE });
+    if (recorded > 0) return recorded;
+  } catch { /* 合言葉ファイルが無い/読めない場合は既定へ */ }
+  return 8788;
+}
 
 // トークン付き URL やログを他ユーザーに読まれないよう、本プロセスが作るファイルは所有者のみ。
 try { process.umask(0o077); } catch { /* 一部環境で未サポート */ }
@@ -317,7 +337,8 @@ function readGatewayState() {
       };
       const req = http.get({
         hostname: HOST,
-        port: DS_GATEWAY_PORT,
+        // 毎回読み直す（Gateway が別ポートで立ち上がり直しても追随するため）。
+        port: dsGatewayPort(),
         path: '/status',
         timeout: 700,
         headers: { Accept: 'application/json' },
@@ -1414,6 +1435,7 @@ module.exports = {
   saveApiKey,
   profileInfo,
   readGatewayState,
+  dsGatewayPort,
 };
 
 // ---- コーチ UI（1ファイル完結。AI 出力は textContent で表示=XSS安全） -----

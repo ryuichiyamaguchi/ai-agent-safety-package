@@ -42,6 +42,11 @@ command -v node >/dev/null 2>&1 || { echo "【エラー】node が見つかり�
 GATEWAY_TOKEN="$(node "$GATEWAY_TOKEN_JS" --ensure --gateway "$GATEWAY_JS" 2>/dev/null || true)"
 [ -n "$GATEWAY_TOKEN" ] || { echo "【エラー】Gateway の合言葉を用意できませんでした（fail-closed）。"; exit 1; }
 
+# gateway の出力はログへ。listen 行の pid 照合に使うほか、受講者の画面を汚さない。
+GATEWAY_LOG="${AI_SAFE_LOG_DIR:-$HOME/.ai-safety/logs}/deepseek-gateway.log"
+mkdir -p "$(dirname "$GATEWAY_LOG")" 2>/dev/null || true
+: >> "$GATEWAY_LOG" 2>/dev/null || true
+
 # そのポートを握っているのが「自分たちの ds-gateway.js」かを、実行中のコマンドラインで確かめる。
 # lsof が無い環境では判定できない＝再利用しない（自分で立て直す）に倒す。
 our_gateway_pid() {
@@ -79,15 +84,45 @@ stop_stale_gateway() {
   done
 }
 
-wait_for_gateway_health() {
+# 自分で spawn した gateway が「本当に動いているか」を見る。
+# bash のバックグラウンドジョブは、即座に終了しても親が wait するまで zombie として
+# プロセステーブルに残り、`kill -0` が成功してしまう。EADDRINUSE で落ちた gateway を
+# 生きていると誤判定すると、同じポートで応答している「別の gateway」を自分のものだと
+# 取り違えて相乗りしてしまう（別ワークスペースの検査設定で通信することになる）。
+gateway_process_alive() {
+  _pid="$1"
+  [ -n "$_pid" ] || return 1
+  _st="$(ps -p "$_pid" -o state= 2>/dev/null | tr -d ' ')"
+  case "$_st" in
+    ''|Z*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# 自分で立てた gateway が、そのポートで listen できたことを確かめる。
+#
+# healthz の応答だけで判断してはいけない。ポートが他に取られていた場合、自分の gateway は
+# bind に失敗して終了するが、その同じポートで「別の gateway」（例: 別ワークスペースから
+# 起動されたもの）が動いていると healthz は正常に応答する。それを自分のものと取り違えると、
+# 別の検査設定を通って通信することになる（実機で発生）。
+#
+# 確実なのは gateway 自身が listen 直後に出す 1 行の照合。
+#   listening on 127.0.0.1:<port> pid=<pid> started=<時刻>
+# ここの pid は自分が spawn した node のプロセス ID そのものなので、これが一致すれば
+# 「そのポートで listen しているのは自分の gateway」だと確定できる。
+# ログは追記式なので、今回の起動より前の行は見ない。
+wait_for_own_gateway() {
   _p="$1"
+  _from="$2"
   for _w in $(seq 1 50); do
-    if curl -s "http://127.0.0.1:$_p/healthz" 2>/dev/null | grep -q '"status":"ok"'; then
-      return 0
-    fi
-    # 自分で立てた場合は、その子プロセスが死んだ時点で見切る（ポートを取れなかった等）。
     if [ -n "${GW_PID:-}" ]; then
-      kill -0 "$GW_PID" 2>/dev/null || return 1
+      gateway_process_alive "$GW_PID" || return 1
+    fi
+    if tail -n "+$_from" "$GATEWAY_LOG" 2>/dev/null \
+       | grep -q "listening on 127.0.0.1:$_p pid=$GW_PID"; then
+      # 念のため応答も確かめる（listen 直後に落ちた場合を弾く）。
+      curl -fsS --max-time 1 "http://127.0.0.1:$_p/healthz" 2>/dev/null | grep -q '"status":"ok"' && return 0
+      return 1
     fi
     sleep 0.1
   done
@@ -124,14 +159,16 @@ if [ "$GATEWAY_REUSED" -ne 1 ]; then
   for candidate in $PORT_CANDIDATES; do
     # 自分たちの gateway が中身違い（更新後に古いものが居座っている）で居るなら止める。
     stop_stale_gateway "$candidate"
+    # 今回の起動より前のログ行は見ない（追記式のため）。
+    _log_from=$(( $(wc -l < "$GATEWAY_LOG" 2>/dev/null || echo 0) + 1 ))
     # 実キー(DS_GATEWAY_AUTH_FILE)と合言葉(DS_GATEWAY_TOKEN)は、この行だけの環境変数として
     # gateway 子プロセスに渡す（export しないので Claude Code 側の環境には残らない）。
     DS_GATEWAY_PORT="$candidate" \
     DS_GATEWAY_TOKEN="$GATEWAY_TOKEN" \
     DS_GATEWAY_AUTH_FILE="$KEY_FILE" \
-      node "$GATEWAY_JS" &
+      node "$GATEWAY_JS" >>"$GATEWAY_LOG" 2>&1 &
     GW_PID=$!
-    if wait_for_gateway_health "$candidate"; then
+    if wait_for_own_gateway "$candidate" "$_log_from"; then
       PORT="$candidate"
       [ "$PORT" = "8788" ] || echo "ポート 8788 は他のプログラムが使っていたため、送信検査 Gateway は 127.0.0.1:${PORT} で動かします。"
       break
@@ -168,7 +205,7 @@ fi
 #     （他プロセスが占有していれば bind 失敗で即終了しているため）
 #   - 共用の場合: コマンドライン照合で自分たちの gateway だと確かめる
 gateway_alive=0
-if [ -n "$GW_PID" ] && kill -0 "$GW_PID" 2>/dev/null; then
+if [ -n "$GW_PID" ] && gateway_process_alive "$GW_PID"; then
   gateway_alive=1
 elif [ "$GATEWAY_REUSED" = "1" ] && our_gateway_pid "$PORT" >/dev/null 2>&1; then
   gateway_alive=1

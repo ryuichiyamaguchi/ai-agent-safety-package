@@ -44,6 +44,10 @@ if (-not $gatewayToken) {
   Write-Host "【エラー】Gateway の合言葉を用意できませんでした (fail-closed)。"; exit 1
 }
 
+# gateway の出力はログへ。listen 行の pid 照合に使うほか、受講者の画面を汚さない。
+New-Item -ItemType Directory -Force -Path $coachLogDir | Out-Null
+$gatewayLog = Join-Path $coachLogDir 'deepseek-gateway.log'
+
 # そのポートを握っているのが「自分たちの ds-gateway.js」かを、実行中のコマンドラインで確かめる。
 # 見つからなければ 0 を返す (＝再利用しない)。
 function Get-OurGatewayPid {
@@ -130,16 +134,34 @@ if (-not $gatewayReused) {
     # 実キーと合言葉は gateway 子プロセスにだけ渡し、spawn 後は自分の環境から消す。
     $env:DS_GATEWAY_TOKEN = $gatewayToken
     $env:DS_GATEWAY_AUTH_FILE = $keyFile
-    $gw = Start-Process node -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden
+    $gw = Start-Process node -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden -RedirectStandardOutput $gatewayLog -RedirectStandardError "$gatewayLog.err"
     Remove-Item Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_AUTH_FILE -ErrorAction SilentlyContinue
 
+    # healthz の応答だけで判断してはいけない。ポートが他に取られていた場合、自分の gateway は
+    # bind に失敗して終了するが、その同じポートで「別の gateway」(例: 別ワークスペースから
+    # 起動されたもの) が動いていると healthz は正常に応答する。それを自分のものと取り違えると、
+    # 別の検査設定を通って通信することになる。gateway が listen 直後に出す
+    #   listening on 127.0.0.1:<port> pid=<pid>
+    # の pid を照合すれば、そのポートで listen しているのが自分の gateway だと確定できる。
     $ok = $false
+    $listenMark = "listening on 127.0.0.1:$candidate pid=$($gw.Id)"
     for ($i = 0; $i -lt 50; $i++) {
-      try {
-        $r = Invoke-WebRequest -Uri "http://127.0.0.1:$candidate/healthz" -UseBasicParsing -TimeoutSec 1
-        if ($r.Content -match '"status":"ok"') { $ok = $true; break }
-      } catch { Start-Sleep -Milliseconds 100 }
       if ($gw -and $gw.HasExited) { break }
+      $listened = $false
+      try {
+        foreach ($line in @(Get-Content -LiteralPath $gatewayLog -ErrorAction Stop)) {
+          if ([string]$line -eq '') { continue }
+          if (([string]$line).StartsWith($listenMark)) { $listened = $true; break }
+        }
+      } catch {}
+      if ($listened) {
+        try {
+          $r = Invoke-WebRequest -Uri "http://127.0.0.1:$candidate/healthz" -UseBasicParsing -TimeoutSec 1
+          if ($r.Content -match '"status":"ok"') { $ok = $true }
+        } catch {}
+        break
+      }
+      Start-Sleep -Milliseconds 100
     }
     if ($ok -and $gw -and -not $gw.HasExited) {
       $port = $candidate

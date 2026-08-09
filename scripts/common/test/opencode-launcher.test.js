@@ -277,3 +277,22 @@ test('既定以外のポートを使ったときは利用者に伝える', () =>
       `${rel}: 黙って別ポートへ逃げないこと`);
   }
 });
+
+// ★ 実機で踏んだ事故の回帰: 候補ポートで「別の gateway」が healthz に正常応答すると、
+// 自分の gateway が bind に失敗して終了していても成功と誤判定して相乗りしていた。
+// 4 本すべてで「gateway 自身が出す listen 行の PID 照合」を行うこと。
+test('4 本のランチャーは listen 行の PID を照合して自分の gateway だけを使う', () => {
+  for (const rel of GATEWAY_LAUNCHERS) {
+    const script = read(rel);
+    assert.match(script, /listening on 127\.0\.0\.1:/,
+      `${rel}: gateway が出す listen 行を照合すること`);
+    assert.match(script, /pid=/, `${rel}: listen 行の PID まで一致を見ること`);
+  }
+  // mac 側は zombie を弾く生存判定も持つ（即死した子プロセスは kill -0 が通ってしまう）。
+  for (const rel of ['scripts/macos/opencode/launch-opencode-deepseek.sh',
+                     'scripts/macos/deepseek/launch-deepseek-gateway.sh']) {
+    const script = read(rel);
+    assert.match(script, /gateway_process_alive/, `${rel}: zombie を弾く生存判定を持つこと`);
+    assert.match(script, /ps -p "\$_pid" -o state=/, `${rel}: プロセス状態で zombie を判定すること`);
+  }
+});
