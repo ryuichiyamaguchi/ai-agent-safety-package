@@ -39,6 +39,9 @@ $cmds = @(
     @{ name = "claude-safe"; ps1 = "launch-claude-safe.ps1"; ws = $true },
     @{ name = "agy-safe";    ps1 = "launch-agy-safe.ps1";    ws = $true },
     @{ name = "monitor";     ps1 = "open-monitor.ps1";       ws = $false },
+    # OpenCode は「起動したフォルダ」が作業対象になるため、フォルダを受け取れる薄い
+    # ラッパー (oc-safe.ps1) 経由で呼ぶ。ccmux / Zed のターミナルからも同じ 1 行で起動できる。
+    @{ name = "oc-safe";     ps1 = "oc-safe.ps1";            ws = $true },
     @{ name = "d-claude";    bat = "deepseek\起動-Claude-DeepSeek.bat" }
 )
 

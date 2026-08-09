@@ -410,6 +410,35 @@ if command -v xattr >/dev/null 2>&1; then
   done
 fi
 
+# --- どこからでも打てる起動コマンド（oc-safe） -------------------------------
+# OpenCode は「起動したフォルダ」が作業対象になり、動き出したあとで cd しても移らない
+# （OpenCode 本体の仕様）。そのため「プロジェクトごとに分けて作業する」には、そのフォルダで
+# 起動する必要がある。ccmux や Zed のターミナルからでも 1 行で起動できるよう、
+# ~/.ai-safety/bin/oc-safe を置いて PATH に通す（Windows の setup-commands.ps1 と対称）。
+oc_bin_dir="$HOME/.ai-safety/bin"
+oc_template="$package_root/scripts/macos/oc-safe.template.sh"
+if [ -f "$oc_template" ]; then
+  mkdir -p "$oc_bin_dir"
+  # ワークスペースの絶対パスを焼き込む（bin 配下からは呼び出し元をたどれないため）。
+  awk -v ws="$workspace" '{ gsub(/__WORKSPACE__/, ws); print }' "$oc_template" > "$oc_bin_dir/oc-safe"
+  chmod 755 "$oc_bin_dir/oc-safe"
+  echo "起動コマンドを配置しました: $oc_bin_dir/oc-safe"
+
+  # PATH 追加は冪等に。すでに書いてあれば触らない。
+  zshrc="$HOME/.zshrc"
+  path_line='export PATH="$HOME/.ai-safety/bin:$PATH"  # ai-agent-safety-package'
+  if [ -f "$zshrc" ] && grep -qF '.ai-safety/bin' "$zshrc"; then
+    :
+  else
+    {
+      echo ""
+      echo "# AI エージェント安全運用パッケージ（oc-safe などの起動コマンド）"
+      echo "$path_line"
+    } >> "$zshrc"
+    echo "PATH に追加しました（新しいターミナルから oc-safe が使えます）: $oc_bin_dir"
+  fi
+fi
+
 echo "AI Safety package installed."
 echo "Workspace: $workspace"
 echo "Backups: $backup_dir"

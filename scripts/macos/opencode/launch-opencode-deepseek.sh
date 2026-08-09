@@ -14,21 +14,56 @@ KEY_FILE="$KEY_DIR/auth"
 LOG_DIR="${AI_SAFE_LOG_DIR:-$HOME/.ai-safety/logs}"
 COACH_MARKER="$LOG_DIR/coach-engine"
 
-# 第 2 引数以降はフラグ。--resume は前回の続きから開く（OpenCode の --continue）。
-# 位置が入れ替わっても効くよう、順不同で受ける。
+# 第 2 引数以降はフラグ。順不同で受ける。
+#   --websearch        Web 検索を確認制で有効化
+#   --resume           前回の続きから開く（OpenCode の --continue）
+#   --project <path>   作業フォルダ。OpenCode は「起動したフォルダ」が作業対象になり、
+#                      動き出したあとで cd しても移らない（本体仕様）。プロジェクトごとに
+#                      分けて作業できるよう、起動するフォルダをここで指定する。
 WEBSEARCH=""
 RESUME=""
+PROJECT_DIR=""
+_expect_project=0
 shift || true
 for _arg in "$@"; do
+  if [ "$_expect_project" = "1" ]; then
+    PROJECT_DIR="$_arg"
+    _expect_project=0
+    continue
+  fi
   case "$_arg" in
     "") ;;
     --websearch) WEBSEARCH="--websearch" ;;
     --resume|--continue) RESUME="--continue" ;;
-    *) echo "使い方: $0 [workspace] [--websearch] [--resume]" >&2; exit 2 ;;
+    --project) _expect_project=1 ;;
+    *) echo "使い方: $0 [workspace] [--websearch] [--resume] [--project <フォルダ>]" >&2; exit 2 ;;
   esac
 done
+[ "$_expect_project" = "0" ] || { echo "--project の後にフォルダを指定してください。" >&2; exit 2; }
 
 [ -d "$WORKSPACE" ] || { echo "作業フォルダが見つかりません: $WORKSPACE" >&2; exit 2; }
+# 比較は物理パス（pwd -P）で揃える。macOS の /var → /private/var のようなシンボリックリンクが
+# 途中にあると、論理パスのままでは「ワークスペースの中なのに外」と誤判定される。
+WORKSPACE="$(cd "$WORKSPACE" && pwd -P)"
+
+# 作業フォルダ（OpenCode を起動する場所）を決める。既定はワークスペース直下。
+# ワークスペースの外は指定させない: 安全パッケージのガードとポリシーはワークスペースを
+# 基準に配置されており、外で起動すると保護が及ばない場所で AI が動くことになる。
+if [ -n "$PROJECT_DIR" ]; then
+  [ -d "$PROJECT_DIR" ] || { echo "指定されたフォルダが見つかりません: $PROJECT_DIR" >&2; exit 2; }
+  PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd -P)"
+  case "$PROJECT_DIR" in
+    "$WORKSPACE"|"$WORKSPACE"/*) ;;
+    *)
+      echo "作業フォルダはワークスペースの中だけを指定できます（fail-closed）。" >&2
+      echo "  指定: $PROJECT_DIR" >&2
+      echo "  ワークスペース: $WORKSPACE" >&2
+      exit 2
+      ;;
+  esac
+else
+  PROJECT_DIR="$WORKSPACE"
+fi
 [ -f "$GATEWAY_JS" ] || { echo "送信検査 Gateway が見つかりません: $GATEWAY_JS" >&2; exit 2; }
 [ -f "$GATEWAY_TOKEN_JS" ] || { echo "送信検査 Gateway の合言葉管理が見つかりません: $GATEWAY_TOKEN_JS" >&2; exit 2; }
 [ -f "$CONFIG_JS" ] || { echo "OpenCode 安全設定が見つかりません: $CONFIG_JS" >&2; exit 2; }
@@ -37,6 +72,7 @@ done
 if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
   echo "OpenCode + DeepSeek dry-run"
   echo "  workspace: $WORKSPACE"
+  echo "  project:   $PROJECT_DIR"
   if [ -n "${DS_GATEWAY_PORT:-}" ]; then
     echo "  gateway:   http://127.0.0.1:$PORT/v1 (mandatory)"
   else
@@ -432,7 +468,9 @@ export OPENCODE_PERMISSION
 # 合言葉の受け渡し用変数も消す（OpenCode へは設定内の apiKey として渡るので不要）。
 unset DS_GATEWAY_AUTH_FILE DS_GATEWAY_TOKEN 2>/dev/null || true
 
-cd "$WORKSPACE"
+# OpenCode は「起動したフォルダ」が作業対象になる（動き出したあとで cd しても移らない）。
+# プロジェクトごとに分けて作業できるよう、ここで指定されたフォルダへ移ってから起動する。
+cd "$PROJECT_DIR"
 
 # --- 本体を出す前に「安全プラグインが本当に載るか」を実物で確かめる ----------------
 # `opencode debug config` はプラグインを実際に読み込む（1.18.4 実測: プラグインの中で

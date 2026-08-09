@@ -2,7 +2,11 @@
     [string]$Workspace = "$env:USERPROFILE\Documents\my-ai-workspace",
     [switch]$WebSearch,
     # 前回のセッションを開き直す（OpenCode の --continue）。
-    [switch]$Resume
+    [switch]$Resume,
+    # 作業フォルダ。OpenCode は「起動したフォルダ」が作業対象になり、動き出したあとで
+    # cd しても移らない (本体仕様)。プロジェクトごとに分けて作業できるよう、
+    # 起動するフォルダをここで指定する。既定はワークスペース直下。
+    [string]$Project = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,6 +23,20 @@ $logDir = if ($env:AI_SAFE_LOG_DIR) { $env:AI_SAFE_LOG_DIR } else { Join-Path $e
 $coachMarker = Join-Path $logDir 'coach-engine'
 
 if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw "作業フォルダが見つかりません: $Workspace" }
+
+# 作業フォルダ (OpenCode を起動する場所) を決める。既定はワークスペース直下。
+# ワークスペースの外は指定させない: ガードとポリシーはワークスペースを基準に配置されており、
+# 外で起動すると保護が及ばない場所で AI が動くことになる。
+if ($Project) {
+    if (-not (Test-Path -LiteralPath $Project -PathType Container)) { throw "指定されたフォルダが見つかりません: $Project" }
+    $Project = [System.IO.Path]::GetFullPath($Project)
+    $wsPrefix = $Workspace.TrimEnd('\') + '\'
+    if (-not ($Project -eq $Workspace -or $Project.StartsWith($wsPrefix, [System.StringComparison]::OrdinalIgnoreCase))) {
+        throw "作業フォルダはワークスペースの中だけを指定できます（fail-closed）。指定: $Project / ワークスペース: $Workspace"
+    }
+} else {
+    $Project = $Workspace
+}
 if (-not (Test-Path -LiteralPath $gatewayJs -PathType Leaf)) { throw "送信検査 Gateway が見つかりません: $gatewayJs" }
 if (-not (Test-Path -LiteralPath $gatewayTokenJs -PathType Leaf)) { throw "送信検査 Gateway の合言葉管理が見つかりません: $gatewayTokenJs" }
 if (-not (Test-Path -LiteralPath $configJs -PathType Leaf)) { throw "OpenCode 安全設定が見つかりません: $configJs" }
@@ -27,6 +45,7 @@ if (-not (Test-Path -LiteralPath $monitorPlugin -PathType Leaf)) { throw "OpenCo
 if ($env:AI_SAFE_DRY_RUN -eq '1') {
     Write-Output 'OpenCode + DeepSeek dry-run'
     Write-Output "  workspace: $Workspace"
+    Write-Output "  project:   $Project"
     if ($env:DS_GATEWAY_PORT) {
         Write-Output "  gateway:   http://127.0.0.1:$port/v1 (mandatory)"
     } else {
@@ -397,7 +416,8 @@ try {
     $watchdog = $null
     $resolvedFile = Join-Path $logDir 'opencode-resolved-config.json'
     $failedResolvedFile = Join-Path $logDir 'opencode-resolved-config.failed.txt'
-    Push-Location $Workspace
+    # OpenCode は「起動したフォルダ」が作業対象になる。指定されたフォルダへ移ってから起動する。
+    Push-Location $Project
     try {
         # --- 本体を出す前に「安全プラグインが本当に載るか」を実物で確かめる -----------
         # `opencode debug config` はプラグインを実際に読み込む (1.18.4 実測: プラグインの
