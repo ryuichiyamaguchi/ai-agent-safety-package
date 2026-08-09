@@ -22,6 +22,25 @@ const MCP_SERVERS = [
   { key: 'agy-image', file: 'agy-image-mcp.js', flag: 'AI_SAFE_DCLAUDE_AGY_IMAGE', tool: 'generate_image_agy', timeout: 210000, needsGeminiKey: false },
 ];
 
+// ホスト型（リモート）の MCP。実体は先方のサーバーで動くので、こちらは URL と鍵だけを持つ。
+// 有効化条件はローカル MCP と同じ考え方:
+//   - AI_SAFE_DCLAUDE_*=0 で個別に無効化できる
+//   - 鍵ファイルが無ければ登録しない（鍵なしで登録すると毎回 401 を返すツールが並ぶため）
+// Buffer は SNS の予約投稿サービス。投稿の作成・予約・下書き、チャンネル一覧、
+// 実績の取得などができる。**投稿は公開＝取り消せない操作**なので権限は ask のまま
+// （既定の '*': 'ask' と同じだが、設定に明示して debug config で確認できるようにする）。
+// なお MCP の通信は OpenCode から先方へ直接出るため、DeepSeek 向けの送信検査（マスク）は
+// 経由しない。これは既存の Gemini 検索 MCP（検索語が直接 Gemini へ行く）と同じ構造。
+const REMOTE_MCP_SERVERS = [
+  {
+    key: 'buffer',
+    url: 'https://mcp.buffer.com/mcp',
+    flag: 'AI_SAFE_DCLAUDE_BUFFER',
+    keyFile: 'buffer-api-key.txt',
+    timeout: 60000,
+  },
+];
+
 // OpenCode 本体のプロセス環境から必ず取り除く秘密の環境変数（SSOT）。
 // ランチャーは `--print-secret-env` でこの一覧を受け取り、OpenCode を起動する前に消す。
 // 消す理由: OpenCode 配下の bash 子プロセスは環境をそのまま継承するので、`env` や
@@ -52,6 +71,16 @@ function hasCoachKeyFile(homeDir) {
   }
 }
 
+// ~/.ai-safety/<name> に置かれた鍵を読む（登録ボタンが書く場所）。
+// 改行や前後の空白は取り除く。読めない・空なら空文字（＝その MCP は登録しない）。
+function readKeyFile(homeDir, name) {
+  try {
+    return fs.readFileSync(path.join(homeDir, '.ai-safety', name), 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
 // 接続できる MCP だけを { mcp, permission } の形で返す。
 // MCP ツールの permission キーは「<設定のサーバー名>_<ツール名>」（1.18.4 実測: モデルへ渡る
 // ツール名がそのまま permission 名になる。例 gemini-search_web_search）。
@@ -77,6 +106,23 @@ function buildMcpConfig({ mcpDir = '', env = process.env, homeDir = os.homedir()
       timeout: server.timeout,
     };
     permission[`${server.key}_${server.tool}`] = 'ask';
+  }
+  for (const server of REMOTE_MCP_SERVERS) {
+    if (String(env[server.flag] ?? '1') === '0') continue;
+    const token = readKeyFile(homeDir, server.keyFile);
+    if (!token) continue;
+    mcp[server.key] = {
+      type: 'remote',
+      url: server.url,
+      enabled: true,
+      // 自動 OAuth を試させない（鍵はこちらで渡す）。ブラウザが開いて止まるのを避ける。
+      oauth: false,
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: server.timeout,
+    };
+    // ホスト型はツールが複数あり、名前も先方の都合で増減する。個別に列挙せず
+    // まとめて ask に固定する（取りこぼしても既定の '*': 'ask' が受け止める）。
+    permission[`${server.key}_*`] = 'ask';
   }
   return { mcp, permission };
 }

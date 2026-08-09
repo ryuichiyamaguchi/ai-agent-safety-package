@@ -494,6 +494,11 @@ if [ -z "$resolved" ]; then
 fi
 if ! printf '%s' "$resolved" | node "$CONFIG_JS" --verify-resolved; then
   resolved_safe="${resolved//$GATEWAY_TOKEN/REDACTED}"
+  # 解決済み設定には、リモート MCP（Buffer 等）の鍵も Authorization ヘッダとして入る。
+  # 診断ファイルは講師へ共有してもらう前提なので、鍵は残さず伏せる。
+  _remote_key="$(tr -d '\r\n' < "$HOME/.ai-safety/buffer-api-key.txt" 2>/dev/null || true)"
+  [ -n "$_remote_key" ] && resolved_safe="${resolved_safe//$_remote_key/REDACTED}"
+  unset _remote_key
   ( umask 077; printf '%s' "$resolved_safe" > "$FAILED_RESOLVED" ) 2>/dev/null || true
   echo "安全設定が有効になっていないため、OpenCode は起動しません（fail-closed）。" >&2
   echo "診断ファイル: $FAILED_RESOLVED" >&2

@@ -441,6 +441,12 @@ try {
         # 解決済み設定には provider の apiKey (= gateway の合言葉) が含まれる。検証は
         # permission / share / agent しか見ないので、ディスクへ書く前に伏せる。
         $resolvedSafe = $resolved.Replace($gatewayToken, 'REDACTED')
+        # リモート MCP (Buffer 等) の鍵も Authorization ヘッダとして入るので、同じく伏せる。
+        $remoteKeyFile = Join-Path $env:USERPROFILE '.ai-safety\buffer-api-key.txt'
+        if (Test-Path -LiteralPath $remoteKeyFile -PathType Leaf) {
+            $remoteKey = ([System.IO.File]::ReadAllText($remoteKeyFile)).Trim()
+            if ($remoteKey) { $resolvedSafe = $resolvedSafe.Replace($remoteKey, 'REDACTED') }
+        }
         [System.IO.File]::WriteAllText($resolvedFile, $resolvedSafe, (New-Object System.Text.UTF8Encoding($false)))
         & $node.Source $configJs '--verify-resolved' $resolvedFile
         $verified = ($LASTEXITCODE -eq 0)
