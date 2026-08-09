@@ -156,3 +156,28 @@ test('mac の ccmux 導入は改造版を取得し、SHA-256 で照合してか�
   const lic = read('THIRD_PARTY/ccmux-LICENSE.txt');
   assert.match(lic, /上の階層へ移動できる機能を追加/, '改変内容に上位階層移動を記載すること');
 });
+
+// 「Bouncer統合版を起動」から OpenCode を選んだとき、作業フォルダを番号で選べるようにする。
+// OpenCode は起動したフォルダが作業対象になるので、案件ごとに分けて作業するには
+// 起動時にどこで始めるかを決める必要がある（受講者にパスを打たせない形にする）。
+test('起動メニューから作業フォルダを番号で選べる（Mac / Windows とも）', () => {
+  const cmd = read('workspace-template/スタート/0_Bouncer統合版を起動.command');
+  assert.match(cmd, /choose_project/, 'mac: フォルダ選択を持つこと');
+  assert.match(cmd, /どのフォルダで作業しますか/, 'mac: 選ばせる文言を出すこと');
+  assert.match(cmd, /--project=\$WORKSPACE\/\$_sel/, 'mac: 選んだフォルダを渡すこと');
+  // OpenCode の 3 経路（通常 / Web検索 / 続きから）すべてで選べること。
+  assert.strictEqual((cmd.match(/choose_project;/g) || []).length, 3, 'mac: OpenCode の 3 経路で呼ぶこと');
+  // 変数の直後に日本語が続くと bash 3.2 が変数名を取り違えるので ${} で囲む。
+  assert.match(cmd, /「\$\{_sel\}」/, 'mac: 日本語の直前の変数は ${} で囲むこと');
+
+  const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/0_Bouncer統合版を起動.bat'));
+  assert.ok(batBytes[0] !== 0xef, '.bat に BOM を付けない');
+  const bat = new TextDecoder('shift_jis').decode(batBytes);
+  assert.match(bat, /setlocal enabledelayedexpansion/, 'Windows: 連番変数を引くため遅延展開を使うこと');
+  assert.match(bat, /:choose_project/, 'Windows: フォルダ選択を持つこと');
+  assert.strictEqual((bat.match(/call :choose_project/g) || []).length, 3, 'Windows: OpenCode の 3 経路で呼ぶこと');
+  assert.strictEqual((bat.match(/-Project "!PROJECT_DIR!"/g) || []).length, 3, 'Windows: 選んだフォルダを渡すこと');
+  assert.match(bat, /どのフォルダで作業しますか/, 'Windows: CP932 のまま日本語が壊れていないこと');
+  // 変数名の中で番号を展開するには call を挟む必要がある（!PDIR_!PICK!! は書けない）。
+  assert.match(bat, /call set "PSEL=%%PDIR_!PICK!%%"/, 'Windows: 連番変数の引き方が正しいこと');
+});

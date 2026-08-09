@@ -1,6 +1,6 @@
 @echo off
 chcp 932 >nul
-setlocal
+setlocal enabledelayedexpansion
 :: ============================================================
 :: 0_Bouncer統合版を起動.bat
 ::   Bouncer統合版のランチャー。番号を選ぶと、その組み合わせで
@@ -42,16 +42,31 @@ if errorlevel 2 goto claude
 goto codex
 
 :opencode_resume
-powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent opencode -Profile standard -Resume
+call :choose_project
+if defined PROJECT_DIR (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent opencode -Profile standard -Resume -Project "!PROJECT_DIR!"
+) else (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent opencode -Profile standard -Resume
+)
 goto done
 :d_claude
 powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent d-claude -Profile standard
 goto done
 :opencode_web
-powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent opencode -Profile standard -WebSearch
+call :choose_project
+if defined PROJECT_DIR (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent opencode -Profile standard -WebSearch -Project "!PROJECT_DIR!"
+) else (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent opencode -Profile standard -WebSearch
+)
 goto done
 :opencode
-powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent opencode -Profile standard
+call :choose_project
+if defined PROJECT_DIR (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent opencode -Profile standard -Project "!PROJECT_DIR!"
+) else (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent opencode -Profile standard
+)
 goto done
 :claude_max
 powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent claude -Profile maximum
@@ -64,6 +79,51 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORK
 goto done
 :codex
 powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent codex -Profile standard
+
+REM ------------------------------------------------------------
+REM OpenCode は「起動したフォルダ」が作業対象になり、動き出したあとで cd しても
+REM 移らない（OpenCode 本体の仕様）。案件ごとにフォルダを分けて作業できるよう、
+REM 起動前にどこで始めるかを選んでもらう。パスは打たせず、作業フォルダ直下の
+REM 一覧から番号で選ぶ。0 または未入力なら従来どおり作業フォルダ直下で起動する。
+REM ------------------------------------------------------------
+:choose_project
+set "PROJECT_DIR="
+set /a PCOUNT=0
+for /d %%D in ("%WORKSPACE%\*") do (
+  set "PNAME=%%~nxD"
+  set "PSKIP="
+  if /i "!PNAME!"=="スタート" set "PSKIP=1"
+  if /i "!PNAME!"=="safe-workspace" set "PSKIP=1"
+  if "!PNAME:~0,1!"=="." set "PSKIP=1"
+  if not defined PSKIP (
+    set /a PCOUNT+=1
+    set "PDIR_!PCOUNT!=!PNAME!"
+  )
+)
+if !PCOUNT!==0 goto :eof
+echo.
+echo  どのフォルダで作業しますか？
+echo ============================================================
+echo  0 そのまま（作業フォルダ直下）
+for /l %%I in (1,1,!PCOUNT!) do echo  %%I !PDIR_%%I!
+echo ============================================================
+set "PICK="
+set /p "PICK=番号を入力してください [0]: "
+if not defined PICK goto :eof
+if "!PICK!"=="0" goto :eof
+REM 数字以外・範囲外はそのまま（作業フォルダ直下）で起動する。
+set "PVALID="
+for /l %%I in (1,1,!PCOUNT!) do if "!PICK!"=="%%I" set "PVALID=1"
+if not defined PVALID (
+  echo  その番号はありません。作業フォルダ直下で起動します。
+  goto :eof
+)
+REM 変数名の中で番号を展開するため call を挟む（!PDIR_!PICK!! は書けない）。
+call set "PSEL=%%PDIR_!PICK!%%"
+if not defined PSEL goto :eof
+set "PROJECT_DIR=%WORKSPACE%\!PSEL!"
+echo  「!PSEL!」で起動します。
+goto :eof
 
 :done
 if errorlevel 1 (

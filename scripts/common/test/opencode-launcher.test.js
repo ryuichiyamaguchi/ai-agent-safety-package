@@ -233,7 +233,8 @@ test('統合ランチャーは「続きから」を OpenCode へ渡す', () => {
 
 test('起動メニューに「続きから」の番号がある（Mac / Windows とも）', () => {
   const command = read('workspace-template/スタート/0_Bouncer統合版を起動.command');
-  assert.match(command, /8\) exec bash "\$LAUNCHER" "\$WORKSPACE" opencode standard --resume/);
+  // 8 番は作業フォルダを選んでから起動する（choose_project を挟む）。
+  assert.match(command, /8\) choose_project; exec bash "\$LAUNCHER" "\$WORKSPACE" opencode standard --resume/);
   assert.match(command, /前回の続きから開く/);
   assert.match(command, /1〜8の番号/, '案内の番号範囲も更新すること');
 
