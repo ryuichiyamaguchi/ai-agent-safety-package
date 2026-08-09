@@ -139,3 +139,20 @@ test('oc-safe は統合ランチャー（モニターを起動する入口）を
   assert.match(read('scripts/macos/launch-integrated.sh'), /--project=\*/, 'mac 統合: --project= を受けること');
   assert.match(read('scripts/windows/launch-integrated.ps1'), /-Project \$Project/, 'Windows 統合: -Project を渡すこと');
 });
+
+// ccmux は Windows 版だけ改造版（ドラッグ&ドロップ、Shift+ホイール遡り、上位階層移動）を
+// 配布していて、mac は本家 npm 版しか入れていなかった。mac でも改造版を入れる。
+test('mac の ccmux 導入は改造版を取得し、SHA-256 で照合してから配置する', () => {
+  const cmd = read('workspace-template/スタート/（上級）10_ccmuxを入れる.command');
+  assert.match(cmd, /ccmux-macos-arm64/, 'mac 用の改造版を取得すること');
+  assert.match(cmd, /EXPECT_SHA="[0-9a-f]{64}"/, '期待する SHA-256 を焼き込んでいること');
+  assert.match(cmd, /shasum -a 256/, '照合してから使うこと');
+  assert.match(cmd, /--proto '=https' --proto-redir '=https'/, 'HTTPS 固定で取得すること');
+  assert.match(cmd, /xattr -dr com\.apple\.quarantine/, '検疫属性を外して起動できるようにすること');
+  // Apple Silicon 以外は改造版バイナリが無いので本家版にフォールバックする。
+  assert.match(cmd, /npm install -g ccmux-cli/, 'Intel Mac は本家版で導入すること');
+
+  // MIT ライセンス遵守: 改変内容の記載を実装に追従させる。
+  const lic = read('THIRD_PARTY/ccmux-LICENSE.txt');
+  assert.match(lic, /上の階層へ移動できる機能を追加/, '改変内容に上位階層移動を記載すること');
+});
