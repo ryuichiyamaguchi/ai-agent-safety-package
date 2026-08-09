@@ -9,7 +9,9 @@
     [string]$SafetyProfile = 'standard',
     [switch]$WebSearch,
     # OpenCode のみ。前回のセッションを開き直す。
-    [switch]$Resume
+    [switch]$Resume,
+    # OpenCode のみ。作業フォルダ (ワークスペース内のプロジェクトフォルダ)。
+    [string]$Project = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,6 +25,7 @@ if ($Agent -eq 'opencode' -and $SafetyProfile -ne 'standard') { throw 'OpenCode 
 if ($Agent -eq 'd-claude' -and $SafetyProfile -ne 'standard') { throw 'd-claude は standard モードで起動してください。' }
 if ($WebSearch -and $Agent -ne 'opencode') { throw '-WebSearch は OpenCode だけで指定できます。' }
 if ($Resume -and $Agent -ne 'opencode') { throw '-Resume は OpenCode だけで指定できます。' }
+if ($Project -and $Agent -ne 'opencode') { throw '-Project は OpenCode だけで指定できます。' }
 if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw "作業フォルダが見つかりません: $Workspace" }
 
 # どのボタン(スタート等)から呼ばれても、AI は必ず作業フォルダを起点に起動する。
@@ -42,6 +45,7 @@ if ($env:AI_SAFE_DRY_RUN -eq '1') {
     Write-Output '  monitor:   enabled'
     if ($Agent -eq 'opencode') {
         Write-Output ('  session:   ' + $(if ($Resume) { 'continue last' } else { 'new' }))
+        if ($Project) { Write-Output "  project:   $Project" }
     }
     if ($SafetyProfile -eq 'maximum') {
         Write-Output '  gateway:   http://127.0.0.1:8787 (local only)'
@@ -122,7 +126,7 @@ try {
             $exitCode = $LASTEXITCODE
         }
         'opencode:standard' {
-            & (Join-Path $hooks 'opencode\launch-opencode-deepseek.ps1') -Workspace $Workspace -WebSearch:$WebSearch -Resume:$Resume
+            & (Join-Path $hooks 'opencode\launch-opencode-deepseek.ps1') -Workspace $Workspace -WebSearch:$WebSearch -Resume:$Resume -Project $Project
             $exitCode = $LASTEXITCODE
         }
         'd-claude:standard' {

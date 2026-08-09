@@ -36,6 +36,7 @@ for _arg in "$@"; do
     --websearch) WEBSEARCH="--websearch" ;;
     --resume|--continue) RESUME="--continue" ;;
     --project) _expect_project=1 ;;
+    --project=*) PROJECT_DIR="${_arg#--project=}" ;;
     *) echo "使い方: $0 [workspace] [--websearch] [--resume] [--project <フォルダ>]" >&2; exit 2 ;;
   esac
 done

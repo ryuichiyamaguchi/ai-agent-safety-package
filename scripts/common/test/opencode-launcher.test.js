@@ -222,7 +222,7 @@ test('OpenCode ランチャーは --resume を受けて opencode --continue を�
 
 test('統合ランチャーは「続きから」を OpenCode へ渡す', () => {
   const mac = read('scripts/macos/launch-integrated.sh');
-  assert.match(mac, /--websearch\|--resume\)/, 'mac: --resume を受け付けること');
+  assert.match(mac, /--websearch\|--resume\|--project=\*\)/, 'mac: --resume / --project= を受け付けること');
   assert.match(mac, /launch-opencode-deepseek\.sh" "\$workspace" "\$extra" "\$extra2"/);
 
   const win = read('scripts/windows/launch-integrated.ps1');

@@ -16,7 +16,10 @@
 set -euo pipefail
 
 WORKSPACE="__WORKSPACE__"
-LAUNCHER="$WORKSPACE/.ai-safety/hooks/macos/opencode/launch-opencode-deepseek.sh"
+# 統合ランチャーを経由する。ここが「見守りモニター（Bouncer の画面）＋ AI」をまとめて
+# 立ち上げる入口なので、OpenCode のランチャーを直接叩いてはいけない
+# （直接叩くとモニターが起動せず、画面で見えないまま AI が動くことになる）。
+LAUNCHER="$WORKSPACE/.ai-safety/hooks/macos/launch-integrated.sh"
 
 usage() {
   cat <<'EOF'
@@ -86,4 +89,4 @@ case "$PROJECT" in
 esac
 
 # shellcheck disable=SC2086
-exec bash "$LAUNCHER" "$WORKSPACE" --project "$PROJECT" $FLAGS
+exec bash "$LAUNCHER" "$WORKSPACE" opencode standard "--project=$PROJECT" $FLAGS

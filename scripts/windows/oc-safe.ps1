@@ -20,7 +20,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Workspace = [System.IO.Path]::GetFullPath($Workspace)
-$launcher = Join-Path $Workspace '.ai-safety\hooks\windows\opencode\launch-opencode-deepseek.ps1'
+# 統合ランチャーを経由する。ここが「見守りモニター (Bouncer の画面) ＋ AI」をまとめて
+# 立ち上げる入口なので、OpenCode のランチャーを直接叩いてはいけない
+# (直接叩くとモニターが起動せず、画面で見えないまま AI が動くことになる)。
+$launcher = Join-Path $Workspace '.ai-safety\hooks\windows\launch-integrated.ps1'
 
 if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
     Write-Host "安全パッケージが見つかりません: $launcher"
@@ -53,5 +56,5 @@ if (-not ($Folder -eq $Workspace -or $Folder.StartsWith($wsPrefix, [System.Strin
     exit 2
 }
 
-& $launcher -Workspace $Workspace -Project $Folder -Resume:$Resume -WebSearch:$WebSearch
+& $launcher -Workspace $Workspace -Agent opencode -SafetyProfile standard -Project $Folder -Resume:$Resume -WebSearch:$WebSearch
 exit $LASTEXITCODE

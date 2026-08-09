@@ -76,6 +76,10 @@ test('oc-safe はプロジェクトフォルダを指定して起動する', { s
   assert.strictEqual(byName.status, 0, byName.stderr);
   assert.match(byName.stdout, new RegExp(`project:\\s+${path.join(realWorkspace, '案件A')}`),
     'ワークスペース内の同名フォルダを解決すること');
+  // ★ 見守りモニターごと立ち上がる「統合ランチャー」を必ず経由すること。
+  // OpenCode のランチャーを直接叩くと、モニターが起動せず画面で見えないまま AI が動く。
+  assert.match(byName.stdout, /Bouncer統合版/, '統合ランチャーを経由すること');
+  assert.match(byName.stdout, /monitor:\s+enabled/, '見守りモニターが起動対象に入っていること');
 
   // 引数なしなら「いま開いているフォルダ」
   const byCwd = spawnSync(oc, [], { env, cwd: project, encoding: 'utf8' });
@@ -113,4 +117,25 @@ test('Windows でも oc-safe が PATH のコマンドとして入る', () => {
   assert.match(ps1, /\[Parameter\(Position = 0\)\]/, 'フォルダを位置引数で受けること');
   assert.match(ps1, /-Project \$Folder/, 'ランチャーへ作業フォルダを渡すこと');
   assert.match(ps1, /作業フォルダ \(my-ai-workspace\) の中で使ってください/, '外は断ること');
+});
+
+// ★ 実機で踏んだ事故の回帰: oc-safe が OpenCode のランチャーを直接呼んでいたため、
+// 見守りモニター（Bouncer の画面）が起動しなかった。モニターを立ち上げるのは統合ランチャーの
+// 役目なので、oc-safe は必ずそこを経由する。
+test('oc-safe は統合ランチャー（モニターを起動する入口）を経由する', () => {
+  const mac = read('scripts/macos/oc-safe.template.sh');
+  assert.match(mac, /launch-integrated\.sh/, 'mac: 統合ランチャーを呼ぶこと');
+  assert.ok(!/LAUNCHER=.*launch-opencode-deepseek\.sh/.test(mac),
+    'mac: OpenCode のランチャーを直接叩かないこと');
+  assert.match(mac, /opencode standard/, 'mac: agent と profile を渡すこと');
+
+  const win = read('scripts/windows/oc-safe.ps1');
+  assert.match(win, /launch-integrated\.ps1/, 'Windows: 統合ランチャーを呼ぶこと');
+  assert.ok(!/\$launcher = Join-Path \$Workspace '\.ai-safety\\\\hooks\\\\windows\\\\opencode/.test(win),
+    'Windows: OpenCode のランチャーを直接叩かないこと');
+  assert.match(win, /-Agent opencode -SafetyProfile standard/, 'Windows: agent と profile を渡すこと');
+
+  // 統合ランチャー側が作業フォルダを受け取れること
+  assert.match(read('scripts/macos/launch-integrated.sh'), /--project=\*/, 'mac 統合: --project= を受けること');
+  assert.match(read('scripts/windows/launch-integrated.ps1'), /-Project \$Project/, 'Windows 統合: -Project を渡すこと');
 });

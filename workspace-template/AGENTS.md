@@ -5,8 +5,8 @@ This file is for Codex Agents to understand the workspace context.
 
 ## このディレクトリは何か / What This Directory Is
 
-AI エージェント安全運用パッケージ（ai-agent-safety-package v1.14.12）の受講者用 workspace です。
-Training workspace for the AI Agent Safety Package (v1.14.12).
+AI エージェント安全運用パッケージ（ai-agent-safety-package v1.14.13）の受講者用 workspace です。
+Training workspace for the AI Agent Safety Package (v1.14.13).
 
 ## エージェントへの指示 / Agent Instructions
 

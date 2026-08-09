@@ -10,7 +10,7 @@ unset AI_SAFE_POLICY AI_SAFE_ROOT
 usage() {
   cat <<'EOF'
 Usage:
-  launch-integrated.sh [workspace] [codex|claude|opencode|d-claude] [standard|assisted|maximum] [--websearch] [--resume]
+  launch-integrated.sh [workspace] [codex|claude|opencode|d-claude] [standard|assisted|maximum] [--websearch] [--resume] [--project=<フォルダ>]
 
 Profiles:
   standard  Safety hooks + approval monitor. No local LLM is required.
@@ -63,14 +63,14 @@ fi
 for _flag in "$extra" "$extra2"; do
   case "$_flag" in
     "") ;;
-    --websearch|--resume)
+    --websearch|--resume|--project=*)
       if [ "$agent" != "opencode" ]; then
-        echo "--websearch / --resume は OpenCode だけで指定できます。" >&2
+        echo "--websearch / --resume / --project は OpenCode だけで指定できます。" >&2
         exit 2
       fi
       ;;
     *)
-      echo "第4引数以降に指定できるのは --websearch / --resume だけです。" >&2
+      echo "第4引数以降に指定できるのは --websearch / --resume / --project=<フォルダ> だけです。" >&2
       exit 2
       ;;
   esac
@@ -108,6 +108,18 @@ if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
   echo "  agent:     $agent"
   echo "  profile:   $profile"
   echo "  monitor:   enabled"
+  if [ "$agent" = "opencode" ]; then
+    _session="new"
+    _project=""
+    for _f in "$extra" "$extra2"; do
+      case "$_f" in
+        --resume) _session="continue last" ;;
+        --project=*) _project="${_f#--project=}" ;;
+      esac
+    done
+    echo "  session:   $_session"
+    [ -n "$_project" ] && echo "  project:   $_project"
+  fi
   if [ "$profile" = "maximum" ]; then
     echo "  gateway:   http://127.0.0.1:8787 (local only)"
   elif [ "$agent" = "opencode" ] || [ "$agent" = "d-claude" ]; then
