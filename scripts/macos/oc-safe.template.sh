@@ -15,7 +15,32 @@
 #   起動する必要がある。このコマンドはそれを 1 行で済ませるためのもの。
 set -euo pipefail
 
-WORKSPACE="__WORKSPACE__"
+# 導入時に焼き込まれる作業フォルダ。これは「どこでもない場所から打たれたとき」の
+# 手がかりに使うだけで、優先はしない。理由は下の _detect_workspace を参照。
+WORKSPACE_BAKED="__WORKSPACE__"
+
+# いま居る場所から上へ .ai-safety を探し、見つかったフォルダを作業フォルダとする。
+# 焼き込み値を優先しないのは、
+#   - 複数の作業フォルダを使い分けても「いま居る側」で正しく動く
+#   - 焼き込み値が古い／別の場所を指していても、居場所から正しく判断できる
+#   （実際、検証用フォルダへ導入し直したせいで焼き込み値がそちらに書き換わり、
+#     本来の作業フォルダの中に居るのに「外です」と断られる事故が起きた）
+# ため。見つからなければ焼き込み値に戻す。
+_detect_workspace() {
+  local d
+  d="$(pwd -P 2>/dev/null)" || return 1
+  while [ -n "$d" ] && [ "$d" != "/" ]; do
+    if [ -f "$d/.ai-safety/hooks/macos/launch-integrated.sh" ]; then
+      printf '%s' "$d"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  return 1
+}
+
+WORKSPACE="$(_detect_workspace 2>/dev/null || printf '%s' "$WORKSPACE_BAKED")"
+
 # 統合ランチャーを経由する。ここが「見守りモニター（Bouncer の画面）＋ AI」をまとめて
 # 立ち上げる入口なので、OpenCode のランチャーを直接叩いてはいけない
 # （直接叩くとモニターが起動せず、画面で見えないまま AI が動くことになる）。

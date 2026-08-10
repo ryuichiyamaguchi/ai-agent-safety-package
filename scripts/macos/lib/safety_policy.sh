@@ -473,6 +473,21 @@ load_policy_or_fail() {
 # ("nrm -rf …") 単語境界 \b が成立せず、複数行コマンドが丸ごと素通しした。
 # plutil は本物の JSON パーサなので -p で全文字列値を復号したテキストを得られる
 # （改行・タブ・\uXXXX すべて実文字になる）。Windows の ConvertFrom-Json と同じ土俵。
+# plutil -p の代わりに使う Node 実装の場所を決める。
+# このライブラリは <workspace>/.ai-safety/hooks/macos/lib/ に置かれ、
+# Node 実装は同じ配布物の <workspace>/.ai-safety/hooks/common/ にある。
+_PLUTIL_P_JS=""
+_resolve_plutil_p_js() {
+  [ -n "$_PLUTIL_P_JS" ] && return 0
+  local _dir _cand
+  _dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || return 1
+  _cand="$_dir/../common/plutil-p.js"
+  [ -f "$_cand" ] || _cand="$_dir/../../common/plutil-p.js"
+  [ -f "$_cand" ] || return 1
+  _PLUTIL_P_JS="$_cand"
+  return 0
+}
+
 _decode_hook_input() {
   local decoded
   if decoded="$(printf '%s' "$RAW_INPUT" | "$_PLUTIL" -p - 2>/dev/null)"; then
@@ -481,25 +496,24 @@ _decode_hook_input() {
     return 0
   fi
 
-  # macOS 14 (Sonoma) 等では `plutil -p -`（標準入力から JSON）が
-  # "Unexpected character { at line 1" で必ず失敗する（受講者の実機で確認。
-  # macOS 26 では成功するため、講師機では再現しない）。ここで諦めると
-  # 「入力を検査できない＝fail-closed」で全プロンプトがブロックされ、
-  # AI がまったく使えなくなる。
-  # 同じ JSON でも**ファイル指定なら読める**ので、一時ファイル経由で読み直す。
-  # 出力は同じ `plutil -p` 形式なので、以降の検査（deny 床の照合）は不変。
-  local tmp=""
-  tmp="$(mktemp "${TMPDIR:-/tmp}/ai-safety-hook.XXXXXX" 2>/dev/null)" || return 1
-  # 中身はプロンプト本文やコマンドそのもの。本人以外に読ませない。
-  chmod 600 "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
-  printf '%s' "$RAW_INPUT" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
-  if decoded="$("$_PLUTIL" -p "$tmp" 2>/dev/null)"; then
-    rm -f "$tmp"
-    DECODED_INPUT="$decoded"
-    _INPUT_DECODED=1
-    return 0
+  # macOS 14 (Sonoma) では `plutil -p` が JSON を受け付けず
+  # "Unexpected character { at line 1" で必ず失敗する。**ファイル指定でも同じ**
+  # （実機で確認: `plutil -p /tmp/t.json` も失敗し、`plutil -convert` だけが通る）。
+  # macOS 26 では成功するため講師機では再現しない。
+  # ここで諦めると「入力を検査できない＝fail-closed」で全プロンプトがブロックされ、
+  # AI がまったく使えなくなる（受講者の実機で発生）。
+  #
+  # OS ごとに当たり外れのある外部コマンドへ fail-closed を直結させたのが誤りだった。
+  # Node は元から必須（送信検査 Gateway 等で使う）なので、そちらで読み直して OS 差を断つ。
+  # plutil-p.js は `plutil -p` と同じ見た目のテキストを出す（本物との一致を回帰テストで固定）
+  # ため、以降の検査（deny 床の照合）は一切変わらない。
+  if _resolve_plutil_p_js && command -v node >/dev/null 2>&1; then
+    if decoded="$(printf '%s' "$RAW_INPUT" | node "$_PLUTIL_P_JS" 2>/dev/null)"; then
+      DECODED_INPUT="$decoded"
+      _INPUT_DECODED=1
+      return 0
+    fi
   fi
-  rm -f "$tmp"
   # 復号できない = JSON として壊れている（上限超過で切り詰めた場合を含む）。
   # 中身を検査できない以上、通してはいけない。Windows の ConvertFrom-Json 失敗 →
   # Fail-Closed と同じ挙動（切り詰めた入力を「見えた範囲だけ」で通すと、無害な文字で

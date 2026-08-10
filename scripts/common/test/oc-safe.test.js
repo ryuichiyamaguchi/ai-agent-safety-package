@@ -181,3 +181,43 @@ test('起動メニューから作業フォルダを番号で選べる（Mac / Wi
   // 変数名の中で番号を展開するには call を挟む必要がある（!PDIR_!PICK!! は書けない）。
   assert.match(bat, /call set "PSEL=%%PDIR_!PICK!%%"/, 'Windows: 連番変数の引き方が正しいこと');
 });
+
+// ★ 実際に起こした事故の回帰テスト。
+// 検証用フォルダへ導入し直したせいで oc-safe に焼き込まれた作業フォルダがそちらへ
+// 書き換わり、本来の作業フォルダの中に居るのに「外です」と断られた。
+// 焼き込み値を優先せず、いま居る場所から上へ .ai-safety を探して判断する。
+test('oc-safe は焼き込み値より「いま居る場所」を優先して作業フォルダを決める',
+  { skip: process.platform !== 'darwin' }, (t) => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'ocsafe-detect-'));
+    t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+    const home = path.join(base, 'home');
+    fs.mkdirSync(home, { recursive: true });
+
+    const wsA = path.join(base, 'wsA');
+    const wsB = path.join(base, 'wsB');
+    for (const ws of [wsA, wsB]) {
+      const r = spawnSync('bash', [path.join(root, 'scripts', 'macos', 'install.sh'), ws],
+        { env: { ...process.env, HOME: home }, encoding: 'utf8' });
+      assert.strictEqual(r.status, 0, `install 失敗: ${r.stderr}`);
+    }
+
+    const oc = path.join(home, '.ai-safety', 'bin', 'oc-safe');
+    // 最後に導入した wsB が焼き込まれている状態。
+    assert.match(fs.readFileSync(oc, 'utf8'), new RegExp(`WORKSPACE_BAKED="${wsB}"`),
+      '前提: 焼き込み値は最後に導入した方を指す');
+
+    const projA = path.join(wsA, '案件A');
+    fs.mkdirSync(projA, { recursive: true });
+    const env = { ...process.env, HOME: home, AI_SAFE_DRY_RUN: '1' };
+
+    // 焼き込みは wsB を指しているが、wsA の中に居るので wsA が使われること。
+    const inA = spawnSync(oc, [], { env, cwd: projA, encoding: 'utf8' });
+    assert.strictEqual(inA.status, 0, `wsA の中で断られている: ${inA.stdout}${inA.stderr}`);
+    assert.match(inA.stdout, new RegExp(`workspace:\\s+${fs.realpathSync(wsA)}`),
+      '居る側の作業フォルダを使うこと');
+    assert.match(inA.stdout, new RegExp(`project:\\s+${fs.realpathSync(projA)}`));
+
+    // どちらの作業フォルダの外でもないなら、これまでどおり断ること。
+    const outside = spawnSync(oc, [], { env, cwd: os.tmpdir(), encoding: 'utf8' });
+    assert.notStrictEqual(outside.status, 0, '作業フォルダの外では起動しないこと');
+  });
