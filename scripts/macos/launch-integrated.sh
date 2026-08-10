@@ -204,9 +204,14 @@ case "$agent:$profile" in
     bash "$consent" --consent-only
     export ANTHROPIC_AUTH_TOKEN
     ANTHROPIC_AUTH_TOKEN="$(cat "$auth_file")"
-    export ANTHROPIC_MODEL="deepseek-v4-flash[1m]"
-    export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-flash[1m]"
-    export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-flash[1m]"
+    # モデル名に [1m]（1M コンテキスト指定）を付けると、Claude Code 2.1.226 以降は
+    # それを名前の一部として扱い「そんなモデルは無い」で起動できなくなる（実機で再現）。
+    # DeepSeek が公開しているのは deepseek-v4-flash / deepseek-v4-pro の 2 つだけ。
+    # 1M コンテキストは CLAUDE_CODE_MAX_CONTEXT_TOKENS で伝える（これが無いと 200k 扱いの警告が出る）。
+    export ANTHROPIC_MODEL="deepseek-v4-flash"
+    export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-flash"
+    export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-flash"
+    export CLAUDE_CODE_MAX_CONTEXT_TOKENS="1048576"
     export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"
     export CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash"
     export CLAUDE_CODE_EFFORT_LEVEL="max"

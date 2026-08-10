@@ -25,7 +25,12 @@ test('install は「更新のたびに検疫が戻る」を起こさない', { s
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'inst-quarantine-'));
   t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
 
-  const first = spawnSync('bash', [INSTALL_SH, workspace], { encoding: 'utf8' });
+  // install は HOME 配下（~/.ai-safety/bin と ~/.zshrc）も書き換える。テストで実 HOME を
+  // 汚すと、利用者の oc-safe に検証用パスが焼き込まれる事故になる（実際に起こした）。
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'inst-quarantine-home-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const env = { ...process.env, HOME: home };
+  const first = spawnSync('bash', [INSTALL_SH, workspace], { env, encoding: 'utf8' });
   assert.strictEqual(first.status, 0, `install(1回目) が失敗: ${first.stdout}\n${first.stderr}`);
 
   const button = path.join(workspace, 'スタート', '0_Bouncer統合版を起動.command');
@@ -41,7 +46,7 @@ test('install は「更新のたびに検疫が戻る」を起こさない', { s
   }
 
   // 「6_最新版に更新」に相当する再インストール。
-  const second = spawnSync('bash', [INSTALL_SH, workspace], { encoding: 'utf8' });
+  const second = spawnSync('bash', [INSTALL_SH, workspace], { env, encoding: 'utf8' });
   assert.strictEqual(second.status, 0, `install(2回目) が失敗: ${second.stdout}\n${second.stderr}`);
 
   assert.ok(!hasQuarantine(button), '更新後、ボタンに検疫が残ってはいけない（毎回ブロックされる原因）');

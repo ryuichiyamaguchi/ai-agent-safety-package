@@ -221,3 +221,25 @@ test('oc-safe は焼き込み値より「いま居る場所」を優先して作
     const outside = spawnSync(oc, [], { env, cwd: os.tmpdir(), encoding: 'utf8' });
     assert.notStrictEqual(outside.status, 0, '作業フォルダの外では起動しないこと');
   });
+
+// install は HOME 配下（~/.ai-safety/bin と ~/.zshrc）も書き換える。テストがそれを忘れると、
+// 利用者の oc-safe に検証用ワークスペースが焼き込まれる（実際に 2 度起こした）。
+// 新しいテストが install を実行するようになっても気づけるよう、機械的に見張る。
+test('install を実行するテストは必ず HOME を隔離している', () => {
+  const dir = path.join(root, 'scripts', 'common', 'test');
+  const offenders = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith('.test.js')) continue;
+    const body = fs.readFileSync(path.join(dir, name), 'utf8');
+    // install.sh を子プロセスとして起動している箇所だけを見る（読むだけの参照は対象外）。
+    const launches = /(spawnSync|spawn)\(\s*'bash'\s*,\s*\[[^\]]*install\.sh/g;
+    let m;
+    while ((m = launches.exec(body)) !== null) {
+      // 呼び出しから少し先までの範囲に HOME 指定があるかを見る。
+      const window = body.slice(m.index, m.index + 400);
+      if (!/HOME:/.test(window)) offenders.push(`${name} (offset ${m.index})`);
+    }
+  }
+  assert.deepStrictEqual(offenders, [],
+    `install を HOME 隔離なしで実行しているテストがある: ${offenders.join(', ')}`);
+});

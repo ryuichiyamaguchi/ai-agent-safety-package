@@ -147,9 +147,14 @@ try {
             $deepseekKey = ([System.IO.File]::ReadAllText($authFile)).Trim()
             if (-not $deepseekKey) { throw 'DeepSeek APIキーの登録ファイルが空です。登録し直してください。' }
             $env:ANTHROPIC_AUTH_TOKEN = $deepseekKey
-            $env:ANTHROPIC_MODEL = 'deepseek-v4-flash[1m]'
-            $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'deepseek-v4-flash[1m]'
-            $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'deepseek-v4-flash[1m]'
+            # モデル名に [1m] (1M コンテキスト指定) を付けると、Claude Code 2.1.226 以降は
+            # それを名前の一部として扱い「そんなモデルは無い」で起動できなくなる (実機で再現)。
+            # DeepSeek が公開しているのは deepseek-v4-flash / deepseek-v4-pro の 2 つだけ。
+            # 1M コンテキストは CLAUDE_CODE_MAX_CONTEXT_TOKENS で伝える。
+            $env:ANTHROPIC_MODEL = 'deepseek-v4-flash'
+            $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'deepseek-v4-flash'
+            $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'deepseek-v4-flash'
+            $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS = '1048576'
             $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'deepseek-v4-flash'
             $env:CLAUDE_CODE_SUBAGENT_MODEL = 'deepseek-v4-flash'
             $env:CLAUDE_CODE_EFFORT_LEVEL = 'max'

@@ -196,8 +196,13 @@ test('the macOS installer really creates the harness and skill sources in the wo
     fs.rmSync(backups, { recursive: true, force: true });
   });
 
+  // install は HOME 配下（~/.ai-safety/bin と ~/.zshrc）も書き換える。テストで実 HOME を
+  // 汚すと、利用者の oc-safe に検証用ワークスペースが焼き込まれる事故になる（実際に起こした）。
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-harness-home-'));
+  t.after(() => fs.rmSync(fakeHome, { recursive: true, force: true }));
+
   const child = spawn('bash', [path.join(root, 'scripts/macos/install.sh'), '--platform', 'mac', workspace], {
-    env: { ...process.env, AI_SAFE_BACKUP_ROOT: backups },
+    env: { ...process.env, AI_SAFE_BACKUP_ROOT: backups, HOME: fakeHome },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let err = '';
