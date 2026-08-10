@@ -480,6 +480,26 @@ _decode_hook_input() {
     _INPUT_DECODED=1
     return 0
   fi
+
+  # macOS 14 (Sonoma) 等では `plutil -p -`（標準入力から JSON）が
+  # "Unexpected character { at line 1" で必ず失敗する（受講者の実機で確認。
+  # macOS 26 では成功するため、講師機では再現しない）。ここで諦めると
+  # 「入力を検査できない＝fail-closed」で全プロンプトがブロックされ、
+  # AI がまったく使えなくなる。
+  # 同じ JSON でも**ファイル指定なら読める**ので、一時ファイル経由で読み直す。
+  # 出力は同じ `plutil -p` 形式なので、以降の検査（deny 床の照合）は不変。
+  local tmp=""
+  tmp="$(mktemp "${TMPDIR:-/tmp}/ai-safety-hook.XXXXXX" 2>/dev/null)" || return 1
+  # 中身はプロンプト本文やコマンドそのもの。本人以外に読ませない。
+  chmod 600 "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  printf '%s' "$RAW_INPUT" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  if decoded="$("$_PLUTIL" -p "$tmp" 2>/dev/null)"; then
+    rm -f "$tmp"
+    DECODED_INPUT="$decoded"
+    _INPUT_DECODED=1
+    return 0
+  fi
+  rm -f "$tmp"
   # 復号できない = JSON として壊れている（上限超過で切り詰めた場合を含む）。
   # 中身を検査できない以上、通してはいけない。Windows の ConvertFrom-Json 失敗 →
   # Fail-Closed と同じ挙動（切り詰めた入力を「見えた範囲だけ」で通すと、無害な文字で

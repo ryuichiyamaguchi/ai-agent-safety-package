@@ -1,4 +1,4 @@
-# AI エージェント安全運用パッケージ v1.14.17
+# AI エージェント安全運用パッケージ v1.14.18
 
 Codex CLI、Claude Code、OpenCode、Gemini CLI を「あなたを守る安全装置」付きで使うためのパッケージです。
 
