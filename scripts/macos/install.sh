@@ -76,6 +76,38 @@ stamp="$(date +%Y%m%d-%H%M%S)"
 backup_root="${AI_SAFE_BACKUP_ROOT:-$HOME/.ai-safety/backups}"
 backup_dir="$backup_root/$stamp"
 mkdir -p "$backup_dir" "$workspace/.ai-safety/hooks" "$workspace/.ai-safety/policy" "$workspace/.ai-safety/cards"
+# 利用者が自分でプラグインを置く場所（v1.15.0〜）。`.ai-safety` は AI の書き込み禁止パスなので
+# AI にはこのフォルダを作れず、ここに置けるのは人だけ。隠しフォルダの下なので受講者が Finder /
+# エクスプローラーで作るのは難しく、こちらで用意しておく（中身は空のまま）。
+mkdir -p "$workspace/.ai-safety/plugins"
+# 置き方の説明を 1 枚だけ置く。ランチャーは .js / .ts しか見ないので .txt は読み込まれない。
+# 既にあるときは触らない（利用者が書き足しているかもしれないため）。
+if [ ! -e "$workspace/.ai-safety/plugins/README.txt" ]; then
+  cat > "$workspace/.ai-safety/plugins/README.txt" <<'PLUGIN_README'
+このフォルダは、OpenCode で使うプラグインを自分で置く場所です。
+
+・ここに .js または .ts のファイルを置くと、次に統合ランチャーから OpenCode を
+  起動したときに読み込みます。
+・このフォルダの直下だけを見ます。中にフォルダを作って入れても読み込みません。
+・初めて置いたとき、中身を変えたときは、起動が一度止まって名前を表示し、
+  Enter を押すまで先に進みません（顔ぶれが同じなら次からは聞きません）。
+・置いていないときは、これまでと同じ静かな起動になります。
+
+【重要】ここに置いたコードは、承認モニターの確認を通りません。
+「このコマンドを実行していいですか」の確認画面が出ないだけでなく、
+見守りの仕組みそのものを止めることもできます。
+中身を自分で確かめたものだけを置いてください。
+
+うまく起動しなくなったときは、まずこのフォルダを疑ってください。
+プラグインの書き方が誤っていると、OpenCode はプラグインの読み込み全体を中止し、
+見守りプラグインも載らないため、安全のため起動を止めます。
+「導入をやり直す」ではこのフォルダは消えません。中身を別の場所へ移してから
+起動し直してください。
+
+詳しくは説明書の「10_OpenCode_DeepSeekを安全に使う」の
+「自分で入れたプラグインを使う」を読んでください。
+PLUGIN_README
+fi
 
 echo "Installing for platform: $PLATFORM"
 
