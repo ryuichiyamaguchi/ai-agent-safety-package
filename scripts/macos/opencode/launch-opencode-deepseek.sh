@@ -444,6 +444,102 @@ if [ -n "$_shell_expansion_hits" ]; then
   exit 1
 fi
 
+# --- 利用者が自分で入れたプラグインの配置 -----------------------------------------
+# 配布物の plugin/ を写さない方針（上）はそのまま。そのうえで「利用者が自分の意思で置いた
+# プラグイン」だけを通す道を 1 本用意する。置き場は作業フォルダの .ai-safety/plugins/ に
+# 限り、その直下の .js / .ts を隔離設定ディレクトリの plugin/ へ毎回写す。サブフォルダは
+# 見ない（画面に一覧として出せる範囲に限るため）。
+# 設定ディレクトリの plugin は無条件で実行される＝ここに置いたコードは承認モニターの
+# 決定的 deny 床を通らないどころか、見守りの仕組みそのものを止めることもできる。
+#
+# 歯止めの作り方について（レビュー指摘を受けた設計）:
+#   画面に名前を出すだけでは歯止めにならない。この直後に走る `opencode debug config` が
+#   プラグインを実際に読み込み、その数百ミリ秒後に全画面 TUI がメッセージごと画面を消す
+#   ため、利用者が読み終わる前に実行が済んでいる（このスクリプト自身が別の箇所で
+#   「TUI は全画面なので画面出力では気づけない」と結論している）。
+#   そこで「顔ぶれ（名前＋中身のハッシュ）が前回と変わったときだけ、Enter を求めて止まる」
+#   方式にした。毎回は聞かないので普段の起動は静かなまま、新しい物が増えた・中身が
+#   差し替わったときだけ必ず人の手が要る。承認の記録は監査ログにも残す。
+#   端末が対話可能でないとき（stdin が TTY でない）は、返事を取れないので配置しない。
+#
+# 位置について: 上の 2 つの検査（シンボリックリンク禁止・スラッシュコマンドの !`…` 禁止）は
+# 「配布物のハーネスが差し替えられていないか」を見るためのもので、配布物に無い書き方が 1 つ
+# でもあれば起動を止める。利用者のプラグインは配布物ではなく本人が承知の上で置いた
+# JavaScript なので、その 2 つの検査より後に写す。とくに !`…` の検査は .md のテンプレート
+# 展開を止めるためのもので、ふつうの JavaScript（`…!` で終わるテンプレート文字列など）に
+# 当てると、本人が置いたプラグインが理由の分からない fail-closed で弾かれる。
+USER_PLUGIN_SRC="$WORKSPACE/.ai-safety/plugins"
+USER_PLUGIN_DEST="$OC_CONFIG_DIR/plugin"
+if [ -L "$USER_PLUGIN_SRC" ]; then
+  # 置き場そのものがショートカットだと、写す物の出所が作業フォルダの外になる。
+  echo "注意: 追加プラグインの置き場がショートカットのため読み込みません: $USER_PLUGIN_SRC" >&2
+elif [ -d "$USER_PLUGIN_SRC" ]; then
+  _user_plugin_files=()
+  _user_plugin_names=""
+  for _entry in "$USER_PLUGIN_SRC"/*.js "$USER_PLUGIN_SRC"/*.ts; do
+    # 一致が無いときはパターン文字列そのものが渡ってくるので、実在確認で弾く。
+    [ -e "$_entry" ] || continue
+    if [ -L "$_entry" ]; then
+      echo "注意: ショートカット（シンボリックリンク）は配置しません: $_entry" >&2
+      continue
+    fi
+    [ -f "$_entry" ] || continue
+    # 名前は画面に出す唯一の手掛かりなので、制御文字（行消去などの端末エスケープ）を落とす。
+    _name="$(basename "$_entry" | tr -d '[:cntrl:]')"
+    _user_plugin_files+=("$_entry")
+    _user_plugin_names="${_user_plugin_names:+$_user_plugin_names, }$_name"
+  done
+  if [ "${#_user_plugin_files[@]}" -gt 0 ]; then
+    # 顔ぶれの指紋 = 名前と中身のハッシュ。中身だけ差し替えられた場合も検知する。
+    _plugin_fp="$(for _entry in "${_user_plugin_files[@]}"; do
+      printf '%s %s\n' "$(basename "$_entry")" "$(shasum -a 256 "$_entry" 2>/dev/null | cut -d' ' -f1)"
+    done | sort)"
+    _plugin_state="$LOG_DIR/opencode-user-plugins.approved"
+    _plugin_prev=""
+    [ -f "$_plugin_state" ] && _plugin_prev="$(cat "$_plugin_state" 2>/dev/null || true)"
+
+    # 20 件を超えたら丸めて出す（1 行が巨大化すると「見せる」歯止めが崩れるため）
+    _plugin_count="${#_user_plugin_files[@]}"
+    _plugin_shown="$_user_plugin_names"
+    if [ "$_plugin_count" -gt 20 ]; then
+      _plugin_shown="$(printf '%s' "$_user_plugin_names" | cut -d',' -f1-20), ほか $((_plugin_count - 20)) 件"
+    fi
+
+    if [ "$_plugin_fp" != "$_plugin_prev" ]; then
+      echo ""
+      echo "────────────────────────────────────────"
+      echo "追加プラグインの顔ぶれが前回と変わりました。"
+      echo "  読み込むもの: $_plugin_shown"
+      echo "  置き場: $USER_PLUGIN_SRC"
+      echo ""
+      echo "これはあなたが置いたコードです。OpenCode の中で無条件に実行され、"
+      echo "見守り（承認モニター）を止めることもできます。中身に心当たりがありますか？"
+      echo "────────────────────────────────────────"
+      if [ -t 0 ]; then
+        printf "続けるには Enter、やめるには Ctrl+C を押してください: "
+        read -r _plugin_answer || true
+        printf '%s' "$_plugin_fp" > "$_plugin_state" 2>/dev/null || true
+      else
+        # 返事を取れない状況（TTY でない）では、承認されていないコードは動かさない。
+        echo "注意: 対話できない状態のため、追加プラグインは読み込みません。" >&2
+        _user_plugin_files=()
+      fi
+    fi
+
+    if [ "${#_user_plugin_files[@]}" -gt 0 ]; then
+      echo "次の追加プラグインを読み込みます: $_plugin_shown"
+      mkdir -p "$USER_PLUGIN_DEST"
+      for _entry in "${_user_plugin_files[@]}"; do
+        cp "$_entry" "$USER_PLUGIN_DEST/$(basename "$_entry")"
+      done
+      # 画面は TUI で流れるため、監査ログ（見守り画面の履歴）にも残す。
+      printf '{"ts":"%s","type":"user_plugins_loaded","names":"%s","count":%s}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_user_plugin_names" "$_plugin_count" \
+        >> "$LOG_DIR/events-$(date +%Y-%m-%d).jsonl" 2>/dev/null || true
+    fi
+  fi
+fi
+
 # 合言葉は provider の apiKey として設定に埋め込む（gateway 側で照合される）。
 # opencode-config.js へは環境変数で渡す（引数にすると ps に出る）。この行限定の
 # 環境変数なのでランチャー自身の環境には残らない。
@@ -512,6 +608,15 @@ case "$ready_signal" in
   *BOUNCER_READY_OK*) ;;
   *)
     echo "危険なコマンドを止める安全プラグインが読み込まれないため、OpenCode は起動しません（fail-closed）。" >&2
+    if [ -n "${_user_plugin_names:-}" ]; then
+      # 「導入をやり直す」では .ai-safety/plugins/ は消えないので、こちらを先に案内する。
+      echo "" >&2
+      echo "この起動では、あなたが置いた追加プラグインを読み込んでいます: $_user_plugin_names" >&2
+      echo "まず次のフォルダから中身を別の場所へ移して、もう一度お試しください:" >&2
+      echo "  $USER_PLUGIN_SRC" >&2
+      echo "（プラグインの書き方が誤っていると、OpenCode はプラグインの読み込み全体を中止します）" >&2
+      echo "" >&2
+    fi
     echo "「導入(インストール)」をやり直してから、もう一度お試しください。" >&2
     exit 1 ;;
 esac

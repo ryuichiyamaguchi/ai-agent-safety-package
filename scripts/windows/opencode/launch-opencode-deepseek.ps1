@@ -388,6 +388,104 @@ try {
         throw 'コマンド定義に「確認なしでコマンドを実行する書き方」が含まれていたため、OpenCode は起動しません (fail-closed)。「導入(インストール)」をやり直してください。それでも出る場合は講師に連絡してください。'
     }
 
+    # --- 利用者が自分で入れたプラグインの配置 -------------------------------------
+    # 配布物の plugin\ を写さない方針 (上) はそのまま。そのうえで「利用者が自分の意思で
+    # 置いたプラグイン」だけを通す道を 1 本用意する。置き場は作業フォルダの
+    # .ai-safety\plugins\ に限り、その直下の .js / .ts を隔離設定ディレクトリの plugin\ へ
+    # 毎回写す。サブフォルダは見ない (画面に一覧として出せる範囲に限るため)。
+    # 設定ディレクトリの plugin は無条件で実行される = ここに置いたコードは承認モニターの
+    # 決定的 deny 床を通らない。歯止めは「毎回、何を読み込むかを本人に見せること」だけなので、
+    # ファイルがあるときは必ず名前を画面に出してから写す (無いときは何も出さない)。
+    #
+    # 位置について: 上の 2 つの検査 (ショートカット禁止・スラッシュコマンドのシェル実行禁止) は
+    # 「配布物のハーネスが差し替えられていないか」を見るためのもので、配布物に無い書き方が
+    # 1 つでもあれば起動を止める。利用者のプラグインは配布物ではなく本人が承知の上で置いた
+    # JavaScript なので、その 2 つの検査より後に写す。とくにシェル実行の検査は .md のテンプレート
+    # 展開を止めるためのもので、ふつうの JavaScript (感嘆符で終わるテンプレート文字列など) に
+    # 当てると、本人が置いたプラグインが理由の分からない fail-closed で弾かれる。
+    $userPluginSrc = Join-Path $Workspace '.ai-safety\plugins'
+    $userPluginDest = Join-Path $ocConfigDir 'plugin'
+    $userPluginSrcItem = Get-Item -LiteralPath $userPluginSrc -Force -ErrorAction SilentlyContinue
+    $userPluginSrcIsLink = $false
+    if ($userPluginSrcItem) {
+        $userPluginSrcIsLink = (($userPluginSrcItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint)
+    }
+    if ($userPluginSrcIsLink) {
+        # 置き場そのものがショートカットだと、写す物の出所が作業フォルダの外になる。
+        Write-Warning "追加プラグインの置き場がショートカットのため読み込みません: $userPluginSrc"
+    } elseif ($userPluginSrcItem -and $userPluginSrcItem.PSIsContainer) {
+        $userPluginFiles = @()
+        # mac 側のグロブ (*.js / *.ts) と拾う範囲を揃える。隠しファイルは拾わず (-Force を付けない)、
+        # 拡張子は大文字小文字を区別する (-ceq。OpenCode 側の走査に合わせる)。
+        foreach ($candidate in @(Get-ChildItem -LiteralPath $userPluginSrc -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension -ceq '.js' -or $_.Extension -ceq '.ts' } | Sort-Object Name)) {
+            if (($candidate.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint) {
+                Write-Warning "ショートカット (シンボリックリンク) は配置しません: $($candidate.FullName)"
+                continue
+            }
+            $userPluginFiles += $candidate
+        }
+        if ($userPluginFiles.Count -gt 0) {
+            # 名前は画面に出す唯一の手掛かりなので、制御文字 (行消去などの端末エスケープ) を落とす。
+            $userPluginNames = @($userPluginFiles | ForEach-Object { ($_.Name -replace '\p{C}', '') })
+            $userPluginNameList = $userPluginNames -join ', '
+            # 20 件を超えたら丸めて出す (1 行が巨大化すると「見せる」歯止めが崩れるため)
+            $shownNames = $userPluginNameList
+            if ($userPluginFiles.Count -gt 20) {
+                $shownNames = (($userPluginNames | Select-Object -First 20) -join ', ') + (", ほか {0} 件" -f ($userPluginFiles.Count - 20))
+            }
+
+            # 顔ぶれの指紋 = 名前と中身のハッシュ。中身だけ差し替えられた場合も検知する。
+            $fingerprint = (@($userPluginFiles | ForEach-Object {
+                '{0} {1}' -f $_.Name, (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+            } | Sort-Object) -join "`n")
+            $pluginStatePath = Join-Path $logDir 'opencode-user-plugins.approved'
+            $previous = ''
+            if (Test-Path -LiteralPath $pluginStatePath) {
+                $previous = (Get-Content -LiteralPath $pluginStatePath -Raw -ErrorAction SilentlyContinue)
+                if ($null -eq $previous) { $previous = '' }
+                $previous = $previous.TrimEnd("`r", "`n")
+            }
+
+            $proceed = $true
+            if ($fingerprint -ne $previous) {
+                Write-Host ''
+                Write-Host '----------------------------------------'
+                Write-Host '追加プラグインの顔ぶれが前回と変わりました。'
+                Write-Host "  読み込むもの: $shownNames"
+                Write-Host "  置き場: $userPluginSrc"
+                Write-Host ''
+                Write-Host 'これはあなたが置いたコードです。OpenCode の中で無条件に実行され、'
+                Write-Host '見守り (承認モニター) を止めることもできます。中身に心当たりがありますか?'
+                Write-Host '----------------------------------------'
+                if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+                    Read-Host '続けるには Enter、やめるには Ctrl+C を押してください' | Out-Null
+                    Set-Content -LiteralPath $pluginStatePath -Value $fingerprint -Encoding UTF8
+                } else {
+                    # 返事を取れない状況では、承認されていないコードは動かさない。
+                    Write-Warning '対話できない状態のため、追加プラグインは読み込みません。'
+                    $proceed = $false
+                }
+            }
+
+            if ($proceed) {
+                Write-Host "次の追加プラグインを読み込みます: $shownNames"
+                New-Item -ItemType Directory -Force -Path $userPluginDest | Out-Null
+                foreach ($plugin in $userPluginFiles) {
+                    # 角括弧を含む名前でも確実に写せるよう .NET の Copy を使う (Copy-Item の -Destination は literal 指定ができない)。
+                    [System.IO.File]::Copy($plugin.FullName, (Join-Path $userPluginDest $plugin.Name), $true)
+                }
+                # 画面は TUI で流れるため、監査ログ (見守り画面の履歴) にも残す。
+                $auditLine = '{{"ts":"{0}","type":"user_plugins_loaded","names":"{1}","count":{2}}}' -f (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'), $userPluginNameList, $userPluginFiles.Count
+                $auditPath = Join-Path $logDir ("events-{0}.jsonl" -f (Get-Date).ToString('yyyy-MM-dd'))
+                Add-Content -LiteralPath $auditPath -Value $auditLine -Encoding UTF8 -ErrorAction SilentlyContinue
+            } else {
+                $userPluginFiles = @()
+                $userPluginNameList = ''
+            }
+        }
+    }
+
     $configArgs = @($configJs, '--port', $port, '--monitor-plugin', $monitorPlugin)
     if ($WebSearch) {
         $env:OPENCODE_ENABLE_EXA = '1'
