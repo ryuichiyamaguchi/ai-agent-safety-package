@@ -6,7 +6,12 @@
     # 作業フォルダ。OpenCode は「起動したフォルダ」が作業対象になり、動き出したあとで
     # cd しても移らない (本体仕様)。プロジェクトごとに分けて作業できるよう、
     # 起動するフォルダをここで指定する。既定はワークスペース直下。
-    [string]$Project = ""
+    [string]$Project = "",
+    # 画面から雇うための「裏で 1 件だけ実行する」モード。
+    # -Task を渡すと対話画面(TUI)を開かず、その指示だけを走らせて終わる。
+    [string]$Title = "",
+    [string]$Task = "",
+    [string]$Session = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -573,9 +578,25 @@ try {
         Write-Host ('変更操作は確認、外部フォルダは禁止、Web検索は' + $(if ($WebSearch) { '許可時のみ' } else { '無効' }) + 'です。')
         Write-Host '危険なコマンド（まとめて削除・鍵の読み出し・ネットから拾った実行）は確認なしで止まります。'
 
+        # -Task が来たときは対話画面(TUI)を開かず、その 1 件だけを裏で走らせて終わる。
+        # 可視化ダッシュボードの「雇用する」「話しかける」から使うための入口。
+        # ここまでの安全設定（送信検査 Gateway・deny 床・承認モニター・ハーネス配置・
+        # 利用者プラグインの承認）は、対話起動とまったく同じものが効いた状態で走る。
+        if ($Task -ne '') {
+            if ($Session -ne '') {
+                Write-Host ('続きの指示を渡します（セッション: ' + $Session + '）。')
+                & $openCode 'run' '--session' $Session '--auto' $Task
+            } elseif ($Title -ne '') {
+                Write-Host ('裏で 1 件だけ実行します（名前: ' + $Title + '）。')
+                & $openCode 'run' '--title' $Title '--auto' $Task
+            } else {
+                Write-Host '裏で 1 件だけ実行します。'
+                & $openCode 'run' '--auto' $Task
+            }
+        }
         # -Resume のときは前回のセッションを開き直す。会話は OpenCode 自身がローカルに
         # 保存しているので、前の窓が落ちても続きから戻れる。
-        if ($Resume) {
+        elseif ($Resume) {
             Write-Host '前回の続きから開きます（新しく始めるときは「続きから」ではないボタンを使ってください）。'
             & $openCode '--continue'
         } else {

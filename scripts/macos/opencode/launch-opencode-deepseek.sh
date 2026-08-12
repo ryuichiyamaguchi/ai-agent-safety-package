@@ -23,21 +23,41 @@ COACH_MARKER="$LOG_DIR/coach-engine"
 WEBSEARCH=""
 RESUME=""
 PROJECT_DIR=""
+# 画面から雇うための「裏で1件だけ実行する」モード用（--task を渡すと TUI を開かず run で走る）
+TITLE=""
+TASK=""
+SESSION=""
 _expect_project=0
+_expect_title=0
+_expect_task=0
+_expect_session=0
 shift || true
 for _arg in "$@"; do
   if [ "$_expect_project" = "1" ]; then
-    PROJECT_DIR="$_arg"
-    _expect_project=0
-    continue
+    PROJECT_DIR="$_arg"; _expect_project=0; continue
+  fi
+  if [ "$_expect_title" = "1" ]; then
+    TITLE="$_arg"; _expect_title=0; continue
+  fi
+  if [ "$_expect_task" = "1" ]; then
+    TASK="$_arg"; _expect_task=0; continue
+  fi
+  if [ "$_expect_session" = "1" ]; then
+    SESSION="$_arg"; _expect_session=0; continue
   fi
   case "$_arg" in
     "") ;;
     --websearch) WEBSEARCH="--websearch" ;;
     --resume|--continue) RESUME="--continue" ;;
+    --title) _expect_title=1 ;;
+    --title=*) TITLE="${_arg#--title=}" ;;
+    --task) _expect_task=1 ;;
+    --task=*) TASK="${_arg#--task=}" ;;
+    --session) _expect_session=1 ;;
+    --session=*) SESSION="${_arg#--session=}" ;;
     --project) _expect_project=1 ;;
     --project=*) PROJECT_DIR="${_arg#--project=}" ;;
-    *) echo "使い方: $0 [workspace] [--websearch] [--resume] [--project <フォルダ>]" >&2; exit 2 ;;
+    *) echo "使い方: $0 [workspace] [--websearch] [--resume] [--project <フォルダ>] [--title <名前>] [--task <指示>] [--session <ID>]" >&2; exit 2 ;;
   esac
 done
 [ "$_expect_project" = "0" ] || { echo "--project の後にフォルダを指定してください。" >&2; exit 2; }
@@ -632,6 +652,23 @@ printf 'opencode-deepseek' > "$COACH_MARKER" 2>/dev/null || true
 echo "Bouncer送信検査: 有効 / モデル: DeepSeek V4 Pro / 補助: V4 Flash"
 echo "変更操作は確認、外部フォルダは禁止、Web検索は${WEBSEARCH:+許可時のみ}$( [ -n "$WEBSEARCH" ] || printf '無効' )です。"
 echo "危険なコマンド（まとめて削除・鍵の読み出し・ネットから拾った実行）は確認なしで止まります。"
+
+# --task が来たときは対話画面(TUI)を開かず、その 1 件だけを裏で走らせて終わる。
+# 可視化ダッシュボードの「雇用する」「話しかける」から使うための入口。
+# ここまでの安全設定（送信検査 Gateway・deny 床・承認モニター・ハーネス配置・
+# 利用者プラグインの承認）は、対話起動とまったく同じものが効いた状態で走る。
+if [ -n "$TASK" ]; then
+  if [ -n "$SESSION" ]; then
+    echo "続きの指示を渡します（セッション: $SESSION）。"
+    exec "$OPENCODE_BIN" run --session "$SESSION" --auto "$TASK"
+  fi
+  if [ -n "$TITLE" ]; then
+    echo "裏で 1 件だけ実行します（名前: $TITLE）。"
+    exec "$OPENCODE_BIN" run --title "$TITLE" --auto "$TASK"
+  fi
+  echo "裏で 1 件だけ実行します。"
+  exec "$OPENCODE_BIN" run --auto "$TASK"
+fi
 
 # --resume が指定されたときは前回のセッションを開き直す。会話は OpenCode 自身が
 # ローカル（~/.local/share/opencode）に保存しているので、前の窓が落ちても続きから戻れる。
