@@ -423,7 +423,7 @@ function mcpFixture(t, files, { coachKey = '' } = {}) {
 
 const ALL_MCP_FILES = MCP_SERVERS.map((server) => server.file);
 
-test('all four zero-dependency MCP servers are wired with absolute node commands', (t) => {
+test('all five zero-dependency MCP servers are wired with absolute node commands', (t) => {
   const dir = mcpFixture(t, ALL_MCP_FILES, { coachKey: 'coach-key' });
   const config = buildOpenCodeConfig({
     mcpDir: dir,
@@ -432,7 +432,7 @@ test('all four zero-dependency MCP servers are wired with absolute node commands
   });
 
   assert.deepStrictEqual(Object.keys(config.mcp).sort(), [
-    'agy-image', 'gemini-search', 'gemini-vision', 'pollinations-image',
+    'agy-image', 'gemini-search', 'gemini-vision', 'playwright', 'pollinations-image',
   ]);
   for (const [name, entry] of Object.entries(config.mcp)) {
     assert.strictEqual(entry.type, 'local', `${name} は local 起動でなければならない`);
@@ -448,13 +448,14 @@ test('all four zero-dependency MCP servers are wired with absolute node commands
   assert.strictEqual(config.permission['gemini-vision_describe_image'], 'ask');
   assert.strictEqual(config.permission['pollinations-image_generate_image'], 'ask');
   assert.strictEqual(config.permission['agy-image_generate_image_agy'], 'ask');
+  assert.strictEqual(config.permission['playwright_*'], 'ask');
 });
 
 test('Gemini-backed MCP servers are omitted when the coach API key is missing', (t) => {
   const dir = mcpFixture(t, ALL_MCP_FILES);
   const { mcp, permission } = buildMcpConfig({ mcpDir: dir, env: {}, homeDir: dir });
 
-  assert.deepStrictEqual(Object.keys(mcp).sort(), ['agy-image', 'pollinations-image']);
+  assert.deepStrictEqual(Object.keys(mcp).sort(), ['agy-image', 'playwright', 'pollinations-image']);
   assert.strictEqual(permission['gemini-search_web_search'], undefined);
   assert.strictEqual(permission['gemini-vision_describe_image'], undefined);
 });
@@ -479,7 +480,7 @@ test('an environment-only Gemini key never registers the Gemini MCP servers', (t
   const env = { GEMINI_API_KEY: 'env-key', GOOGLE_API_KEY: 'env-key-2' };
 
   const { mcp, permission } = buildMcpConfig({ mcpDir: dir, env, homeDir: dir });
-  assert.deepStrictEqual(Object.keys(mcp).sort(), ['agy-image', 'pollinations-image']);
+  assert.deepStrictEqual(Object.keys(mcp).sort(), ['agy-image', 'playwright', 'pollinations-image']);
   assert.strictEqual(permission['gemini-search_web_search'], undefined);
   assert.strictEqual(permission['gemini-vision_describe_image'], undefined);
 });
@@ -498,7 +499,7 @@ test('each MCP server can be switched off individually and missing files are nev
     AI_SAFE_DCLAUDE_IMAGE: '0',
   };
   const { mcp } = buildMcpConfig({ mcpDir: dir, env, homeDir: dir });
-  assert.deepStrictEqual(Object.keys(mcp).sort(), ['agy-image', 'gemini-vision']);
+  assert.deepStrictEqual(Object.keys(mcp).sort(), ['agy-image', 'gemini-vision', 'playwright']);
 
   const partial = mcpFixture(t, ['gemini-search-mcp.js'], { coachKey: 'k' });
   const only = buildMcpConfig({ mcpDir: partial, env: {}, homeDir: partial });

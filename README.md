@@ -1,8 +1,15 @@
-# AI エージェント安全運用パッケージ v1.15.2
+# AI エージェント安全運用パッケージ v1.15.3
 
 Codex CLI、Claude Code、OpenCode、Gemini CLI を「あなたを守る安全装置」付きで使うためのパッケージです。
 
 業務で使う本物のプロジェクトでも安心して AI エージェントを動かせるように設計されています。学校 PC でも、自宅 PC でも同じように動きます。
+
+## v1.15.3：OpenCode に Playwright MCP（ブラウザ自動操作）を追加しました
+
+OpenCode（および d-claude）から **Playwright（Microsoft 公式 `@playwright/mcp`）** 経由でブラウザの自動操作（Webサイトの閲覧、UIテスト、スクレイピング、クリック、フォーム入力等）を行えるようにしました。
+
+- **安全設計**: ブラウザ操作は外部通信や画面操作の副作用を伴うため、OpenCode の権限は **`playwright_*: ask`**（実行前に必ず確認を挟む）に固定されています
+- **無効化フラグ**: 必要に応じて `AI_SAFE_DCLAUDE_PLAYWRIGHT=0` で個別に無効化できます
 
 ## v1.15.2：ダッシュボードから OpenCode の社員を雇えるようにしました
 

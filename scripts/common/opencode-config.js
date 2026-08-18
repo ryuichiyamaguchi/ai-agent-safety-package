@@ -20,6 +20,7 @@ const MCP_SERVERS = [
   { key: 'gemini-vision', file: 'gemini-vision-mcp.js', flag: 'AI_SAFE_DCLAUDE_VISION', tool: 'describe_image', timeout: 45000, needsGeminiKey: true },
   { key: 'pollinations-image', file: 'pollinations-image-mcp.js', flag: 'AI_SAFE_DCLAUDE_IMAGE', tool: 'generate_image', timeout: 120000, needsGeminiKey: false },
   { key: 'agy-image', file: 'agy-image-mcp.js', flag: 'AI_SAFE_DCLAUDE_AGY_IMAGE', tool: 'generate_image_agy', timeout: 210000, needsGeminiKey: false },
+  { key: 'playwright', file: 'playwright-mcp.js', flag: 'AI_SAFE_DCLAUDE_PLAYWRIGHT', tool: '*', timeout: 90000, needsGeminiKey: false },
 ];
 
 // ホスト型（リモート）の MCP。実体は先方のサーバーで動くので、こちらは URL と鍵だけを持つ。
@@ -105,7 +106,11 @@ function buildMcpConfig({ mcpDir = '', env = process.env, homeDir = os.homedir()
       enabled: true,
       timeout: server.timeout,
     };
-    permission[`${server.key}_${server.tool}`] = 'ask';
+    if (server.tool === '*') {
+      permission[`${server.key}_*`] = 'ask';
+    } else {
+      permission[`${server.key}_${server.tool}`] = 'ask';
+    }
   }
   for (const server of REMOTE_MCP_SERVERS) {
     if (String(env[server.flag] ?? '1') === '0') continue;

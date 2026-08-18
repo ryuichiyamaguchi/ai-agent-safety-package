@@ -114,20 +114,19 @@ if [ "${DS_CLAUDE_MODE:-}" = "1" ]; then
   _image_mcp="$(cd "$(dirname "$0")" && pwd)/../common/pollinations-image-mcp.js"
   _agy_mcp="$(cd "$(dirname "$0")" && pwd)/../common/agy-image-mcp.js"
   _vision_mcp="$(cd "$(dirname "$0")" && pwd)/../common/gemini-vision-mcp.js"
-  _use_search=0; _use_image=0; _use_agy=0; _use_vision=0
+  _playwright_mcp="$(cd "$(dirname "$0")" && pwd)/../common/playwright-mcp.js"
+  _use_search=0; _use_image=0; _use_agy=0; _use_vision=0; _use_playwright=0
   [ "${AI_SAFE_DCLAUDE_SEARCH:-1}" = "1" ] && [ -f "$_search_mcp" ] && _use_search=1
   [ "${AI_SAFE_DCLAUDE_IMAGE:-1}" = "1" ] && [ -f "$_image_mcp" ] && _use_image=1
   [ "${AI_SAFE_DCLAUDE_AGY_IMAGE:-1}" = "1" ] && [ -f "$_agy_mcp" ] && _use_agy=1
   [ "${AI_SAFE_DCLAUDE_VISION:-1}" = "1" ] && [ -f "$_vision_mcp" ] && _use_vision=1
-  if [ $((_use_search + _use_image + _use_agy + _use_vision)) -gt 0 ] \
+  [ "${AI_SAFE_DCLAUDE_PLAYWRIGHT:-1}" = "1" ] && [ -f "$_playwright_mcp" ] && _use_playwright=1
+  if [ $((_use_search + _use_image + _use_agy + _use_vision + _use_playwright)) -gt 0 ] \
      && command -v node >/dev/null 2>&1 && claude --help 2>&1 | grep -q -- "--mcp-config"; then
     _mcp_cfg="$AI_SAFE_LOG_DIR/d-claude-mcp.json"
     mkdir -p "$AI_SAFE_LOG_DIR" 2>/dev/null || true
     # JSON はパスのエスケープ事故を避けるため node で書き出す（d-claude 経路では node 必須）。
-    # 引数: 出力先, search(js or ""), image(js or ""), agy(js or ""), vision(js or "")
-    # ※ `node -e 'CODE' a b c` では最初のユーザ引数が argv[1]（-e はスクリプトを argv に
-    #   含めない）。出力先=argv[1] / 各 MCP=argv[2..5]。以前 argv[2]/argv[3..] としていたのは
-    #   off-by-one で、search-mcp.js を JSON で上書きし・登録パスがずれ・vision が未登録だった。
+    # 引数: 出力先, search(js or ""), image(js or ""), agy(js or ""), vision(js or ""), playwright(js or "")
     if node -e '
       const fs=require("fs");
       const servers={};
@@ -135,8 +134,9 @@ if [ "${DS_CLAUDE_MODE:-}" = "1" ]; then
       if(process.argv[3]) servers["pollinations-image"]={command:"node",args:[process.argv[3]]};
       if(process.argv[4]) servers["agy-image"]={command:"node",args:[process.argv[4]]};
       if(process.argv[5]) servers["gemini-vision"]={command:"node",args:[process.argv[5]]};
+      if(process.argv[6]) servers["playwright"]={command:"node",args:[process.argv[6]]};
       fs.writeFileSync(process.argv[1],JSON.stringify({mcpServers:servers}));
-    ' "$_mcp_cfg" "$([ $_use_search -eq 1 ] && printf '%s' "$_search_mcp")" "$([ $_use_image -eq 1 ] && printf '%s' "$_image_mcp")" "$([ $_use_agy -eq 1 ] && printf '%s' "$_agy_mcp")" "$([ $_use_vision -eq 1 ] && printf '%s' "$_vision_mcp")" 2>/dev/null; then
+    ' "$_mcp_cfg" "$([ $_use_search -eq 1 ] && printf '%s' "$_search_mcp")" "$([ $_use_image -eq 1 ] && printf '%s' "$_image_mcp")" "$([ $_use_agy -eq 1 ] && printf '%s' "$_agy_mcp")" "$([ $_use_vision -eq 1 ] && printf '%s' "$_vision_mcp")" "$([ $_use_playwright -eq 1 ] && printf '%s' "$_playwright_mcp")" 2>/dev/null; then
       claude_args+=(--mcp-config "$_mcp_cfg")
     fi
   fi
