@@ -73,13 +73,13 @@ test('鍵は診断ファイルへ書く前に伏せる（両 OS）', () => {
 });
 
 test('キー登録ボタンが両 OS にあり、取り消せない操作だと伝えている', () => {
-  const cmd = read('workspace-template/スタート/（上級）11_Bufferのキーを登録.command');
+  const cmd = read('workspace-template/スタート/（上級）8_Bufferのキーを登録.command');
   assert.match(cmd, /publish\.buffer\.com\/settings\/api/, '取得先を案内すること');
   assert.match(cmd, /buffer-api-key\.txt/, '保存先が鍵ファイルであること');
   assert.match(cmd, /chmod 600/, '本人だけが読める権限にすること');
   assert.match(cmd, /投稿は取り消せません/, '公開が不可逆であることを伝えること');
 
-  const bat = fs.readFileSync(path.join(root, 'workspace-template/スタート/（上級）11_Bufferのキーを登録.bat'));
+  const bat = fs.readFileSync(path.join(root, 'workspace-template/スタート/（上級）8_Bufferのキーを登録.bat'));
   assert.ok(bat[0] !== 0xef, '.bat に BOM を付けない');
   const text = new TextDecoder('shift_jis').decode(bat);
   assert.match(text, /chcp 932/, '教室 PC 向けに CP932 で動かすこと');

@@ -3,9 +3,11 @@ chcp 932 >nul
 setlocal
 set "HERE=%~dp0"
 for %%I in ("%HERE%..") do set "WORKSPACE=%%~fI"
-set "TARGET=%WORKSPACE%\.ai-safety\hooks\windows\install-ccmux.ps1"
-echo ccmux（複数の Claude 画面を1つのターミナルにまとめる改造版ツール）を入れます。
-echo （Shin-sibainu/ccmux の改造版・MIT。Release から取得し SHA-256 照合します）
+set "TARGET=%WORKSPACE%\.ai-safety\hooks\windows\fetch-update.ps1"
+echo.
+echo == 安全パッケージを最新版に更新します ==
+echo ※ AI ツール本体の更新は「8_AIツールを最新版に更新」です。
+echo 最新版を GitHub から取得して更新します（ネット接続が必要）。
 echo.
 if not exist "%TARGET%" (
   echo 見つかりません: %TARGET%
@@ -16,4 +18,3 @@ if not exist "%TARGET%" (
 powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%"
 echo.
 pause
-

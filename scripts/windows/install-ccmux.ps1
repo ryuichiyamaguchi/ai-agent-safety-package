@@ -54,5 +54,5 @@ try {
 } catch { Write-Host "  （ライセンスファイルの配置はスキップしました）" -ForegroundColor Yellow }
 
 Write-Host ""
-Write-Host "インストール成功！ 「9_作業ウィンドウを開く」または新しい PowerShell で ccmux と打つと起動します。" -ForegroundColor Green
+Write-Host "インストール成功！ 新しい PowerShell で ccmux と打つと起動します。" -ForegroundColor Green
 Write-Host "（これは Shin-sibainu/ccmux の改造版です・MIT）"

@@ -1,10 +1,12 @@
 # 自宅 Mac で使う
 
-自分の Mac で AI エージェント安全運用パッケージ v1.15.3 を使う手順です。
+自分の Mac で AI エージェント安全運用パッケージ v1.16.0 を使う手順です。
+
+> **このページは在校中（講座期間中）向けです。** 卒業した方・もうすぐ卒業する方は、まず [20_卒業後ガイド.md](20_卒業後ガイド.md) を読んでください。
 
 > ## 🚀 まず [00_クイックスタート.md](00_クイックスタート.md) を試してください
 >
-> v1.4.1 以降は **`install-one-click.command` を右クリック → 「開く」**するだけでステップ 1〜4 を自動実行します。下の手動手順は、ワンクリックで失敗した場合の予備手段として残しています。
+> **`1_安全パッケージを準備-Mac.command` を右クリック → 「開く」**するだけでステップ 1〜4 を自動実行します。下の手動手順は、ワンクリックで失敗した場合の予備手段として残しています。
 >
 > 最新の macOS で「ゴミ箱に入れる / 完了」しか出ない場合の対処法も `00_クイックスタート.md` の Mac 章を見てください。
 
@@ -15,13 +17,12 @@ Mac では macOS の Seatbelt サンドボックスが Codex CLI と連動しま
 ## 前提
 
 - macOS Monterey (12) 以降推奨
-- Cursor または VS Code がインストール済み
-- Codex CLI がインストール済み（`codex --version` が動く）
+- 使いたい AI の CLI がインストール済み（例：Codex CLI なら `codex --version` が動く。入れ方は [09_各AIのインストール.md](09_各AIのインストール.md)）
 - Bash 環境（標準で入っている）
 
 ## ステップ 1：パッケージのダウンロード
 
-GitHub の Release ページから v1.5.0 の ZIP をダウンロード。
+GitHub の Release ページから最新版の ZIP をダウンロード。
 
 ダウンロード先：`~/Downloads` または `~/Desktop`
 
@@ -31,7 +32,7 @@ Finder で ZIP をダブルクリック → 同じ場所に展開されます。
 
 ## ステップ 3：インストール
 
-ターミナル（または Cursor の Terminal）を開いて：
+ターミナル（アプリケーション → ユーティリティ → ターミナル）を開いて：
 
 ```bash
 cd ~/Downloads/ai-agent-safety-package-v1
@@ -63,7 +64,7 @@ bash .ai-safety/hooks/macos/launch-codex-safe.sh
 
 これで Codex CLI が**対話モード（TUI）**で安全装置付きに起動します。
 
-v1.5.0 の launcher は次の構成を強制します。
+本パッケージの launcher は次の構成を強制します。
 
 - `--sandbox workspace-write`：workspace 外への書き込みを macOS Seatbelt が OS レベルで拒否（1 層目）
 - `network_access = false`：外部通信を全遮断（2 層目）
@@ -72,7 +73,7 @@ v1.5.0 の launcher は次の構成を強制します。
 
 `python -c "open('.env')..."` や `curl`、`rm -rf`、`git push --force` のような trusted list 外の操作は、承認プロンプトが出る（そこで「いいえ」を押せば実行されない）か、または hook 層（`policy/safety-policy.json`）で**先に**拒否されます。`cat ~/.ssh/id_rsa` のように trusted コマンド + 危険な引数の組合せでは approval は出ませんが、hook 層と Seatbelt が止めます。**4 層のどこかで止まれば安全**というモデルです。詳細は `docs/90_守れる-守れない.md` の「なぜ『安全』は 4 層で成り立つのか」を参照。
 
-> 注意：v1.5.0 の `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
+> 注意：本パッケージの `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
 
 Claude Code の場合：
 

@@ -228,7 +228,7 @@ scan_file "docs/tested_versions.md" "warn"
 #      (c) .bat / .cmd -> chcp 65001 禁止（その .bat 自身のコードページ指定のみ）
 #          日本語 Windows の教室 PC では UTF-8 コードページで文字化けして即閉じになる。
 #          行頭の chcp だけを見る。start で開く別ウィンドウ側を UTF-8 にする
-#          用途（9_作業ウィンドウを開く.bat の ccmux 対策）は正当なので対象外。
+#          用途（旧 9_作業ウィンドウを開く.bat の ccmux 対策で使っていた形）は正当なので対象外。
 #      (d) .bat / .cmd -> 中身が CP932 として復号できること
 #          chcp 932 を宣言していても中身が UTF-8 なら教室 PC で文字化けする。
 #          （同種の検査は scripts/common/test/onboarding.test.sh にもあるが、

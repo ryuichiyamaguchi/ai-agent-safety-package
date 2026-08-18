@@ -1,7 +1,7 @@
 @echo off
 chcp 932 >nul
 setlocal
-REM （上級）12_プラグインの置き場を開く.bat
+REM （上級）9_プラグインの置き場を開く.bat
 REM プラグインの置き場（<ワークスペース>\.ai-safety\plugins）をエクスプローラーで開く。
 REM .ai-safety は隠しフォルダなので、自力でたどるのが難しい。その入口。
 set "HERE=%~dp0"

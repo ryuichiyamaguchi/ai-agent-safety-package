@@ -1,6 +1,8 @@
 # OpenCode + DeepSeek を安全に使う
 
-統合版の標準経路は **OpenCode + DeepSeek V4 Pro** です。補助処理・サブエージェントには **DeepSeek V4 Flash** を使います。Claude Codeの操作感を使いたい場合は、同じ統合メニューから **d-claude + DeepSeek** を選べます。
+**DeepSeek を使う場合の標準経路は OpenCode** です（モデルは **DeepSeek V4 Pro**、補助処理・サブエージェントには **DeepSeek V4 Flash**）。Claude Codeの操作感を使いたい場合は、同じ統合メニューから **d-claude + DeepSeek** を選べます。
+
+> どの AI を使うか迷ったら、[00_はじめに.md](00_はじめに.md) の「課金状況別・どの AI を使うか」の表を見てください。DeepSeek のチャージ（課金）のやり方は [20_卒業後ガイド.md](20_卒業後ガイド.md) にあります。
 
 ## この経路で何を守るか
 
@@ -48,7 +50,7 @@ OpenCodeとDeepSeekはいずれも第三者サービスです。利用規約、�
 
 ## 毎回の起動
 
-いちばん簡単なのは `スタート/0_Bouncer統合版を起動` を開き、次を選ぶ方法です。
+いちばん簡単なのは `スタート/1_AIをまとめて起動` を開き、次を選ぶ方法です。
 
 - `OpenCode + DeepSeek V4 Pro（Web検索OFF）`：通常はこちら
 - `OpenCode + DeepSeek V4 Pro（Web検索を確認制でON）`：外部検索が必要な時だけ
@@ -155,7 +157,7 @@ OpenCodeの「プラグイン」は、AIが道具を使ったときなどに小�
 
 ### 置き方
 
-1. 「スタート」フォルダの **「（上級）12_プラグインの置き場を開く」** をダブルクリックする（置き場が Finder／エクスプローラーで開きます）
+1. 「スタート」フォルダの **「（上級）9_プラグインの置き場を開く」** をダブルクリックする（置き場が Finder／エクスプローラーで開きます）
 2. 開いたフォルダの**直下**にプラグインのファイル（`.js` または `.ts`）を置く。フォルダの中にさらにフォルダを作っても読み込みません
 3. いつもどおり統合ランチャーからOpenCodeを起動する
 
@@ -220,17 +222,19 @@ dry-runにはキー本文を表示しません。
 
 ### Mac
 
-`スタート/（上級）9_DeepSeekキーを削除.command` を開きます。
+`スタート/（上級）7_DeepSeekキーを削除.command` を開きます。
 
 ### Windows
 
-`スタート\（上級）9_DeepSeekキーを削除.bat` を開きます。
+`スタート\（上級）7_DeepSeekキーを削除.bat` を開きます。
 
 その後、DeepSeek管理画面でも使わないキーを失効させてください。OpenCode自体をアンインストールしても、Safety Packageのworkspace、監査ログ、DeepSeek側のキーは自動削除されません。
 
 ## d-claudeを統合版から起動する
 
-`スタート/0_Bouncer統合版を起動` の `d-claude + DeepSeek V4 Pro` を選びます。統合版は次をまとめて起動します。
+> **卒業する方へ（大事なお知らせ）**：講座で使っていた d-claude は、**講師（山口さん）配布の API キー**で動いています。**卒業後はこのキーの配布が終わるため、そのままでは使えなくなります。** 卒業後に DeepSeek を使う場合は、①**自分の DeepSeek キーを登録して OpenCode 経路を使う**（このページの手順どおり）か、②**OpenCode Go（有料契約）へ移行する**のどちらかです。くわしくは [20_卒業後ガイド.md](20_卒業後ガイド.md) の「山口さんのキーが使えなくなったら」を読んでください。在校中（〜2026-08-24）はこれまでどおり使えます。
+
+`スタート/1_AIをまとめて起動` の `d-claude + DeepSeek V4 Pro` を選びます。統合版は次をまとめて起動します。
 
 - DeepSeekへの送信同意確認
 - 送信前の秘密情報検査・マスキングGateway
@@ -250,7 +254,7 @@ Windowsで直接起動する場合:
 powershell -File .ai-safety\hooks\windows\launch-integrated.ps1 -Workspace . -Agent d-claude -Profile standard
 ```
 
-DeepSeek APIキーが未登録の場合は、先に `スタート/（上級）1_DeepSeekキーを登録` を実行します。新規利用の標準は引き続きOpenCode経路ですが、d-claudeも統合版の正式な監視対象です。
+DeepSeek APIキーが未登録の場合は、先に `スタート/（上級）1_DeepSeekキーを登録` を実行します。新規利用の標準は引き続きOpenCode経路ですが、d-claudeも統合版の正式な監視対象です（在校中）。卒業後の扱いは上の「卒業する方へ」を参照してください。
 
 ## 限界
 

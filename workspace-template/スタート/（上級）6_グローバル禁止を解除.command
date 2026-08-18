@@ -1,5 +1,5 @@
 #!/bin/bash
-# 「（上級）7_危険コマンドをClaude全体で禁止」で入れた全体設定の変更を取り消し、元の状態へ戻す（ワンクリック）。
+# 「（上級）5_危険コマンドをClaude全体で禁止」で入れた全体設定の変更を取り消し、元の状態へ戻す（ワンクリック）。
 # 適用前のバックアップから ~/.claude/settings.json と ~/.codex/config.toml / hooks.json を復元する。
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

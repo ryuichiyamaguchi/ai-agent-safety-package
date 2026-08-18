@@ -38,8 +38,8 @@ grep -Fq 'powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows
 #
 #    「自分の場所から親をたどる」($HERE/..) 解決が要るのは、作業フォルダ配下の
 #    ファイル（.ai-safety/... のガードやランチャー）を呼ぶラッパーだけ。
-#    npm でツールを入れるだけのラッパー（（上級）10_ccmuxを入れる.command）は
-#    作業フォルダの場所を知る必要がないので、この要件の対象外にする。
+#    npm でツールを入れるだけのラッパーのように作業フォルダの場所を知る必要が
+#    ないものは、この要件の対象外にする。
 #    免除の条件は「作業フォルダを一切参照しないこと」で、$HERE を使って別の場所を
 #    組み立てているファイルは免除しない（免除の乱用防止）。
 for f in "$START_DIR/"*.command; do
@@ -67,8 +67,8 @@ done
 #
 #     判定基準は scripts/release-version-check.sh の実バイト検査と揃えてある
 #     (そちらはパッケージ内の .bat/.cmd 全部の CRLF と行頭 chcp を見る)。
-#     行頭以外の chcp 65001 は対象外。9_作業ウィンドウを開く.bat が start で開く別ウィンドウを
-#     UTF-8 に切り替える (ccmux の表示崩れ対策) のは正当な用途のため。
+#     行頭以外の chcp 65001 は対象外 (start で開く別ウィンドウ側を UTF-8 に
+#     切り替えるのは正当な用途のため)。
 cp932_probe="/tmp/onboarding-cp932.$$"
 for f in "$ROOT"/0_*.bat "$ROOT"/1_*.bat "$START_DIR/"*.bat; do
   [ -f "$f" ] || continue
@@ -108,18 +108,18 @@ else
 fi
 rm -f "$win_installer_txt"
 
-# 9) 期待される番号ファイルが揃う（2..5 と 上級1/2/7/8/9）
-for base in "2_セーフCodexを起動" "3_セーフClaudeを起動" "4_セーフAntiGravityを起動" "5_見守りモニターを起動" "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）7_危険コマンドをClaude全体で禁止" "（上級）8_グローバル禁止を解除" "（上級）9_DeepSeekキーを削除"; do
+# 9) 期待される番号ファイルが揃う（v1.16.0 番号再編後: 基本 1..10 と 上級1..8）
+for base in "1_AIをまとめて起動" "2_セーフCodexを起動" "3_セーフClaudeを起動" "4_セーフAntiGravityを起動" "5_見守りモニターを起動" "6_AIコーチのキーを登録" "7_安全パッケージを最新版に更新" "8_AIツールを最新版に更新" "9_困ったとき診断" "10_野良d-claudeを退治" "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）3_モニターをコンソールで見る" "（上級）4_ステータスラインを入れる" "（上級）5_危険コマンドをClaude全体で禁止" "（上級）6_グローバル禁止を解除" "（上級）7_DeepSeekキーを削除" "（上級）8_Bufferのキーを登録" "（上級）9_プラグインの置き場を開く"; do
   [ -f "$START_DIR/$base.command" ] || { note "FAIL: $base.command がない"; fail=1; }
   [ -f "$START_DIR/$base.bat" ] || { note "FAIL: $base.bat がない"; fail=1; }
 done
 
-# 9b) グローバル禁止（上級7）と その取り消し（上級8）が正しい wrapper を呼ぶ（claude と codex の両対応）
-grep -q 'apply-global-guard.sh' "$START_DIR/（上級）7_危険コマンドをClaude全体で禁止.command" || { note "FAIL: 上級7 .command が apply-global-guard.sh を呼ばない"; fail=1; }
-grep -q 'apply-global-guard.ps1' "$START_DIR/（上級）7_危険コマンドをClaude全体で禁止.bat" || { note "FAIL: 上級7 .bat が apply-global-guard.ps1 を呼ばない"; fail=1; }
-grep -q 'uninstall-global-guard.sh' "$START_DIR/（上級）8_グローバル禁止を解除.command" || { note "FAIL: 上級8 .command が uninstall-global-guard.sh を呼ばない"; fail=1; }
-grep -q 'uninstall-global-guard.ps1' "$START_DIR/（上級）8_グローバル禁止を解除.bat" || { note "FAIL: 上級8 .bat が uninstall-global-guard.ps1 を呼ばない"; fail=1; }
-grep -Fq '（上級）7' "$HTML" || { note "FAIL: スタート.html に 上級7 の案内がない"; fail=1; }
-grep -Fq '（上級）8' "$HTML" || { note "FAIL: スタート.html に 上級8 の案内がない"; fail=1; }
+# 9b) グローバル禁止（上級5）と その取り消し（上級6）が正しい wrapper を呼ぶ（claude と codex の両対応）
+grep -q 'apply-global-guard.sh' "$START_DIR/（上級）5_危険コマンドをClaude全体で禁止.command" || { note "FAIL: 上級5 .command が apply-global-guard.sh を呼ばない"; fail=1; }
+grep -q 'apply-global-guard.ps1' "$START_DIR/（上級）5_危険コマンドをClaude全体で禁止.bat" || { note "FAIL: 上級5 .bat が apply-global-guard.ps1 を呼ばない"; fail=1; }
+grep -q 'uninstall-global-guard.sh' "$START_DIR/（上級）6_グローバル禁止を解除.command" || { note "FAIL: 上級6 .command が uninstall-global-guard.sh を呼ばない"; fail=1; }
+grep -q 'uninstall-global-guard.ps1' "$START_DIR/（上級）6_グローバル禁止を解除.bat" || { note "FAIL: 上級6 .bat が uninstall-global-guard.ps1 を呼ばない"; fail=1; }
+grep -Fq '（上級）5' "$HTML" || { note "FAIL: スタート.html に 上級5 の案内がない"; fail=1; }
+grep -Fq '（上級）6' "$HTML" || { note "FAIL: スタート.html に 上級6 の案内がない"; fail=1; }
 
 if [ $fail -eq 0 ]; then note "ALL PASS"; else note "FAILURES ABOVE"; exit 1; fi

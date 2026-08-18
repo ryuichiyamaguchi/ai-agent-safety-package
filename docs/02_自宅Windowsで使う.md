@@ -1,27 +1,27 @@
 # 自宅 Windows で使う
 
-自分の Windows PC で AI エージェント安全運用パッケージ v1.15.3 を使う手順です。
+自分の Windows PC で AI エージェント安全運用パッケージ v1.16.0 を使う手順です。
+
+> **このページは在校中（講座期間中）向けです。** 卒業した方・もうすぐ卒業する方は、まず [20_卒業後ガイド.md](20_卒業後ガイド.md) を読んでください。
 
 > ## 🚀 まず [00_クイックスタート.md](00_クイックスタート.md) を試してください
 >
-> v1.4.1 以降は **`install-one-click.bat` をダブルクリックする**だけでステップ 0〜5 を自動実行します。下の手動手順は、ワンクリックで失敗した場合の予備手段として残しています。
+> **`1_安全パッケージを準備-Windows.bat` をダブルクリックする**だけでステップ 0〜5 を自動実行します。下の手動手順は、ワンクリックで失敗した場合の予備手段として残しています。
 
 ## 前提
 
 - Windows 10 / 11
 - 自分のユーザーアカウント（管理者権限あり推奨）
-- Cursor または VS Code がインストール済み
-- Codex CLI がインストール済み（`codex --version` が動く）
+- 使いたい AI の CLI がインストール済み（例：Codex CLI なら `codex --version` が動く）
 
-Cursor / Codex CLI のインストールが未済の方は、まず以下を済ませてください。
+CLI のインストールが未済の方は、まず以下を済ませてください（どの AI を入れるかは [00_はじめに.md](00_はじめに.md) の課金状況別の表を参照）。
 
-- Cursor：[cursor.com](https://cursor.com) から DL してインストール
 - Node.js：[nodejs.org](https://nodejs.org/) から LTS 版 MSI を DL してインストール（`npm install` に必要）
-- Codex CLI：Cursor 内で `npm install -g @openai/codex`（次の「ステップ 0」を済ませてから）
+- 各 AI の CLI：[09_各AIのインストール.md](09_各AIのインストール.md)（次の「ステップ 0」を済ませてから）
 
 ## ステップ 0：最初の儀式（5分・必須）
 
-Cursor のターミナルを開いて、以下の 1 行を実行してください。**Codex CLI を `npm install` する前に必ずやってください**。
+PowerShell（黒い画面）を開いて、以下の 1 行を実行してください。**CLI を `npm install` する前に必ずやってください**。
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
@@ -43,7 +43,7 @@ codex login
 
 ## ステップ 1：パッケージのダウンロード
 
-GitHub の Release ページから v1.5.0 の ZIP をダウンロードします。
+GitHub の Release ページから最新版の ZIP をダウンロードします。
 
 ダウンロード先：**ユーザーフォルダ直下**（`C:\Users\あなたの名前\`）または**デスクトップ**
 
@@ -53,9 +53,9 @@ ZIP を右クリック →「すべて展開」→ 展開先を選んで「展�
 
 ## ステップ 3：インストール
 
-Cursor で展開したフォルダを開きます。
+エクスプローラーで展開したフォルダを開き、アドレスバーに `powershell` と入力して Enter。
 
-Cursor の Terminal で以下を実行：
+開いた PowerShell で以下を実行：
 
 ```
 powershell -File scripts\windows\install.ps1 -Workspace "$env:USERPROFILE\Documents\my-ai-workspace"
@@ -88,7 +88,7 @@ powershell -File .ai-safety\hooks\windows\launch-codex-safe.ps1
 
 これで Codex CLI が**対話モード（TUI）**で安全装置付きに起動します。
 
-v1.5.0 の launcher は次の構成を強制します。
+本パッケージの launcher は次の構成を強制します。
 
 - `--sandbox workspace-write`：workspace 外への書き込みを OS が拒否（1 層目）
 - `network_access = false`：外部通信を全遮断（2 層目）
@@ -97,7 +97,7 @@ v1.5.0 の launcher は次の構成を強制します。
 
 `python -c "open('.env')..."` や `curl`、`rm -rf`、`git push --force` のような trusted list 外の操作は、承認ダイアログが出る（そこで「いいえ」を押せば実行されない）か、または hook 層（`policy/safety-policy.json`）で**先に**拒否されます。`cat ~/.ssh/id_rsa` のように trusted コマンド + 危険な引数の組合せでは approval は出ませんが、hook 層と OS サンドボックスが止めます。**4 層のどこかで止まれば安全**というモデルです。詳細は `docs\90_守れる-守れない.md` の「なぜ『安全』は 4 層で成り立つのか」を参照。
 
-> 注意：v1.5.0 の `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
+> 注意：本パッケージの `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
 
 Claude Code を使う場合：
 

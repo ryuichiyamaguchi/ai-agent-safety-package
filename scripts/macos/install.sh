@@ -394,9 +394,48 @@ fi
 # ファイルシステム構造とは別に「ここを見てポチポチやれば使える」入口を用意する。
 if [ -d "$package_root/workspace-template/スタート" ]; then
   mkdir -p "$workspace/スタート"
+  # v1.16.0 の番号再編で名前が変わった旧ボタンを掃除する（旧新併存による番号重複の防止）。
+  # 消すのは「パッケージが過去に配布した既知の旧名」だけに限定し、受講者の自作ファイルには触らない。
+  # Finder / Archive Utility 経由の展開はファイル名が NFD (UTF-8-MAC) になることがあるため、
+  # 名前を NFC に正規化してから照合する（install のハッシュ照合と同じ手法）。
+  legacy_start_names='0_Bouncer統合版を起動.command
+0_Bouncer統合版を起動.bat
+6_最新版に更新.command
+6_最新版に更新.bat
+7_困ったとき診断.bat
+7_野良d-claudeを退治.command
+7_野良d-claudeを退治.bat
+8_PowerShellを開く.bat
+9_作業ウィンドウを開く.bat
+（上級）5_モニターをコンソールで見る.command
+（上級）5_モニターをコンソールで見る.bat
+（上級）6_ステータスラインを入れる.command
+（上級）6_ステータスラインを入れる.bat
+（上級）7_危険コマンドをClaude全体で禁止.command
+（上級）7_危険コマンドをClaude全体で禁止.bat
+（上級）8_グローバル禁止を解除.command
+（上級）8_グローバル禁止を解除.bat
+（上級）9_DeepSeekキーを削除.command
+（上級）9_DeepSeekキーを削除.bat
+（上級）10_ccmuxを入れる.command
+（上級）10_ccmuxを入れる.bat
+（上級）11_Bufferのキーを登録.command
+（上級）11_Bufferのキーを登録.bat
+（上級）12_プラグインの置き場を開く.command
+（上級）12_プラグインの置き場を開く.bat'
+  for _old in "$workspace/スタート"/*; do
+    [ -f "$_old" ] || continue
+    _old_name="$(normalize_hash_rel_path "$(basename "$_old")")"
+    if printf '%s\n' "$legacy_start_names" | grep -qxF "$_old_name"; then
+      rm -f "$_old"
+      echo "旧ボタンを削除しました: スタート/$_old_name"
+    fi
+  done
   cp -R "$package_root/workspace-template/スタート/." "$workspace/スタート/"
   if [ -f "$package_root/スタート.html" ]; then
-    cp "$package_root/スタート.html" "$workspace/スタート/スタート.html"
+    # workspace 配置（スタート/スタート.html）では説明書が ../docs/ にあるため、
+    # コピー時にリンクだけ書き換える。パッケージ直下の スタート.html は docs/ のままで正しい。
+    sed 's#href="docs/#href="../docs/#g' "$package_root/スタート.html" > "$workspace/スタート/スタート.html"
   fi
   # 受講者が同名ファイル（.command と .bat）で迷わないよう、当該 OS 用だけ残す。
   if [[ "$PLATFORM" == "mac" ]]; then
@@ -406,6 +445,59 @@ if [ -d "$package_root/workspace-template/スタート" ]; then
   fi
   chmod +x "$workspace/スタート/"*.command 2>/dev/null || true
   echo "スタートフォルダを配置しました: $workspace/スタート"
+fi
+
+# 受講者向け説明書 (docs/) を workspace/docs/ に同期する。スタート.html や各ボタンの
+# 案内が参照する説明書を、受講者が手元（ワークスペース）で開けるようにするのが目的。
+# ・受講者向けのみ同期し、開発者向けの _dev/ と _archive/ は持ち込まない
+# ・「パッケージ由来のファイルだけ」を上書き・削除の対象にする。前回配布した一覧
+#   （マニフェスト）に載っていて今回の配布に無いファイルだけを消すので、受講者が
+#   docs/ 内に置いた自作メモには触らない
+# ・上書き前に既存 docs/ を丸ごと控え（backup_dir）に取る（copy_with_backup と同じ思想）
+if [ -d "$package_root/docs" ]; then
+  docs_dest="$workspace/docs"
+  docs_manifest="$workspace/.ai-safety/docs-manifest.txt"
+  if [ -e "$docs_dest" ]; then
+    safe_name="$(printf '%s' "$docs_dest" | sed 's#[/:]#_#g')"
+    cp -R "$docs_dest" "$backup_dir/$safe_name"
+  fi
+  mkdir -p "$docs_dest"
+  # 今回配布するファイル一覧（docs/ からの相対パス。_dev / _archive は除外）
+  docs_new_list="$(cd "$package_root/docs" && find . \( -name _dev -o -name _archive \) -prune -o -type f -print | sed 's#^\./##' | sort)"
+  while IFS= read -r _rel; do
+    [ -n "$_rel" ] || continue
+    mkdir -p "$docs_dest/$(dirname "$_rel")"
+    cp "$package_root/docs/$_rel" "$docs_dest/$_rel"
+  done <<EOF_DOCS_COPY
+$docs_new_list
+EOF_DOCS_COPY
+  # 前回パッケージが配ったのに今回の配布に無いファイルだけを掃除する（古い説明書の
+  # 残留防止）。照合は NFC 正規化した名前で行う（Finder 展開の NFD 対策、install の
+  # ハッシュ照合・旧ボタン掃除と同じ手法）。
+  if [ -f "$docs_manifest" ]; then
+    docs_new_list_nfc="$(printf '%s\n' "$docs_new_list" | while IFS= read -r _n; do
+      if [ -n "$_n" ]; then
+        printf '%s\n' "$(normalize_hash_rel_path "$_n")"
+      fi
+    done)"
+    while IFS= read -r _old_rel; do
+      [ -n "$_old_rel" ] || continue
+      _old_rel_nfc="$(normalize_hash_rel_path "$_old_rel")"
+      if ! printf '%s\n' "$docs_new_list_nfc" | grep -qxF "$_old_rel_nfc"; then
+        if [ -f "$docs_dest/$_old_rel" ]; then
+          rm -f "$docs_dest/$_old_rel"
+          echo "旧説明書を削除しました: docs/$_old_rel"
+        fi
+      fi
+    done < "$docs_manifest"
+  fi
+  printf '%s\n' "$docs_new_list" > "$docs_manifest"
+  echo "説明書を配置しました: $docs_dest"
+fi
+
+# 動作確認済みツール版の表 (SSOT)。「8_AIツールを最新版に更新」が参照する。
+if [ -f "$package_root/configs/tested-tool-versions.json" ]; then
+  cp "$package_root/configs/tested-tool-versions.json" "$workspace/.ai-safety/tested-tool-versions.json"
 fi
 
 if [ "$install_global_claude" = "--global-claude" ]; then
@@ -436,7 +528,7 @@ fi
 # Gatekeeper の肝心な部分は残る: 配布物を最初に開くとき（install-one-click.command 自体）
 # のブロックはそのままなので、「知らない配布物を意図せず実行してしまう」ことは防がれる。
 if command -v xattr >/dev/null 2>&1; then
-  for _q in "$workspace/.ai-safety" "$workspace/スタート"; do
+  for _q in "$workspace/.ai-safety" "$workspace/スタート" "$workspace/docs"; do
     [ -e "$_q" ] || continue
     xattr -dr com.apple.quarantine "$_q" 2>/dev/null || true
   done

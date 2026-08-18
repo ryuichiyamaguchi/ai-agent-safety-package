@@ -1,12 +1,16 @@
 # Claude Code を安全に使う（個人利用向け）
 
-v1.15.3
+v1.16.0
 
 ## このドキュメントは誰のものか
 
-このページは、個人で **Claude Code CLI** を使いたい受講者向けです。Day4 講義ではメインで使いませんが、興味ある方向けの案内です。
+このページは、個人で **Claude Code CLI** を使いたい受講者向けです。
+
+> ⚠️ **Claude Code / Claude Desktop は無料プランでは使えません。** Claude の有料プラン（Pro 以上）への加入が前提です。無課金で「Claude のような使い心地」が欲しい場合は、[10_OpenCode_DeepSeekを安全に使う.md](10_OpenCode_DeepSeekを安全に使う.md) の OpenCode + DeepSeek 経路を使ってください。
 
 Claude Code（Anthropic 製）と Codex（OpenAI 製）は別ツールですが、このパッケージで Codex と同等の防具を装着できます。
+
+**AGI Cockpit というアプリの中から Claude を使いたい方へ**：作業フォルダを my-ai-workspace にすれば、このパッケージの保護はそのまま効きます（実測済み）。手順は [11_AGI-Cockpitで使う.md](11_AGI-Cockpitで使う.md) を見てください。
 
 ## Claude Code とは
 
@@ -28,7 +32,7 @@ Claude Code を使う前に以下が必要です。
 
 - **Node.js 18 以上**（Codex と同じ）
 - **Anthropic アカウント**（Claude.ai のアカウントと同じ）
-- **本格利用なら Pro プラン以上**（無料枠は限定的。1 〜 2 時間分程度）
+- **Pro プラン以上の課金**（無料プランでは Claude Code は使えません。料金は公式サイトで確認：https://claude.com/pricing）
 
 ## ステップ 1：Node.js の確認
 
@@ -48,7 +52,7 @@ npm install -g @anthropic-ai/claude-code@2.1.201
 claude --version
 ```
 
-バージョン確認できれば成功です（`1.0.0` など）。
+バージョン確認できれば成功です（`2.1.201` など）。
 
 **参考**：公式ドキュメント https://docs.claude.com/ja/docs/claude-code/quickstart
 
@@ -63,13 +67,17 @@ claude
 ブラウザで Anthropic アカウント（Claude.ai に使うのと同じアカウント）でログインします。
 
 **注意**：
-- ChatGPT のサブスクとは別です。Anthropic の Pro プラン or Team プランに入っていれば多くのコールができます
-- 無料アカウントは 1 日の制限が厳しいので、本格利用なら Pro プラン以上をおすすめします
+- ChatGPT のサブスクとは別です。Anthropic の Pro プラン以上に入っている必要があります
+- **無料プランのアカウントでは Claude Code は使えません**
 - 初回認証後はローカルに token が保存されるので、毎回ブラウザログインは不要です
 
 ## ステップ 4：このパッケージで安全に起動する
 
 Claude Code を **このパッケージの保護下で実行**します。
+
+いちばん簡単なのは、作業フォルダの `スタート` フォルダにある **「3_セーフClaudeを起動」**（Mac は `.command`、Windows は `.bat`）を**ダブルクリック**する方法です。
+
+コマンドで起動したい場合：
 
 ### Mac の場合
 
@@ -158,15 +166,12 @@ claude create my-project
 
 ## 料金・API 制限について
 
-Codex（ChatGPT Pro）と異なり、Claude Code は **使用量に基づく課金**です。
+Claude Code を使うには **Claude の有料プラン（Pro 以上）** が必要です。**無料プランでは使えません。**
 
-- **Pro プラン**：月額 $20、月 100 万トークン
-- **Team プラン**：チーム向け、チーム管理者が予算を設定
-- **無料アカウント**：制限あり（約 1 時間分／日）
+- プランの種類と料金は公式ページで確認してください：https://claude.com/pricing
+- 料金・利用上限は変わることがあるので、このドキュメントには固定額を書きません
 
-使用量は [Anthropic の コンソール](https://console.anthropic.com) で確認できます。
-
-**本格利用を予定する場合は、Pro プランを推奨**します。
+使用量は [Anthropic のコンソール](https://console.anthropic.com) で確認できます。
 
 ## 個人利用での情報セキュリティ
 
@@ -255,7 +260,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 ### 「API キーが無い」エラーが出る
 
-Pro プランに登録済みか、Anthropic コンソールで確認してください。無料アカウントは 1 時間分しか使えません。
+Pro プラン以上に登録済みか、Anthropic コンソールで確認してください。無料プランのアカウントでは Claude Code は使えません。
 
 ## もう少し深く知りたい人へ
 
@@ -266,7 +271,7 @@ Pro プランに登録済みか、Anthropic コンソールで確認してくだ
 ## 質問・報告
 
 - 講座期間中は講師へ
-- 講座終了後に問題を見つけた場合は、GitHub Issues で報告するか、メールで連絡してください（学校指定のアドレス）
+- 講座終了後は [20_卒業後ガイド.md](20_卒業後ガイド.md) の「困ったときの調べ方」の順に自分で確かめてください（9_困ったとき診断 → 99_既知の問題 → AI コーチ）
 
 ---
 

@@ -232,14 +232,14 @@ test('統合ランチャーは「続きから」を OpenCode へ渡す', () => {
 });
 
 test('起動メニューに「続きから」の番号がある（Mac / Windows とも）', () => {
-  const command = read('workspace-template/スタート/0_Bouncer統合版を起動.command');
+  const command = read('workspace-template/スタート/1_AIをまとめて起動.command');
   // 8 番は作業フォルダを選んでから起動する（choose_project を挟む）。
   assert.match(command, /8\) choose_project; exec bash "\$LAUNCHER" "\$WORKSPACE" opencode standard --resume/);
   assert.match(command, /前回の続きから開く/);
   assert.match(command, /1〜8の番号/, '案内の番号範囲も更新すること');
 
   // .bat は教室 PC の PowerShell 5.1 が読めるよう CP932 で配布する（UTF-8 だと文字化けして即閉じ）。
-  const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/0_Bouncer統合版を起動.bat'));
+  const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/1_AIをまとめて起動.bat'));
   assert.ok(batBytes[0] !== 0xef, '.bat に BOM を付けない');
   const bat = new TextDecoder('shift_jis').decode(batBytes);
   assert.match(bat, /choice \/c 12345678 \/n \/m "番号を選んでください \[1-8\]: "/);

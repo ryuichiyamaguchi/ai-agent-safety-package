@@ -69,8 +69,8 @@ test('Windows legacy start buttons route through integrated standard mode', () =
 });
 
 test('Mac and Windows integrated menus expose d-claude as a monitored option', () => {
-  const mac = read('workspace-template/スタート/0_Bouncer統合版を起動.command');
-  const win = read('workspace-template/スタート/0_Bouncer統合版を起動.bat');
+  const mac = read('workspace-template/スタート/1_AIをまとめて起動.command');
+  const win = read('workspace-template/スタート/1_AIをまとめて起動.bat');
   assert.match(mac, /d-claude.*DeepSeek/i);
   assert.match(mac, /d-claude standard/);
   assert.match(win, /d-claude.*DeepSeek/i);

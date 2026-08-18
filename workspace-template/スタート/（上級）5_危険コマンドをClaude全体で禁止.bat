@@ -14,5 +14,5 @@ echo この PC で Claude と Codex をどのフォルダから起動しても、危険コマンド（再帰
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%"
 echo.
-echo 完了しました。元に戻すときは「（上級）8_グローバル禁止を解除」を実行してください。
+echo 完了しました。元に戻すときは「（上級）6_グローバル禁止を解除」を実行してください。
 pause

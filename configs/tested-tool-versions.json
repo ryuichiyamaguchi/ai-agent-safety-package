@@ -1,0 +1,7 @@
+{
+  "comment": "動作確認済みツール版の一覧 (SSOT)。8_AIツールを最新版に更新 が参照する。claudeCode は policy/safety-policy.json の testedClaudeCodeVersion と必ず一致させること (テストで検証)。",
+  "claudeCode": "2.1.201",
+  "codex": "latest",
+  "opencode": "latest",
+  "opencodeMin": "1.14.24"
+}

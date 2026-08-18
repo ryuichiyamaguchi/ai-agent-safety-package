@@ -1,7 +1,11 @@
 @echo off
 chcp 932 >nul
 setlocal
-REM （上級）11_Bufferのキーを登録.bat
+set "HERE=%~dp0"
+for %%I in ("%HERE%..") do set "WORKSPACE=%%~fI"
+REM Mac 版 (.command) と同じく作業フォルダを基点に動く（キー自体は %USERPROFILE%\.ai-safety に保存）。
+cd /d "%WORKSPACE%" 2>nul
+REM （上級）8_Bufferのキーを登録.bat
 REM SNS の予約投稿サービス Buffer の API キーを登録します。
 REM 登録すると OpenCode から Buffer を操作できます（投稿の作成・予約・下書き、
 REM チャンネル一覧、実績の取得など）。

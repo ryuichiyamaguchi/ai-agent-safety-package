@@ -421,10 +421,40 @@ $startSrc = Join-Path $packageRoot "workspace-template\スタート"
 if (Test-Path -LiteralPath $startSrc) {
     $startDest = Join-Path $Workspace "スタート"
     New-Item -ItemType Directory -Force -Path $startDest | Out-Null
+    # v1.16.0 の番号再編で名前が変わった旧ボタンを掃除する（旧新併存による番号重複の防止）。
+    # 消すのは「パッケージが過去に配布した既知の旧名」だけに限定し、受講者の自作ファイルには触らない。
+    $legacyStartNames = @(
+        "0_Bouncer統合版を起動.command", "0_Bouncer統合版を起動.bat",
+        "6_最新版に更新.command", "6_最新版に更新.bat",
+        "7_困ったとき診断.bat",
+        "7_野良d-claudeを退治.command", "7_野良d-claudeを退治.bat",
+        "8_PowerShellを開く.bat",
+        "9_作業ウィンドウを開く.bat",
+        "（上級）5_モニターをコンソールで見る.command", "（上級）5_モニターをコンソールで見る.bat",
+        "（上級）6_ステータスラインを入れる.command", "（上級）6_ステータスラインを入れる.bat",
+        "（上級）7_危険コマンドをClaude全体で禁止.command", "（上級）7_危険コマンドをClaude全体で禁止.bat",
+        "（上級）8_グローバル禁止を解除.command", "（上級）8_グローバル禁止を解除.bat",
+        "（上級）9_DeepSeekキーを削除.command", "（上級）9_DeepSeekキーを削除.bat",
+        "（上級）10_ccmuxを入れる.command", "（上級）10_ccmuxを入れる.bat",
+        "（上級）11_Bufferのキーを登録.command", "（上級）11_Bufferのキーを登録.bat",
+        "（上級）12_プラグインの置き場を開く.command", "（上級）12_プラグインの置き場を開く.bat"
+    )
+    foreach ($legacyName in $legacyStartNames) {
+        $legacyPath = Join-Path $startDest $legacyName
+        if (Test-Path -LiteralPath $legacyPath) {
+            Remove-Item -LiteralPath $legacyPath -Force
+            Write-Host ("旧ボタンを削除しました: スタート\" + $legacyName)
+        }
+    }
     Copy-Item -Path (Join-Path $startSrc "*") -Destination $startDest -Recurse -Force
     $htmlSrc = Join-Path $packageRoot "スタート.html"
     if (Test-Path -LiteralPath $htmlSrc) {
-        Copy-Item -LiteralPath $htmlSrc -Destination (Join-Path $startDest "スタート.html") -Force
+        # workspace 配置（スタート\スタート.html）では説明書が ..\docs\ にあるため、
+        # コピー時にリンクだけ書き換える。パッケージ直下の スタート.html は docs/ のままで正しい。
+        $htmlDest = Join-Path $startDest "スタート.html"
+        $htmlText = [System.IO.File]::ReadAllText($htmlSrc)
+        $htmlText = $htmlText.Replace('href="docs/', 'href="../docs/')
+        [System.IO.File]::WriteAllText($htmlDest, $htmlText, (New-Object System.Text.UTF8Encoding($false)))
     }
     # 受講者が同名ファイル（.command と .bat）で迷わないよう、当該 OS 用だけ残す。
     if ($Platform -eq 'win') {
@@ -433,6 +463,61 @@ if (Test-Path -LiteralPath $startSrc) {
         Get-ChildItem -LiteralPath $startDest -Filter *.bat -ErrorAction SilentlyContinue | Remove-Item -Force
     }
     Write-Host "スタートフォルダを配置しました: $startDest"
+}
+
+# 受講者向け説明書 (docs/) を workspace\docs\ に同期する。スタート.html や各ボタンの
+# 案内が参照する説明書を、受講者が手元（ワークスペース）で開けるようにするのが目的。
+# ・受講者向けのみ同期し、開発者向けの _dev\ と _archive\ は持ち込まない
+# ・「パッケージ由来のファイルだけ」を上書き・削除の対象にする。前回配布した一覧
+#   （マニフェスト）に載っていて今回の配布に無いファイルだけを消すので、受講者が
+#   docs\ 内に置いた自作メモには触らない
+# ・上書き前に既存 docs\ を丸ごと控え（backupDir）に取る（Copy-WithBackup と同じ思想）
+$docsSrc = Join-Path $packageRoot "docs"
+if (Test-Path -LiteralPath $docsSrc) {
+    $docsDest = Join-Path $Workspace "docs"
+    $docsManifest = Join-Path $Workspace ".ai-safety\docs-manifest.txt"
+    if (Test-Path -LiteralPath $docsDest) {
+        $relativeName = ($docsDest -replace "[:\\\/]+", "_")
+        New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+        Copy-Item -LiteralPath $docsDest -Destination (Join-Path $backupDir $relativeName) -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $docsDest | Out-Null
+    # 今回配布するファイル一覧（docs\ からの相対パス。_dev / _archive は除外）
+    $docsSrcFull = (Get-Item -LiteralPath $docsSrc).FullName
+    $docsNewList = @()
+    Get-ChildItem -LiteralPath $docsSrc -Recurse -File | ForEach-Object {
+        $rel = $_.FullName.Substring($docsSrcFull.Length).TrimStart('\', '/')
+        $relSlash = $rel -replace '\\', '/'
+        if ($relSlash -like "_dev/*" -or $relSlash -like "_archive/*") { return }
+        $destPath = Join-Path $docsDest $rel
+        $destDir = Split-Path -Parent $destPath
+        if (-not (Test-Path -LiteralPath $destDir)) {
+            New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+        }
+        Copy-Item -LiteralPath $_.FullName -Destination $destPath -Force
+        $docsNewList += $relSlash
+    }
+    # 前回パッケージが配ったのに今回の配布に無いファイルだけを掃除する（古い説明書の残留防止）。
+    if (Test-Path -LiteralPath $docsManifest) {
+        $oldEntries = Get-Content -LiteralPath $docsManifest -Encoding UTF8 | Where-Object { $_ }
+        foreach ($oldRel in $oldEntries) {
+            if ($docsNewList -notcontains $oldRel) {
+                $stalePath = Join-Path $docsDest ($oldRel -replace '/', '\')
+                if (Test-Path -LiteralPath $stalePath -PathType Leaf) {
+                    Remove-Item -LiteralPath $stalePath -Force
+                    Write-Host ("旧説明書を削除しました: docs\" + $oldRel)
+                }
+            }
+        }
+    }
+    Set-Content -LiteralPath $docsManifest -Value ($docsNewList -join "`n") -Encoding UTF8
+    Write-Host "説明書を配置しました: $docsDest"
+}
+
+# 動作確認済みツール版の表 (SSOT)。「8_AIツールを最新版に更新」が参照する。
+$toolVersionsSrc = Join-Path $packageRoot "configs\tested-tool-versions.json"
+if (Test-Path -LiteralPath $toolVersionsSrc) {
+    Copy-Item -LiteralPath $toolVersionsSrc -Destination (Join-Path $Workspace ".ai-safety\tested-tool-versions.json") -Force
 }
 
 # Zed 等のターミナルから「一発」で起動できる短命名ショートカット (.cmd) を workspace 直下に配置。
@@ -475,7 +560,7 @@ if ($Platform -eq 'win') {
                 & $cleanupDClaude -Workspace $Workspace -Yes
             } catch {
                 Write-Warning ("野良 d-claude の自動退避に失敗しました(スキップ): " + $_.Exception.Message)
-                Write-Host "  必要なら後で スタート\7_野良d-claudeを退治.bat を実行してください。"
+                Write-Host "  必要なら後で スタート\10_野良d-claudeを退治.bat を実行してください。"
             }
         }
     } else {

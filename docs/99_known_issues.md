@@ -1,6 +1,6 @@
 # 既知の問題
 
-v1.5.0 時点で把握している既知の問題と回避策。
+本パッケージで把握している既知の問題と回避策。
 
 ## Gemini CLI → Antigravity CLI 並立対応（v1.3.0 時点）
 
@@ -152,7 +152,7 @@ bash scripts/macos/install.sh ~/Documents/my-ai-workspace
 arch -x86_64 npm install -g @openai/codex
 ```
 
-それでも動かない場合、Codex CLI を諦めて Claude Code（Mac native）または Cursor 拡張に切り替え。
+それでも動かない場合、Codex CLI を諦めて別の AI（Claude 課金があれば Claude Code、無課金なら agy や OpenCode + DeepSeek）に切り替えてください（[00_はじめに.md](00_はじめに.md) の課金状況別の表を参照）。
 
 ### Seatbelt サンドボックスの既知バグ
 
@@ -173,6 +173,12 @@ hook スクリプトが何らかの理由（PowerShell 不在、bash 不在、po
 既存の `.claude/`、`.codex/`、`.gemini/` 設定は `~/.ai-safety/backups/<timestamp>/` にバックアップされる。
 
 復旧：`restore.ps1` または `restore.sh` を使う。
+
+### AGI Cockpit から Codex を使うと、このパッケージの保護が乗らない
+
+AGI Cockpit（複数の AI を 1 画面で使えるアプリ）から **Codex** を起動すると、このパッケージの hook・環境変数フィルタは**適用されません**（Cockpit はパッケージの launcher を経由しないため）。Codex 自身のネイティブサンドボックスと Cockpit の承認 UI だけが働く状態になります。
+
+→ **Codex はスタートフォルダの「2_セーフCodexを起動」から使ってください。** Claude は Cockpit 経由でも、作業フォルダを my-ai-workspace にすれば保護が効きます（実測済み）。詳しくは [11_AGI-Cockpitで使う.md](11_AGI-Cockpitで使う.md)。
 
 ### CLI メジャーアップデート後に hook が動かない
 

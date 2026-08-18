@@ -140,28 +140,23 @@ test('oc-safe は統合ランチャー（モニターを起動する入口）を
   assert.match(read('scripts/windows/launch-integrated.ps1'), /-Project \$Project/, 'Windows 統合: -Project を渡すこと');
 });
 
-// ccmux は Windows 版だけ改造版（ドラッグ&ドロップ、Shift+ホイール遡り、上位階層移動）を
-// 配布していて、mac は本家 npm 版しか入れていなかった。mac でも改造版を入れる。
-test('mac の ccmux 導入は改造版を取得し、SHA-256 で照合してから配置する', () => {
-  const cmd = read('workspace-template/スタート/（上級）10_ccmuxを入れる.command');
-  assert.match(cmd, /ccmux-macos-arm64/, 'mac 用の改造版を取得すること');
-  assert.match(cmd, /EXPECT_SHA="[0-9a-f]{64}"/, '期待する SHA-256 を焼き込んでいること');
-  assert.match(cmd, /shasum -a 256/, '照合してから使うこと');
-  assert.match(cmd, /--proto '=https' --proto-redir '=https'/, 'HTTPS 固定で取得すること');
-  assert.match(cmd, /xattr -dr com\.apple\.quarantine/, '検疫属性を外して起動できるようにすること');
-  // Apple Silicon 以外は改造版バイナリが無いので本家版にフォールバックする。
-  assert.match(cmd, /npm install -g ccmux-cli/, 'Intel Mac は本家版で導入すること');
-
-  // MIT ライセンス遵守: 改変内容の記載を実装に追従させる。
-  const lic = read('THIRD_PARTY/ccmux-LICENSE.txt');
-  assert.match(lic, /上の階層へ移動できる機能を追加/, '改変内容に上位階層移動を記載すること');
+// ccmux ボタンは v1.16.0（卒業版）で廃止（docs に説明の無いボタンは卒業後導線に置かない）。
+// 更新インストール時は install の旧名掃除で既存ワークスペースからも消える。
+test('ccmux ボタンは廃止済みで、スタートフォルダに存在しない', () => {
+  const startDir = path.join(root, 'workspace-template', 'スタート');
+  for (const name of fs.readdirSync(startDir)) {
+    assert.ok(!name.includes('ccmux'), `ccmux ボタンが残っている: ${name}`);
+  }
+  // install の旧名掃除リストに ccmux ボタンが含まれていること（既存ワークスペースの掃除）。
+  assert.match(read('scripts/macos/install.sh'), /（上級）10_ccmuxを入れる\.command/);
+  assert.match(read('scripts/windows/install.ps1'), /（上級）10_ccmuxを入れる\.bat/);
 });
 
 // 「Bouncer統合版を起動」から OpenCode を選んだとき、作業フォルダを番号で選べるようにする。
 // OpenCode は起動したフォルダが作業対象になるので、案件ごとに分けて作業するには
 // 起動時にどこで始めるかを決める必要がある（受講者にパスを打たせない形にする）。
 test('起動メニューから作業フォルダを番号で選べる（Mac / Windows とも）', () => {
-  const cmd = read('workspace-template/スタート/0_Bouncer統合版を起動.command');
+  const cmd = read('workspace-template/スタート/1_AIをまとめて起動.command');
   assert.match(cmd, /choose_project/, 'mac: フォルダ選択を持つこと');
   assert.match(cmd, /どのフォルダで作業しますか/, 'mac: 選ばせる文言を出すこと');
   assert.match(cmd, /--project=\$WORKSPACE\/\$_sel/, 'mac: 選んだフォルダを渡すこと');
@@ -170,7 +165,7 @@ test('起動メニューから作業フォルダを番号で選べる（Mac / Wi
   // 変数の直後に日本語が続くと bash 3.2 が変数名を取り違えるので ${} で囲む。
   assert.match(cmd, /「\$\{_sel\}」/, 'mac: 日本語の直前の変数は ${} で囲むこと');
 
-  const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/0_Bouncer統合版を起動.bat'));
+  const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/1_AIをまとめて起動.bat'));
   assert.ok(batBytes[0] !== 0xef, '.bat に BOM を付けない');
   const bat = new TextDecoder('shift_jis').decode(batBytes);
   assert.match(bat, /setlocal enabledelayedexpansion/, 'Windows: 連番変数を引くため遅延展開を使うこと');

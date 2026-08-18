@@ -1,5 +1,5 @@
 #!/bin/bash
-# （上級）11_Bufferのキーを登録.command
+# （上級）8_Bufferのキーを登録.command
 # SNS の予約投稿サービス Buffer の API キーを登録します。
 # 登録すると OpenCode から Buffer を操作できます（投稿の作成・予約・下書き、
 # チャンネル一覧、実績の取得など）。

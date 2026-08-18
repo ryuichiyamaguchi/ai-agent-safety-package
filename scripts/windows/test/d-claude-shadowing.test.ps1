@@ -22,7 +22,7 @@ if ($diagText -match 'WARN\s+\("プロファイルに d-claude の記述あり' 
 
 $setupText = Get-Content -LiteralPath $setupCommands -Raw -Encoding UTF8
 if ($setupText -match 'Get-DClaudeProfileDefinitionHits' -and
-    $setupText -match '7_野良d-claudeを退治') {
+    $setupText -match '10_野良d-claudeを退治') {
     Ok 'setup command warning uses active d-claude definitions and points to cleanup tool'
 } else {
     Ng 'setup command warning uses active d-claude definitions and points to cleanup tool'

@@ -2,10 +2,10 @@
 chcp 932 >nul
 setlocal enabledelayedexpansion
 :: ============================================================
-:: 0_Bouncer統合版を起動.bat
-::   Bouncer統合版のランチャー。番号を選ぶと、その組み合わせで
+:: 1_AIをまとめて起動.bat
+::   AIをまとめて起動（Bouncer統合版）のランチャー。番号を選ぶと、その組み合わせで
 ::   AIと見守りモニターをまとめて起動する。
-::   メニューの並びは Mac 版 0_Bouncer統合版を起動.command と同じ。
+::   メニューの並びは Mac 版 1_AIをまとめて起動.command と同じ。
 :: ============================================================
 set "HERE=%~dp0"
 for %%I in ("%HERE%..") do set "WORKSPACE=%%~fI"
@@ -18,15 +18,16 @@ if not exist "%TARGET%" (
 )
 
 echo.
-echo  Bouncer 統合版
+echo  AIをまとめて起動（Bouncer統合版）
 echo ============================================================
-echo  1 Codex   標準モード（推奨・軽快）
-echo  2 Claude  標準モード（推奨・軽快）
-echo  3 Claude  AI補助モード
-echo  4 Claude  最大保護モード（ローカルGemmaが必要）
-echo  5 OpenCode + DeepSeek V4 Pro（送信検査・Web検索OFF）
-echo  6 OpenCode + DeepSeek V4 Pro（Web検索を確認制でON）
+echo  1 Codex   標準モード（ChatGPT 課金の人・推奨）
+echo  2 Claude  標準モード（Claude 課金の人・推奨）
+echo  3 Claude  AI補助モード（Claude 課金の人）
+echo  4 Claude  最大保護モード（Claude 課金の人・ローカルGemmaが必要）
+echo  5 OpenCode + DeepSeek V4 Pro（無課金の人・少額チャージ／送信検査・Web検索OFF）
+echo  6 OpenCode + DeepSeek V4 Pro（無課金の人・少額チャージ／Web検索を確認制でON）
 echo  7 d-claude + DeepSeek V4 Pro（Claudeの操作感・送信検査・監視ON）
+echo    ※7 は在校中のみ。卒業後は使えなくなります（OpenCode へ移行 → 説明書 docs/20_卒業後ガイド）
 echo  8 OpenCode + DeepSeek V4 Pro（前回の続きから開く）
 echo ============================================================
 echo.
