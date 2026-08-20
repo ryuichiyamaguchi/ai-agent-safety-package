@@ -26,6 +26,7 @@ const crypto = require('node:crypto');
 
 // Gemini 呼び出しコアは共有モジュール gemini-client.js に集約（two-key-judge.js と SSOT）。
 const gemini = require('./gemini-client.js');
+const secretStore = require('./secret-store.js');
 
 const LOG_DIR = process.env.AI_SAFE_LOG_DIR || path.join(os.homedir(), '.ai-safety', 'logs');
 const TOKEN = process.env.AI_SAFE_MONITOR_TOKEN || crypto.randomBytes(16).toString('hex');
@@ -38,7 +39,6 @@ const COMPANION_ASSET_STATES = ['wait', 'allow', 'review', 'deny', 'thinking'];
 const COMPANION_FILES = Object.fromEntries(
   COMPANION_ASSET_STATES.map((state) => [state, path.join(__dirname, 'assets', `bouncer-companion-${state}.png`)])
 );
-const BOUNCER_PORT = Number(process.env.BOUNCER_PORT || 8787);
 
 // 送信検査 Gateway のポートは固定ではない。既定 8788 が他のプログラムに取られている PC が
 // あり、ランチャーは 8788→8797 の順に空きを探して起動するため（v1.14.9）。ここを 8788 で
@@ -161,7 +161,19 @@ function saveApiKey(raw) {
       text: 'キーの形が正しくないようです。AI Studio の「Create API key」で出る英数字（AIza… で始まる文字列）だけを貼り付けてください。空白・改行・引用符・URL は含めないでください。',
     };
   }
+  // v1.17.0: 保存先を OS の金庫（macOS キーチェーン / Windows DPAPI）へ移した。
+  // この画面は「6_AIコーチのキーを登録」ボタンとは別の副経路なので、ここを直し忘れると
+  // 平文が復活する（設計書 W3）。金庫が使えない PC だけ、従来どおり 0600 のファイルに落とす。
   try {
+    if (secretStore.available()) {
+      secretStore.set('gemini', key);
+      if (secretStore.get('gemini') !== key) {
+        return { ok: false, text: 'キーを金庫に入れましたが、読み戻して確認できませんでした。「6_AIコーチのキーを登録」から登録し直してください。' };
+      }
+      // 旧平文が残っていれば、金庫に入った時点で消す（同じ鍵が2箇所に残らないようにする）。
+      try { if (fs.existsSync(KEY_FILE)) fs.rmSync(KEY_FILE, { force: true }); } catch { /* best effort */ }
+      return { ok: true, text: '登録できました（この PC の金庫にしまいました）。AIコーチがすぐ使えます。' };
+    }
     // dir 0700 / file 0600（他ユーザーにキーを読ませない）。umask 0o077 と併せて確実に絞る。
     fs.mkdirSync(KEY_DIR, { recursive: true, mode: 0o700 });
     fs.writeFileSync(KEY_FILE, key, { mode: 0o600 });
@@ -290,7 +302,7 @@ function readState() {
 }
 
 function profileInfo() {
-  const id = ['standard', 'assisted', 'maximum'].includes(process.env.AI_SAFE_PROFILE)
+  const id = ['standard', 'assisted'].includes(process.env.AI_SAFE_PROFILE)
     ? process.env.AI_SAFE_PROFILE
     : 'standard';
   const profiles = {
@@ -307,13 +319,6 @@ function profileInfo() {
       summary: '通常操作はそのまま通し、判断が難しいコマンドだけ2つのAIで確認します。',
       speed: '一部の操作で待ち時間あり',
       gatewayRequired: false,
-    },
-    maximum: {
-      label: '最大保護モード',
-      short: 'ローカルGemma検査',
-      summary: 'Claudeの応答をローカルGemmaで検査してから表示します。速度より保護を優先します。',
-      speed: '表示開始が遅くなります',
-      gatewayRequired: true,
     },
   };
   return { id, agent: process.env.AI_SAFE_AGENT || 'unknown', ...profiles[id] };
@@ -370,57 +375,12 @@ function readGatewayState() {
       req.on('error', () => finish({ available: false, label: '送信検査は停止中' }));
     });
   }
-  if (!profile.gatewayRequired) {
-    return Promise.resolve({
-      required: false,
-      available: false,
-      localAiAvailable: false,
-      label: '標準では使用しません',
-    });
-  }
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (value) => {
-      if (!settled) {
-        settled = true;
-        resolve({ required: true, ...value });
-      }
-    };
-    const req = http.get({
-      hostname: HOST,
-      port: BOUNCER_PORT,
-      path: '/bouncer/status',
-      timeout: 700,
-      headers: { Accept: 'application/json' },
-    }, (upstream) => {
-      let size = 0;
-      const chunks = [];
-      upstream.on('data', (chunk) => {
-        size += chunk.length;
-        if (size <= 64 * 1024) chunks.push(chunk);
-      });
-      upstream.on('end', () => {
-        if (upstream.statusCode !== 200 || size > 64 * 1024) {
-          return finish({ available: false, localAiAvailable: false, label: '応答を確認できません' });
-        }
-        try {
-          const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-          finish({
-            available: value && value.server && value.server.state === 'running',
-            localAiAvailable: !!(value && value.local_ai && value.local_ai.available),
-            activeRequests: Number(value && value.activity && value.activity.active_requests) || 0,
-            label: 'Bouncer Gateway 稼働中',
-          });
-        } catch {
-          finish({ available: false, localAiAvailable: false, label: '状態を読み取れません' });
-        }
-      });
-    });
-    req.on('timeout', () => {
-      req.destroy();
-      finish({ available: false, localAiAvailable: false, label: '接続待ち' });
-    });
-    req.on('error', () => finish({ available: false, localAiAvailable: false, label: '停止中' }));
+  // Claude / Codex / Gemini は送信検査 Gateway を通さない（通信経路に何も挟まない）。
+  return Promise.resolve({
+    required: false,
+    available: false,
+    localAiAvailable: false,
+    label: '標準では使用しません',
   });
 }
 
@@ -1503,8 +1463,6 @@ function renderPage() {
 		.profile-speed{padding:6px 9px;border:1px solid #4c6149;border-radius:999px;color:var(--green);font:750 9px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:nowrap}
 		body[data-profile="assisted"] .profile-strip{border-color:#6c5b2e;background:linear-gradient(90deg,rgba(225,185,74,.09),rgba(255,255,255,.015))}
 		body[data-profile="assisted"] .profile-mark,body[data-profile="assisted"] .profile-speed{color:var(--amber);border-color:#79652e}
-		body[data-profile="maximum"] .profile-strip{border-color:#6b493d;background:linear-gradient(90deg,rgba(237,107,88,.08),rgba(255,255,255,.015))}
-		body[data-profile="maximum"] .profile-mark,body[data-profile="maximum"] .profile-speed{color:#ff9a8a;border-color:#78483f}
 	.tabs{display:flex;gap:4px;margin:0 0 12px;padding:4px;border:1px solid var(--line);border-radius:11px;background:#0c1210;width:max-content;max-width:100%}
 	.tab,button{font:700 13px/1.4 inherit;cursor:pointer}
 	.tab{padding:8px 14px;border-radius:7px;border:0;background:transparent;color:var(--muted)}
@@ -1951,7 +1909,7 @@ function renderProfile(s,g){
   $('profile-speed').textContent=p.speed||'';
   $('profile-copy').textContent=(p.short||'')+' ・ '+(p.agent||'AI');
   $('profile-state').textContent='有効';
-  $('side-profile-state').textContent=p.id==='maximum'?'最大':(p.id==='assisted'?'AI補助':'標準');
+  $('side-profile-state').textContent=p.id==='assisted'?'AI補助':'標準';
   $('live-label').textContent=(p.agent&&p.agent!=='unknown'?p.agent.toUpperCase()+'を':'このPCで')+'見守り中';
   if(!g||!g.required){
     $('gateway-state').textContent='未使用';
@@ -1965,16 +1923,8 @@ function renderProfile(s,g){
       :'送信検査を確認できない間はOpenCodeを起動しません';
     return;
   }
-  if(g.available&&g.localAiAvailable){
-    $('gateway-state').textContent='稼働中';
-    $('gateway-copy').textContent=(g.activeRequests?g.activeRequests+'件を検査中':'Gemmaが応答を検査できます');
-  }else if(g.available){
-    $('gateway-state').textContent='AI待ち';
-    $('gateway-copy').textContent='Gatewayは稼働中ですが、ローカルGemmaを確認できません';
-  }else{
-    $('gateway-state').textContent='停止中';
-    $('gateway-copy').textContent='最大保護モードに必要なGatewayへ接続できません';
-  }
+  $('gateway-state').textContent=g.available?'稼働中':'停止中';
+  $('gateway-copy').textContent=g.available?'送信前の検査が動いています':'送信検査へ接続できません';
 }
 
 function summarizeObserved(observed){

@@ -2,7 +2,7 @@
     [string]$Workspace = "$env:USERPROFILE\Documents\my-ai-workspace",
     [ValidateSet('codex','claude','opencode','d-claude')]
     [string]$Agent = 'codex',
-    [ValidateSet('standard','assisted','maximum')]
+    [ValidateSet('standard','assisted')]
     # $PROFILE は PowerShell の自動変数なので、変数名は $SafetyProfile にする。
     # 既存の呼び出し元 (スタート/*.bat, docs) は -Profile のまま使えるように別名を残す。
     [Alias('Profile')]
@@ -35,10 +35,7 @@ if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw "作�
 Set-Location -LiteralPath $Workspace
 
 if ($env:AI_SAFE_DRY_RUN -eq '1') {
-    if ($SafetyProfile -eq 'maximum' -and -not (Test-Path -LiteralPath (Join-Path $root 'bouncer\scripts\run-local.ps1'))) {
-        throw "ローカルBouncer Gatewayが見つかりません: $(Join-Path $root 'bouncer')"
-    }
-    Write-Output 'Bouncer統合版 dry-run'
+    Write-Output '安全装置（Bouncer）dry-run'
     Write-Output "  workspace: $Workspace"
     Write-Output "  agent:     $Agent"
     Write-Output "  profile:   $SafetyProfile"
@@ -47,9 +44,7 @@ if ($env:AI_SAFE_DRY_RUN -eq '1') {
         Write-Output ('  session:   ' + $(if ($Resume) { 'continue last' } else { 'new' }))
         if ($Project) { Write-Output "  project:   $Project" }
     }
-    if ($SafetyProfile -eq 'maximum') {
-        Write-Output '  gateway:   http://127.0.0.1:8787 (local only)'
-    } elseif ($Agent -eq 'opencode' -or $Agent -eq 'd-claude') {
+    if ($Agent -eq 'opencode' -or $Agent -eq 'd-claude') {
         Write-Output '  gateway:   http://127.0.0.1:8788 (send inspection, no local LLM)'
     } else {
         Write-Output '  gateway:   bypassed (AIの応答速度を優先)'
@@ -59,7 +54,7 @@ if ($env:AI_SAFE_DRY_RUN -eq '1') {
 
 $monitorScript = Join-Path $hooks 'open-monitor.ps1'
 if (-not (Test-Path -LiteralPath $monitorScript -PathType Leaf)) {
-    throw 'Bouncer統合版がこの作業フォルダに導入されていません。先に統合版のインストーラーを実行してください。'
+    throw '安全装置（Bouncer）がこの作業フォルダに導入されていません。先に統合版のインストーラーを実行してください。'
 }
 
 $powerShell = Get-Command powershell.exe -ErrorAction SilentlyContinue
@@ -68,7 +63,6 @@ if (-not $powerShell) { throw 'PowerShell が見つかりません。' }
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $monitorProc = $null
-$gatewayProc = $null
 
 try {
     $env:AI_SAFE_PROFILE = $SafetyProfile
@@ -78,32 +72,6 @@ try {
     $monitorProc = Start-Process -FilePath $powerShell.Source `
         -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$monitorScript`"") `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $monitorOut -RedirectStandardError $monitorErr
-
-    if ($SafetyProfile -eq 'maximum') {
-        $bouncerRunner = Join-Path $root 'bouncer\scripts\run-local.ps1'
-        if (-not (Test-Path -LiteralPath $bouncerRunner -PathType Leaf)) {
-            throw "ローカルBouncer Gatewayが見つかりません: $(Join-Path $root 'bouncer')"
-        }
-        $env:BOUNCER_REVIEW_MODE = 'block'
-        $env:BOUNCER_AI_FAILURE_MODE = 'block'
-        $gatewayOut = Join-Path $logDir 'bouncer-gateway.log'
-        $gatewayErr = Join-Path $logDir 'bouncer-gateway.err.log'
-        $gatewayProc = Start-Process -FilePath $powerShell.Source `
-            -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$bouncerRunner`"") `
-            -PassThru -WindowStyle Hidden -RedirectStandardOutput $gatewayOut -RedirectStandardError $gatewayErr
-
-        $ready = $false
-        for ($i = 0; $i -lt 180; $i++) {
-            try {
-                $health = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/bouncer/health' -UseBasicParsing -TimeoutSec 1
-                if ($health.StatusCode -eq 200) { $ready = $true; break }
-            } catch { Start-Sleep -Seconds 1 }
-            if ($gatewayProc.HasExited) { break }
-        }
-        if (-not $ready -or $gatewayProc.HasExited) {
-            throw "Bouncer Gatewayを起動できませんでした。確認先: $gatewayErr"
-        }
-    }
 
     $exitCode = 0
     switch ("${Agent}:${SafetyProfile}") {
@@ -119,34 +87,37 @@ try {
             & (Join-Path $hooks 'launch-claude-safe.ps1') -Workspace $Workspace -Assisted
             $exitCode = $LASTEXITCODE
         }
-        'claude:maximum' {
-            $env:BOUNCER_INTEGRATED_MODE = '1'
-            $env:ANTHROPIC_BASE_URL = 'http://127.0.0.1:8787'
-            & (Join-Path $hooks 'launch-claude-safe.ps1') -Workspace $Workspace
-            $exitCode = $LASTEXITCODE
-        }
         'opencode:standard' {
             & (Join-Path $hooks 'opencode\launch-opencode-deepseek.ps1') -Workspace $Workspace -WebSearch:$WebSearch -Resume:$Resume -Project $Project
             $exitCode = $LASTEXITCODE
         }
         'd-claude:standard' {
             $consent = Join-Path $hooks 'launch-deepseek-safe.ps1'
-            $authFile = Join-Path $env:USERPROFILE '.deepseek-claude\auth'
             $deepseekGateway = Join-Path $hooks 'deepseek\launch-deepseek-gateway.ps1'
+            $secretStore = Join-Path $root 'hooks\common\secret-store.js'
             if (-not (Test-Path -LiteralPath $consent -PathType Leaf)) {
                 throw "DeepSeek同意ゲートが見つかりません: $consent"
             }
             if (-not (Test-Path -LiteralPath $deepseekGateway -PathType Leaf)) {
                 throw "DeepSeek送信検査Gatewayが見つかりません: $deepseekGateway"
             }
-            if (-not (Test-Path -LiteralPath $authFile -PathType Leaf)) {
-                throw 'DeepSeek APIキーが未登録です。スタート\（上級）1_DeepSeekキーを登録 を先に実行してください。'
+            # 鍵の有無は「環境変数 → OS の金庫(DPAPI) → 旧平文」の解決結果で判定する。
+            # 金庫化 (secret-migrate.js) で旧平文 .deepseek-claude\auth は削除されるので、
+            # 平文ファイルの実在を条件にすると金庫に鍵があっても起動できなくなる。
+            # 順序の SSOT は scripts\common\secret-store.js の resolve()。ここはそれを呼ぶだけ。
+            # node や secret-store.js が無い環境では判定を保留し、gateway 側の同じ 3 段解決に任せる。
+            $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+            if ($nodeCmd -and (Test-Path -LiteralPath $secretStore -PathType Leaf)) {
+                $hasKey = (& $nodeCmd.Source $secretStore '--has' 'deepseek' 2>$null | Out-String).Trim()
+                if ($hasKey -ne 'yes') {
+                    throw 'DeepSeek APIキーが未登録です。スタート\（上級）1_DeepSeekキーを登録 を先に実行してください。'
+                }
             }
             & $powerShell.Source -NoProfile -ExecutionPolicy Bypass -File $consent -ConsentOnly
             if ($LASTEXITCODE -ne 0) { throw 'DeepSeekへの送信をキャンセルしました。' }
-            $deepseekKey = ([System.IO.File]::ReadAllText($authFile)).Trim()
-            if (-not $deepseekKey) { throw 'DeepSeek APIキーの登録ファイルが空です。登録し直してください。' }
-            $env:ANTHROPIC_AUTH_TOKEN = $deepseekKey
+            # 実キーはここでは読まない。Gateway 子プロセスだけが読む (Claude Code には渡さない)。
+            # gateway は同じ 3 段解決で鍵を取り、ANTHROPIC_AUTH_TOKEN は起動限りの合言葉で上書きする。
+            Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
             # モデル名に [1m] (1M コンテキスト指定) を付けると、Claude Code 2.1.226 以降は
             # それを名前の一部として扱い「そんなモデルは無い」で起動できなくなる (実機で再現)。
             # DeepSeek が公開しているのは deepseek-v4-flash / deepseek-v4-pro の 2 つだけ。
@@ -164,7 +135,6 @@ try {
     }
     exit $exitCode
 } finally {
-    if ($gatewayProc -and -not $gatewayProc.HasExited) { Stop-Process -Id $gatewayProc.Id -Force -ErrorAction SilentlyContinue }
     if ($monitorProc -and -not $monitorProc.HasExited) { Stop-Process -Id $monitorProc.Id -Force -ErrorAction SilentlyContinue }
-    Remove-Item Env:\BOUNCER_INTEGRATED_MODE, Env:\ANTHROPIC_BASE_URL, Env:\ANTHROPIC_AUTH_TOKEN, Env:\ANTHROPIC_MODEL, Env:\ANTHROPIC_DEFAULT_OPUS_MODEL, Env:\ANTHROPIC_DEFAULT_SONNET_MODEL, Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL, Env:\CLAUDE_CODE_SUBAGENT_MODEL, Env:\CLAUDE_CODE_EFFORT_LEVEL, Env:\DS_CLAUDE_MODE -ErrorAction SilentlyContinue
+    Remove-Item Env:\ANTHROPIC_AUTH_TOKEN, Env:\ANTHROPIC_MODEL, Env:\ANTHROPIC_DEFAULT_OPUS_MODEL, Env:\ANTHROPIC_DEFAULT_SONNET_MODEL, Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL, Env:\CLAUDE_CODE_SUBAGENT_MODEL, Env:\CLAUDE_CODE_EFFORT_LEVEL, Env:\DS_CLAUDE_MODE -ErrorAction SilentlyContinue
 }

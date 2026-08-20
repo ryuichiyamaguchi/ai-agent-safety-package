@@ -10,4 +10,6 @@ if not exist "%TARGET%" (
   pause
   exit /b 1
 )
-call "%TARGET%"
+:: 作業フォルダを明示して渡す。「（上級）14_新しい作業フォルダを安全にする」で作った
+:: 別のフォルダから押したときも、そのフォルダのフック・設定で起動させるため。
+call "%TARGET%" "%WORKSPACE%"

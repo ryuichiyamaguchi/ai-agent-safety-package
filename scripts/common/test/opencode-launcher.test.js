@@ -16,7 +16,12 @@ test('macOS OpenCode launcher enforces config after project config and requires 
   assert.match(script, /OPENCODE_DISABLE_PROJECT_CONFIG/);
   assert.match(script, /OPENCODE_PURE/);
   assert.match(script, /opencode-config\.js/);
-  assert.match(script, /DS_GATEWAY_AUTH_FILE/);
+  // v1.17.0: 実キーの受け渡しは「ファイルパス(DS_GATEWAY_AUTH_FILE)」から
+  // 「解決済みの値を DEEPSEEK_API_KEY で渡す」方式に変わった（鍵を金庫に移すと実ファイルが
+  // 消えるため）。守る性質は同じ = 実キーは gateway 子プロセスにだけ渡し、未登録なら起動しない。
+  assert.match(script, /DS_KEY="\$\(read_secret ai-safety\.deepseek DEEPSEEK_API_KEY "\$KEY_FILE"/);
+  assert.match(script, /\[ -n "\$DS_KEY" \] \|\| \{ echo "DeepSeek APIキーが未登録です/);
+  assert.match(script, /^ {4}DEEPSEEK_API_KEY="\$DS_KEY" \\$/m);
   assert.match(script, /api\.deepseek\.com/);
   assert.match(script, /\/healthz/);
   assert.match(script, /1\.14\.24/);
@@ -30,7 +35,11 @@ test('Windows OpenCode launcher provides the same fail-closed controls', () => {
   assert.match(script, /OPENCODE_DISABLE_PROJECT_CONFIG/);
   assert.match(script, /OPENCODE_PURE/);
   assert.match(script, /opencode-config\.js/);
-  assert.match(script, /DS_GATEWAY_AUTH_FILE/);
+  // mac と同じ性質を Windows でも守る（上のコメント参照）。
+  assert.match(script, /\$dsKey = Read-AiSafeSecret -DpapiName 'deepseek\.dpapi'/);
+  assert.match(script, /if \(-not \$dsKey\) \{/);
+  assert.match(script, /\$env:DEEPSEEK_API_KEY = \$dsKey/);
+  assert.match(script, /Remove-Item Env:\\DEEPSEEK_API_KEY/);
   assert.match(script, /api\.deepseek\.com/);
   assert.match(script, /\/healthz/);
   assert.match(script, /1\.14\.24/);
@@ -41,14 +50,18 @@ test('Windows OpenCode launcher provides the same fail-closed controls', () => {
 // OpenCode 統合ランチャーは OPENCODE_DISABLE_PROJECT_CONFIG=1 で起動するため、
 // プロジェクトの .opencode/ はスキャンされない（プローブスキルで実測）。スキルの配布先は
 // .ai-safety/dist-skills →（起動時に）$XDG_CONFIG_HOME/opencode/skills/ へ一本化した。
-test('Mac and Windows installers place Bouncer and the OpenCode skill source', () => {
+// v1.17.0: bouncer-gateway（ローカル Gemma 検査 Gateway）は廃止。installer は配置せず、
+// 既存の作業フォルダに残っている古い .ai-safety/bouncer を片付ける側に回った。
+test('Mac and Windows installers place the OpenCode skill source and clean up the retired gateway', () => {
   const mac = read('scripts/macos/install.sh');
   const win = read('scripts/windows/install.ps1');
 
-  assert.match(mac, /bouncer-gateway/);
+  assert.doesNotMatch(mac, /bouncer-gateway/);
+  assert.match(mac, /legacy_bouncer/);
   assert.match(mac, /\.ai-safety\/dist-skills/);
   assert.match(mac, /AGENTS\.md/);
-  assert.match(win, /bouncer-gateway/);
+  assert.doesNotMatch(win, /bouncer-gateway/);
+  assert.match(win, /legacyBouncer/);
   assert.match(win, /\.ai-safety\\dist-skills/);
   assert.match(win, /AGENTS\.md/);
 });
@@ -233,17 +246,20 @@ test('統合ランチャーは「続きから」を OpenCode へ渡す', () => {
 
 test('起動メニューに「続きから」の番号がある（Mac / Windows とも）', () => {
   const command = read('workspace-template/スタート/1_AIをまとめて起動.command');
-  // 8 番は作業フォルダを選んでから起動する（choose_project を挟む）。
-  assert.match(command, /8\) choose_project; exec bash "\$LAUNCHER" "\$WORKSPACE" opencode standard --resume/);
+  // v1.17.0 で「最大保護モード」を外し、以降の番号を 1 つずつ繰り上げた（8→7）。
+  // 7 番は作業フォルダを選んでから起動する（choose_project を挟む）。
+  assert.match(command, /7\) choose_project; exec bash "\$LAUNCHER" "\$WORKSPACE" opencode standard --resume/);
   assert.match(command, /前回の続きから開く/);
-  assert.match(command, /1〜8の番号/, '案内の番号範囲も更新すること');
+  assert.match(command, /1〜7の番号/, '案内の番号範囲も更新すること');
+  assert.doesNotMatch(command, /最大保護/, '廃止した最大保護モードが復活していないこと');
 
   // .bat は教室 PC の PowerShell 5.1 が読めるよう CP932 で配布する（UTF-8 だと文字化けして即閉じ）。
   const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/1_AIをまとめて起動.bat'));
   assert.ok(batBytes[0] !== 0xef, '.bat に BOM を付けない');
   const bat = new TextDecoder('shift_jis').decode(batBytes);
-  assert.match(bat, /choice \/c 12345678 \/n \/m "番号を選んでください \[1-8\]: "/);
-  assert.match(bat, /if errorlevel 8 goto opencode_resume/);
+  assert.match(bat, /choice \/c 1234567 \/n \/m "番号を選んでください \[1-7\]: "/);
+  assert.match(bat, /if errorlevel 7 goto opencode_resume/);
+  assert.doesNotMatch(bat, /最大保護/, '廃止した最大保護モードが復活していないこと');
   assert.match(bat, /:opencode_resume/);
   assert.match(bat, /-Agent opencode -Profile standard -Resume/);
   assert.match(bat, /前回の続きから開く/, 'CP932 のまま日本語が壊れていないこと');

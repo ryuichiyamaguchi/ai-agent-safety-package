@@ -16,11 +16,24 @@
 # ============================================================
 set -u
 
-WORKSPACE="$HOME/Documents/my-ai-workspace"
+# 作業フォルダは「呼び出し元が渡した値 → このスクリプト自身の位置から逆算 → 既定」の順で決める。
+# 「（上級）14_新しい作業フォルダを安全にする」で別のフォルダへ導入した場合、このファイルは
+# そのフォルダの .ai-safety/hooks/macos/deepseek/ に置かれる。固定パスにしていると
+# 別のワークスペースのフックを使ってしまうため、自分の位置から 4 階層上を作業フォルダとする。
+# （<workspace>/.ai-safety/hooks/macos/deepseek/このファイル）
+_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SELF_WS="$(cd "$_HERE/../../../.." 2>/dev/null && pwd || true)"
+if [ -n "${1:-}" ]; then
+  WORKSPACE="$1"
+elif [ -n "$_SELF_WS" ] && [ -d "$_SELF_WS/.ai-safety/hooks/macos" ]; then
+  WORKSPACE="$_SELF_WS"
+else
+  WORKSPACE="$HOME/Documents/my-ai-workspace"
+fi
 HOOKS="$WORKSPACE/.ai-safety/hooks/macos"
 LAUNCH_CLAUDE="$HOOKS/launch-claude-safe.sh"
 DEEPSEEK_GATE="$HOOKS/launch-deepseek-safe.sh"
-AUTH_FILE="$HOME/.deepseek-claude/auth"
+SECRET_STORE="$WORKSPACE/.ai-safety/hooks/common/secret-store.js"
 
 if [ ! -f "$LAUNCH_CLAUDE" ]; then
   echo ""
@@ -59,16 +72,21 @@ else
   fi
 fi
 
-# -- API キーを読み込む（起動ファイルには平文で書かない） ------------
-if [ -f "$AUTH_FILE" ]; then
-  ANTHROPIC_AUTH_TOKEN="$(cat "$AUTH_FILE")"
-  export ANTHROPIC_AUTH_TOKEN
-else
-  echo ""
-  echo "【注意】API キーが未登録です。先に「登録-初回だけ.command」を"
-  echo "  実行してから、もう一度この .command を開いてください。"
-  echo ""
+# -- API キーの有無を確かめる（値はここでは読まない） ----------------
+# 判定は「環境変数 → OS の金庫（キーチェーン）→ 旧平文 ~/.deepseek-claude/auth」の
+# 解決結果で行う。金庫化（secret-migrate.js）で旧平文は削除されるので、平文ファイルの
+# 実在で判定すると「登録したのに未登録と言われる」誤表示になる。
+# 実キーを読むのは Gateway 子プロセスだけ（Claude Code のプロセスには渡さない）。
+# node / secret-store.js が無い環境では判定を保留し、Gateway 側の同じ 3 段解決に任せる。
+if command -v node >/dev/null 2>&1 && [ -f "$SECRET_STORE" ]; then
+  if [ "$(node "$SECRET_STORE" --has deepseek 2>/dev/null || true)" != "yes" ]; then
+    echo ""
+    echo "【注意】API キーが未登録です。先に「登録-初回だけ.command」を"
+    echo "  実行してから、もう一度この .command を開いてください。"
+    echo ""
+  fi
 fi
+unset ANTHROPIC_AUTH_TOKEN
 
 # -- DeepSeek backend 環境変数（BASE_URL は Gateway 側で設定） ------
 # モデル名に [1m]（1M コンテキスト指定）を付けると、Claude Code 2.1.226 以降は

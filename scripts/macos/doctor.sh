@@ -418,5 +418,42 @@ if [ -f "$drills_lib" ]; then
   echo "INFO isolation: network egress は教室プロファイル(v1.12.0)で許可のため要件外（遮断ドリルは実行しない）"
 fi
 
+# --- 秘密の保管状態（API キーが平文のまま残っていないか） -------------------
+# 1Password（op run）利用者は環境変数で解決するため自動移行が走らない。だから
+# 「環境変数の有無に関係なく」平文の残骸を必ず見る（未移行が見えない状態を作らない）。
+secret_status_js="$workspace/.ai-safety/hooks/common/secret-migrate.js"
+if [ -f "$secret_status_js" ] && command -v node >/dev/null 2>&1; then
+  _sec_json="$(node "$secret_status_js" --status 2>/dev/null || true)"
+  if [ -n "$_sec_json" ]; then
+    _vault_ok="$(printf '%s' "$_sec_json" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).vaultAvailable?1:0)}catch{console.log(0)}})')"
+    if [ "$_vault_ok" = "1" ]; then
+      echo "PASS secrets: OS の金庫（キーチェーン）が使えます"
+      pass=$((pass + 1))
+    else
+      echo "WARN secrets: OS の金庫を使えません。キーはファイルのまま動きます"
+    fi
+    # 平文の残骸を1行ずつ。世界に読める権限のものは FAIL、それ以外は赤い WARN。
+    _leftovers="$(printf '%s' "$_sec_json" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{const j=JSON.parse(d);for(const l of j.leftovers)console.log([l.label,l.file,l.mode,l.worldReadable?"WORLD":"OWNER",l.keepPlaintext?"KEEP":"MIGRATE"].join("\t"))}catch{}})')"
+    if [ -z "$_leftovers" ]; then
+      echo "PASS secrets: 平文のキーは残っていません"
+      pass=$((pass + 1))
+    else
+      printf '%s\n' "$_leftovers" | while IFS=$'\t' read -r _label _file _mode _world _keep; do
+        if [ "$_world" = "WORLD" ]; then
+          printf '\033[31mFAIL secrets: %s が平文で、しかも他ユーザーから読めます（%s / 権限 %s）\033[0m\n' "$_label" "$_file" "$_mode"
+        elif [ "$_keep" = "KEEP" ]; then
+          printf '\033[31mWARN secrets: %s が平文のまま残っています（%s / 権限 %s。パッケージ外で使われている可能性があるため自動削除はしません）\033[0m\n' "$_label" "$_file" "$_mode"
+        else
+          printf '\033[31mWARN secrets: %s がまだ平文のままです（%s / 権限 %s）。「6_AIコーチのキーを登録」等で登録し直すと金庫へ移ります\033[0m\n' "$_label" "$_file" "$_mode"
+        fi
+      done
+      # world-readable が1件でもあれば FAIL 扱いにする（サブシェルを跨ぐので再判定）。
+      if printf '%s\n' "$_leftovers" | grep -q 'WORLD'; then
+        fail=$((fail + 1))
+      fi
+    fi
+  fi
+fi
+
 echo "doctor summary: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

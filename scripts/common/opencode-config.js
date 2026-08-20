@@ -6,6 +6,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+// OS の金庫（macOS キーチェーン / Windows DPAPI）。鍵の在処を「金庫 → 旧平文」の順で見る。
+const secretStore = require('./secret-store.js');
 
 // 依存ゼロ MCP サーバー（d-claude と同じ実体）を OpenCode にも接続する。
 // 有効化条件は d-claude ランチャー（scripts/macos/launch-claude-safe.sh）の踏襲:
@@ -38,6 +40,8 @@ const REMOTE_MCP_SERVERS = [
     url: 'https://mcp.buffer.com/mcp',
     flag: 'AI_SAFE_DCLAUDE_BUFFER',
     keyFile: 'buffer-api-key.txt',
+    // OS の金庫での項目名（secret-store.js の固定表）。金庫 → 旧平文 の順で読む。
+    storeName: 'buffer',
     timeout: 60000,
   },
 ];
@@ -65,6 +69,13 @@ const SECRET_ENV_VARS = [
 // 環境変数を根拠に MCP を登録すると「登録されているのに鍵が届かない MCP」になる。
 // 鍵の受け渡しはキーファイル 1 本に寄せる（設定にも環境変数にも実物が載らない）。
 function hasCoachKeyFile(homeDir) {
+  // v1.17.0: 保存先を OS の金庫（キーチェーン / DPAPI）に移した。
+  // ここだけは意図的に環境変数を見ない（従来どおり）。OpenCode の環境からは SECRET_ENV_VARS が
+  // 消えているので、環境変数を根拠に登録すると「登録されているのに鍵が届かない MCP」になる。
+  // 見るのは「金庫 → 旧平文」の2段だけ。値は読まない設計（設定にも環境変数にも実物を載せない）は維持。
+  try {
+    if (secretStore.exists('gemini')) return true;
+  } catch { /* 金庫が使えない環境 → 旧平文へ */ }
   try {
     return fs.readFileSync(path.join(homeDir, '.ai-safety', 'gemini-api-key.txt'), 'utf8').trim().length > 0;
   } catch {
@@ -72,9 +83,14 @@ function hasCoachKeyFile(homeDir) {
   }
 }
 
-// ~/.ai-safety/<name> に置かれた鍵を読む（登録ボタンが書く場所）。
-// 改行や前後の空白は取り除く。読めない・空なら空文字（＝その MCP は登録しない）。
-function readKeyFile(homeDir, name) {
+// リモート MCP に渡す鍵を読む。v1.17.0 で保存先を OS の金庫へ移した。
+// 順序は「金庫 → 旧平文 ~/.ai-safety/<name>」。ここも hasCoachKeyFile と同じ理由で
+// 環境変数は見ない（OpenCode の環境からは秘密の環境変数が消えているため）。
+// 読めない・空なら空文字（＝その MCP は登録しない）。
+function readKeyFile(homeDir, name, storeName) {
+  if (storeName) {
+    try { const v = secretStore.get(storeName); if (v) return v; } catch { /* 金庫が使えない → 旧平文へ */ }
+  }
   try {
     return fs.readFileSync(path.join(homeDir, '.ai-safety', name), 'utf8').trim();
   } catch {
@@ -114,7 +130,7 @@ function buildMcpConfig({ mcpDir = '', env = process.env, homeDir = os.homedir()
   }
   for (const server of REMOTE_MCP_SERVERS) {
     if (String(env[server.flag] ?? '1') === '0') continue;
-    const token = readKeyFile(homeDir, server.keyFile);
+    const token = readKeyFile(homeDir, server.keyFile, server.storeName);
     if (!token) continue;
     mcp[server.key] = {
       type: 'remote',
@@ -136,24 +152,68 @@ function buildMcpConfig({ mcpDir = '', env = process.env, homeDir = os.homedir()
 // OPENCODE_PERMISSION は OPENCODE_CONFIG_CONTENT より後にマージされるため、ランチャーは
 // この集合を環境変数側にも明示 export して「危険な既存値の消去」と「安全な値での上書き」を
 // 二重に行う（1.18.4 実測: 環境変数側のキーが最後に勝つ）。
-// curl / wget は送信検査 Gateway を迂回する外部通信の主経路なので deny に含める。
+//
+// 2026-08-20 実用最小限への見直し（山口さん裁定）。撤廃・緩和したものと、その理由:
+//   ・`curl *` / `wget *` を撤廃
+//       パッケージ全体は v1.12.0 で curl/wget の一律 deny を撤廃済み（policy の
+//       _comment_dangerousCommand 参照）なのに、この経路だけが撤廃前の床を保持していた。
+//       残していた理由は「送信検査 Gateway を素通りするから」だったが、同じパッケージが
+//       公式に載せている MCP 5 本（gemini-search / gemini-vision / pollinations-image /
+//       agy-image / buffer）と webfetch は**全部 Gateway を通らずに外へ出ている**ので、
+//       curl だけを deny に残す根拠が脅威モデル上もう成立していない。
+//       しかも OpenCode の permission はコマンド文字列全体の前方一致グロブなので、
+//       `cd . && curl ...` と 1 語前置きするだけで当たらない＝**正当用途だけを確実に止め、
+//       悪用は 1 語で回避できる**という非対称になっていた。撤廃後は '*': 'ask' に落ちる。
+//       秘密流出（.env 読み出し）・リモートコード実行（curl|sh、$(curl …)、-o して実行）・
+//       匿名アップロードサイト宛は policy の dangerousCommandRegex / protectedPathRegex が
+//       独立して決定的 deny を続けるので、そこは一切弱まっていない。
+//   ・`chmod -R *` を撤廃
+//       `chmod -R u+rwX,go-rwx project`（＝**権限を締める**正当操作）まで止めていた。
+//       本当に危険な「他人に書き込みを与える形」（777/666 や a+w / o+w）は policy の
+//       dangerousCommandRegex が 3 エンジン共通で決定的 deny を続ける。撤廃したのは
+//       「-R が付いていたら中身に関係なく止める」という粗い規則のほうだけ。
+//   ・`git push*` / `npm publish*` を deny → ask
+//       公開系は取り消しにくいが、正当用途（自分のリポジトリへ push する）も多い。
+//       確認カードを 1 枚挟む形にして、判断を受講者に渡す。
+//   ・残したもの: 再帰削除（rm *）・`sudo *`・`git reset --hard*`
+//       いずれも取り消せない破壊で、正当な代替手段がある。
+//   ・追加したもの: 裸の `codex*` / `claude*` を deny、`oc-safe*` を deny
+//       安全フックを通らない裸起動を閉じる。安全ランチャー（codex-safe / claude-safe）は
+//       下の enforcedBashAsk() で ask として明示的に開けてある（壁 A の解消）。
+//       oc-safe は自分自身の再帰起動なので閉じる。
 function enforcedBashDeny() {
   return {
     [['r', 'm *'].join('')]: 'deny',
     'sudo *': 'deny',
-    'git push*': 'deny',
-    'npm publish*': 'deny',
-    'curl *': 'deny',
-    'wget *': 'deny',
     'git reset --hard*': 'deny',
-    'chmod -R *': 'deny',
+    'codex*': 'deny',
+    'claude*': 'deny',
+    'oc-safe*': 'deny',
   };
 }
 
-// ランチャーが OPENCODE_PERMISSION に入れる最小の deny 集合。
+// 設定・環境変数の両方で必ず ask に固定する bash パターン（SSOT）。
+// **この表は enforcedBashDeny() より後ろに置くこと。** OpenCode の permission は
+// 「最後に一致したルールが勝つ」ので、`codex-safe*` が `codex*`(deny) より後ろに無いと
+// 安全ランチャーが起動できない。並び順そのものが意味を持つため、起動前検査
+// （verifyResolvedConfig）は「ask が deny より後ろにあること」まで確かめる。
+//
+// codex-safe / claude-safe は PATH 上のシム（install が ~/.ai-safety/bin/ に置く）で、
+// 中で安全ランチャーへ橋渡しする。呼ばれた側は --sandbox workspace-write / 安全 settings /
+// guard フック / 見守りモニターが全部かかった状態で動くので、**裸起動より安全**になる。
+function enforcedBashAsk() {
+  return {
+    'codex-safe*': 'ask',
+    'claude-safe*': 'ask',
+    'git push*': 'ask',
+    'npm publish*': 'ask',
+  };
+}
+
+// ランチャーが OPENCODE_PERMISSION に入れる最小の強制集合（deny → ask の順を保つ）。
 function buildEnforcedPermissionEnv() {
   return {
-    bash: enforcedBashDeny(),
+    bash: { ...enforcedBashDeny(), ...enforcedBashAsk() },
     external_directory: 'deny',
   };
 }
@@ -230,6 +290,22 @@ function verifyResolvedConfig(resolved) {
   const bash = permission.bash && typeof permission.bash === 'object' ? permission.bash : {};
   for (const [pattern, action] of Object.entries(enforcedBashDeny())) {
     if (bash[pattern] !== action) problems.push(`bash の「${pattern}」が禁止になっていません。`);
+  }
+  for (const [pattern, action] of Object.entries(enforcedBashAsk())) {
+    if (bash[pattern] !== action) problems.push(`bash の「${pattern}」が確認制になっていません。`);
+  }
+  // 並び順の検査。OpenCode は「最後に一致したルールが勝つ」ので、`codex-safe*`(ask) が
+  // `codex*`(deny) より前に来ると安全ランチャーが起動できず、逆に `codex*`(deny) が
+  // 後ろに来ると裸起動が閉じられない。キーの並びそのものを見る。
+  {
+    const keys = Object.keys(bash);
+    const lastDeny = keys.reduce((acc, key, i) => (bash[key] === 'deny' ? i : acc), -1);
+    for (const pattern of Object.keys(enforcedBashAsk())) {
+      const at = keys.indexOf(pattern);
+      if (at >= 0 && at < lastDeny) {
+        problems.push(`bash の「${pattern}」が禁止規則より前にあり、最後の一致で打ち消されます。`);
+      }
+    }
   }
   if (bash['*'] === 'allow') problems.push('bash がすべて自動許可になっています。');
   if (permission.external_directory !== 'deny') problems.push('作業フォルダの外へのアクセスが禁止になっていません。');
@@ -450,6 +526,9 @@ function buildOpenCodeConfig({
         'pytest*': 'allow',
         'python* -m unittest*': 'allow',
         ...enforcedBashDeny(),
+        // ask は deny の後ろ（最後に一致したルールが勝つ）。codex-safe* を codex*(deny) の
+        // 後ろに置くことで「安全ランチャーは確認つきで通り、裸起動は止まる」に反転させる。
+        ...enforcedBashAsk(),
       },
       external_directory: 'deny',
       webfetch: 'ask',

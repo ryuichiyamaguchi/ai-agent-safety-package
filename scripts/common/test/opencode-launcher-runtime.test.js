@@ -164,7 +164,7 @@ test('正常な導入では OpenCode 本体まで起動する', (t) => {
 
   assert.strictEqual(run.status, 0, run.output);
   assert.strictEqual(run.launched, true, 'fake-opencode 本体が呼ばれていない');
-  assert.match(run.output, /Bouncer送信検査: 有効/);
+  assert.match(run.output, /送信検査（伏せる人）: 有効/);
 });
 
 test('初回の依存関係準備ログが混ざっても安全設定を確認して本体を起動する', (t) => {
@@ -173,7 +173,7 @@ test('初回の依存関係準備ログが混ざっても安全設定を確認�
 
   assert.strictEqual(run.status, 0, run.output);
   assert.strictEqual(run.launched, true, '準備ログだけを理由に fake-opencode 本体を止めている');
-  assert.match(run.output, /Bouncer送信検査: 有効/);
+  assert.match(run.output, /送信検査（伏せる人）: 有効/);
 });
 
 test('改行なしの準備ログ直後に設定JSONが続いても本体を起動する', (t) => {
@@ -182,7 +182,7 @@ test('改行なしの準備ログ直後に設定JSONが続いても本体を起�
 
   assert.strictEqual(run.status, 0, run.output);
   assert.strictEqual(run.launched, true);
-  assert.match(run.output, /Bouncer送信検査: 有効/);
+  assert.match(run.output, /送信検査（伏せる人）: 有効/);
 });
 
 test('設定JSONを特定できないときは赤字化済み診断を残して本体を起動しない', (t) => {
@@ -206,7 +206,7 @@ test('安全プラグインが読み込まれないときは OpenCode 本体を�
   assert.strictEqual(run.launched, false, '安全プラグインが載っていないのに本体が起動した');
   assert.match(run.output, /安全プラグインが読み込まれない/);
   // 確認が取れる前に「有効」と表示してはいけない（表示の正直さ）。
-  assert.doesNotMatch(run.output, /Bouncer送信検査: 有効/);
+  assert.doesNotMatch(run.output, /送信検査（伏せる人）: 有効/);
 });
 
 test('debug config が何も返さない古い版では OpenCode 本体を起動しない', (t) => {

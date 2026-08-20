@@ -38,20 +38,17 @@ json_value() {
   sed -n 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$versions_json" | head -n1
 }
 
+# 2026-08-20: Claude Code の固定版インストールを廃止し、最新版追従にした（純正サンドボックスを
+# 使う方針に切り替えたため）。表が無い場合も "latest" にフォールバックして更新を止めない。
 claude_pin="$(json_value claudeCode)"
-if [ -z "$claude_pin" ]; then
-  echo "注意: 動作確認済みバージョン表 (tested-tool-versions.json) が見つかりません。"
-  echo "      Claude Code の更新はスキップします（7_安全パッケージを最新版に更新 を先に実行してください）。"
-fi
+[ -n "$claude_pin" ] || claude_pin="latest"
 
 echo ""
 echo " == AI ツールを最新版に更新します =="
 echo ""
 echo " 更新するもの（入っているものだけ）:"
 echo "   ・Codex CLI    → 最新版"
-if [ -n "$claude_pin" ]; then
-  echo "   ・Claude Code  → 動作確認済み版 ($claude_pin) ※最新版にはしません"
-fi
+echo "   ・Claude Code  → 最新版"
 echo "   ・OpenCode     → 最新版"
 echo " 更新しないもの:"
 echo "   ・agy (AntiGravity) → 公式の自動更新に任せます（作業フォルダの docs/09_各AIのインストール.md を参照）"
@@ -109,31 +106,9 @@ update_tool() {
 
 update_tool "Codex CLI" "codex" "@openai/codex@latest"
 
-# Claude Code は「最新」ではなく、パッケージが動作確認した版に合わせる。
-if [ -n "$claude_pin" ]; then
-  if ! command -v claude >/dev/null 2>&1; then
-    echo ""
-    echo "── Claude Code: 入っていないためスキップします（新規インストールはしません）"
-    add_result "Claude Code: スキップ (未インストール)"
-  else
-    cc_before="$(tool_version claude)"
-    echo ""
-    echo "── Claude Code（現在の版: ${cc_before:-不明} / 検証済み版: $claude_pin）"
-    if [ -n "$cc_before" ] && [ "$cc_before" = "$claude_pin" ]; then
-      echo "   検証済み版に一致しています。更新は不要です。"
-      add_result "Claude Code: 検証済み版に一致 ($claude_pin)"
-    else
-      if npm install -g "@anthropic-ai/claude-code@$claude_pin"; then
-        add_result "Claude Code: 検証済み版に更新 (${cc_before:-不明} → $claude_pin)"
-      else
-        fail_hint "Claude Code"
-        add_result "Claude Code: 失敗（上のメッセージを確認）"
-      fi
-    fi
-  fi
-else
-  add_result "Claude Code: スキップ (版の表が見つからない)"
-fi
+# Claude Code は最新版に追従する（2026-08-20 に固定をやめた）。Codex / OpenCode と同じ
+# update_tool を通す（未インストールならスキップする挙動も共通）。
+update_tool "Claude Code" "claude" "@anthropic-ai/claude-code@$claude_pin"
 
 update_tool "OpenCode" "opencode" "opencode-ai@latest"
 

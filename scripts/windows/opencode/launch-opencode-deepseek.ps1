@@ -26,6 +26,31 @@ $keyDir = Join-Path $env:USERPROFILE '.deepseek-claude'
 $keyFile = Join-Path $keyDir 'auth'
 $logDir = if ($env:AI_SAFE_LOG_DIR) { $env:AI_SAFE_LOG_DIR } else { Join-Path $env:USERPROFILE '.ai-safety\logs' }
 $coachMarker = Join-Path $logDir 'coach-engine'
+# 秘密の解決（順序は全箇所共通: 環境変数 → OS の金庫(DPAPI) → 旧平文）。
+# DPAPI の復号は PowerShell 5.1 でも動く Marshal 経由で書く
+# （ConvertFrom-SecureString -AsPlainText は PowerShell 7.0 以降なので使わない）。
+# 金庫に入っている値は "v1:" + base64(UTF-8) の封筒に包んである。
+function Read-AiSafeSecret {
+  param([string]$DpapiName, [string]$EnvName, [string]$LegacyFile)
+  if ($EnvName) {
+    $v = [Environment]::GetEnvironmentVariable($EnvName)
+    if ($v -and $v.Trim()) { return $v.Trim() }
+  }
+  $p = Join-Path $env:USERPROFILE (Join-Path '.ai-safety' $DpapiName)
+  if (Test-Path -LiteralPath $p -PathType Leaf) {
+    try {
+      $ss = ConvertTo-SecureString ((Get-Content -LiteralPath $p -Raw).Trim())
+      $b = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss))
+      if ($b.StartsWith('v1:')) { $b = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b.Substring(3))) }
+      if ($b -and $b.Trim()) { return $b.Trim() }
+    } catch { }
+  }
+  if ($LegacyFile -and (Test-Path -LiteralPath $LegacyFile -PathType Leaf)) {
+    $t = ([System.IO.File]::ReadAllText($LegacyFile)).Trim()
+    if ($t) { return $t }
+  }
+  return ''
+}
 
 if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw "作業フォルダが見つかりません: $Workspace" }
 
@@ -57,7 +82,7 @@ if ($env:AI_SAFE_DRY_RUN -eq '1') {
         Write-Output "  gateway:   http://127.0.0.1:8788/v1 (mandatory / 使用中なら 8789-8797 から自動選択)"
     }
     Write-Output '  config:    OPENCODE_CONFIG_CONTENT'
-    Write-Output '  model:     DeepSeek V4 Pro / small: V4 Flash'
+    Write-Output '  model:     DeepSeek V4 Flash / small: V4 Flash'
     Write-Output ('  websearch: ' + $(if ($WebSearch) { 'opt-in (approval required)' } else { 'off' }))
     Write-Output ('  session:   ' + $(if ($Resume) { 'continue last' } else { 'new' }))
     exit 0
@@ -75,7 +100,11 @@ $openCode = if ($env:OPENCODE_BIN) { $env:OPENCODE_BIN } else {
     if ($found) { $found.Source } else { $null }
 }
 if (-not $openCode) { throw 'OpenCode が見つかりません。先に OpenCode をインストールしてください。' }
-if (-not (Test-Path -LiteralPath $keyFile -PathType Leaf) -or (Get-Item -LiteralPath $keyFile).Length -eq 0) {
+# 実キーはここで一度だけ解決する (環境変数 → 金庫(DPAPI) → 旧平文)。金庫に移したあとは
+# 旧平文が消えるので、ファイルの有無で判定してはいけない。
+# 解決できなければ fail-closed (鍵なしで gateway を立てると素通しの中継になる)。
+$dsKey = Read-AiSafeSecret -DpapiName 'deepseek.dpapi' -EnvName 'DEEPSEEK_API_KEY' -LegacyFile $keyFile
+if (-not $dsKey) {
     throw 'DeepSeek APIキーが未登録です。先に「DeepSeekキーを登録」を実行してください。'
 }
 
@@ -164,11 +193,11 @@ if (-not $gatewayReused) {
         Stop-StaleGateway -Port $candidate -GatewayJs $gatewayJs
         $env:DS_GATEWAY_PORT = $candidate
         $env:DS_GATEWAY_UPSTREAM = 'https://api.deepseek.com'
-        $env:DS_GATEWAY_AUTH_FILE = $keyFile
+        $env:DEEPSEEK_API_KEY = $dsKey
         $env:DS_GATEWAY_TOKEN = $gatewayToken
         $env:DS_GATEWAY_WORKSPACE = $Workspace
         $gw = Start-Process -FilePath $node.Source -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden -RedirectStandardOutput $gatewayOut -RedirectStandardError $gatewayErr
-        Remove-Item Env:\DS_GATEWAY_AUTH_FILE, Env:\DS_GATEWAY_UPSTREAM, Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_WORKSPACE -ErrorAction SilentlyContinue
+        Remove-Item Env:\DEEPSEEK_API_KEY, Env:\DS_GATEWAY_UPSTREAM, Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_WORKSPACE -ErrorAction SilentlyContinue
 
         # healthz の応答だけで判断してはいけない。ポートが他に取られていた場合、自分の gateway は
         # bind に失敗して終了するが、その同じポートで「別の gateway」(例: 別ワークスペースから
@@ -246,7 +275,10 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not $secretEnvRaw) { throw 'OpenCode 安全設定を生成できませんでした。' }
     $secretEnvNames = @(([string]$secretEnvRaw).Trim() -split '\s+' | Where-Object { $_ })
     $coachKeyFile = Join-Path $env:USERPROFILE '.ai-safety\gemini-api-key.txt'
-    if (($env:GEMINI_API_KEY -or $env:GOOGLE_API_KEY) -and -not (Test-Path -LiteralPath $coachKeyFile -PathType Leaf)) {
+    # 金庫(gemini.dpapi) か 旧平文のどちらかに入っていれば登録済み。環境変数は数えない
+    # (OpenCode の環境からは秘密の環境変数を消すので、環境変数だけでは MCP に届かないため)。
+    $coachRegistered = [bool](Read-AiSafeSecret -DpapiName 'gemini.dpapi' -EnvName '' -LegacyFile $coachKeyFile)
+    if (($env:GEMINI_API_KEY -or $env:GOOGLE_API_KEY) -and -not $coachRegistered) {
         Write-Warning '環境変数の Gemini キーは OpenCode へ渡しません (AI から見えてしまうため)。検索と画像読み取りを使うときは「6_AIコーチのキーを登録」で登録してください。'
     }
     foreach ($secretName in $secretEnvNames) {
@@ -546,10 +578,8 @@ try {
         $resolvedSafe = $resolved.Replace($gatewayToken, 'REDACTED')
         # リモート MCP (Buffer 等) の鍵も Authorization ヘッダとして入るので、同じく伏せる。
         $remoteKeyFile = Join-Path $env:USERPROFILE '.ai-safety\buffer-api-key.txt'
-        if (Test-Path -LiteralPath $remoteKeyFile -PathType Leaf) {
-            $remoteKey = ([System.IO.File]::ReadAllText($remoteKeyFile)).Trim()
-            if ($remoteKey) { $resolvedSafe = $resolvedSafe.Replace($remoteKey, 'REDACTED') }
-        }
+        $remoteKey = Read-AiSafeSecret -DpapiName 'buffer.dpapi' -EnvName '' -LegacyFile $remoteKeyFile
+        if ($remoteKey) { $resolvedSafe = $resolvedSafe.Replace($remoteKey, 'REDACTED') }
         [System.IO.File]::WriteAllText($resolvedFile, $resolvedSafe, (New-Object System.Text.UTF8Encoding($false)))
         & $node.Source $configJs '--verify-resolved' $resolvedFile
         $verified = ($LASTEXITCODE -eq 0)
@@ -574,7 +604,7 @@ try {
         $watchdog = Start-Process -FilePath $node.Source -ArgumentList @($monitorPlugin, '--watchdog', '--timeout-ms', '30000') -PassThru -WindowStyle Hidden
 
         Set-Content -NoNewline -Encoding ascii -LiteralPath $coachMarker -Value 'opencode-deepseek'
-        Write-Host 'Bouncer送信検査: 有効 / モデル: DeepSeek V4 Pro / 補助: V4 Flash'
+        Write-Host '送信検査（伏せる人）: 有効 / モデル: DeepSeek V4 Flash / 補助: V4 Flash'
         Write-Host ('変更操作は確認、外部フォルダは禁止、Web検索は' + $(if ($WebSearch) { '許可時のみ' } else { '無効' }) + 'です。')
         Write-Host '危険なコマンド（まとめて削除・鍵の読み出し・ネットから拾った実行）は確認なしで止まります。'
 

@@ -17,8 +17,17 @@ setlocal EnableDelayedExpansion
 ::     launch-claude-safe.ps1 を経由します（ガードバイパス防止）。
 :: ============================================================
 
-:: -- 1. workspace を特定（インストーラ既定の場所） ----------------
-set "WORKSPACE=%USERPROFILE%\Documents\my-ai-workspace"
+:: -- 1. workspace を特定 -----------------------------------------
+:: 「呼び出し元が渡した値 → このファイル自身の位置から逆算 → 既定」の順で決める。
+:: 「（上級）14_新しい作業フォルダを安全にする」で別のフォルダへ導入した場合、この
+:: ファイルは <作業フォルダ>\.ai-safety\hooks\windows\deepseek\ に置かれる。固定パスだと
+:: 別のワークスペースのフックを使ってしまうため、自分の位置から 4 階層上を作業フォルダとする。
+set "WORKSPACE="
+if not "%~1"=="" set "WORKSPACE=%~1"
+if "%WORKSPACE%"=="" (
+    for %%I in ("%~dp0..\..\..\..") do set "WORKSPACE=%%~fI"
+)
+if not exist "%WORKSPACE%\.ai-safety\hooks\windows" set "WORKSPACE=%USERPROFILE%\Documents\my-ai-workspace"
 set "HOOKS=%WORKSPACE%\.ai-safety\hooks\windows"
 set "LAUNCH_CLAUDE=%HOOKS%\launch-claude-safe.ps1"
 set "DEEPSEEK_GATE=%HOOKS%\launch-deepseek-safe.ps1"
@@ -61,13 +70,20 @@ if exist "%DEEPSEEK_GATE%" (
 )
 
 :: -- 3. DeepSeek バックエンドへ向ける環境変数を前差し --------------
-:: ANTHROPIC_AUTH_TOKEN は「登録-初回だけ.bat」が保存したファイルから読み、
-:: このプロセス内だけに set する（永続化しない＝素の claude を壊さない）。
+:: 実キーはここでは読まない。Gateway 子プロセスだけが読む（Claude Code には渡さない）。
+:: 鍵の有無だけを「環境変数 → OS の金庫(DPAPI) → 旧平文」の解決結果で確かめる。
+:: 金庫化（secret-migrate.js）で旧平文 .deepseek-claude\auth は削除されるため、平文ファイルの
+:: 実在で判定すると「登録したのに未登録」で起動できなくなる。
 :: BASE_URL is set by the gateway launcher (launch-deepseek-gateway.ps1)
-set "AUTH_FILE=%USERPROFILE%\.deepseek-claude\auth"
 set "ANTHROPIC_AUTH_TOKEN="
-if exist "%AUTH_FILE%" (
-    for /f "usebackq delims=" %%K in ("%AUTH_FILE%") do set "ANTHROPIC_AUTH_TOKEN=%%K"
+set "SECRET_STORE=%WORKSPACE%\.ai-safety\hooks\common\secret-store.js"
+set "DS_KEY_PRESENT=unknown"
+where node >nul 2>&1
+if not errorlevel 1 (
+    if exist "%SECRET_STORE%" (
+        set "DS_KEY_PRESENT=no"
+        for /f "usebackq delims=" %%K in (`node "%SECRET_STORE%" --has deepseek 2^>nul`) do set "DS_KEY_PRESENT=%%K"
+    )
 )
 set "ANTHROPIC_MODEL=deepseek-v4-flash"
 set "ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-flash"
@@ -86,12 +102,12 @@ set "GATEWAY_LAUNCH=%HOOKS%\deepseek\launch-deepseek-gateway.ps1"
 ::   B案（動けばよい・表示は Opus）: ANTHROPIC_MODEL 行を消し、
 ::     起動後に /model で opus を選ぶ（サーバ側で v4 に振り分け）。
 
-if "%ANTHROPIC_AUTH_TOKEN%"=="" (
+if "!DS_KEY_PRESENT!"=="no" (
     echo.
     echo 【注意】DeepSeek の API キーが未登録です。
     echo   先に「登録-初回だけ.bat」（またはスタートの（上級）1）で
     echo   キーを登録してから、もう一度これを開いてください。
-    echo   （ファイル方式なので登録後すぐ反映されます。再起動は不要です）
+    echo   （登録後すぐ反映されます。再起動は不要です）
     echo.
     pause
     exit /b 1

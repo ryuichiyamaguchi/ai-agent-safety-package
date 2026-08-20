@@ -78,7 +78,7 @@ test('oc-safe はプロジェクトフォルダを指定して起動する', { s
     'ワークスペース内の同名フォルダを解決すること');
   // ★ 見守りモニターごと立ち上がる「統合ランチャー」を必ず経由すること。
   // OpenCode のランチャーを直接叩くと、モニターが起動せず画面で見えないまま AI が動く。
-  assert.match(byName.stdout, /Bouncer統合版/, '統合ランチャーを経由すること');
+  assert.match(byName.stdout, /安全装置（Bouncer）/, '統合ランチャーを経由すること');
   assert.match(byName.stdout, /monitor:\s+enabled/, '見守りモニターが起動対象に入っていること');
 
   // 引数なしなら「いま開いているフォルダ」

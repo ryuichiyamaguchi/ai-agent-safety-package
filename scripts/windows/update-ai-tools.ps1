@@ -32,25 +32,22 @@ foreach ($cand in @(
     )) {
     if (Test-Path -LiteralPath $cand) { $versionsJson = $cand; break }
 }
+# 2026-08-20: Claude Code の固定版インストールを廃止し、最新版追従にした（純正サンドボックスを
+# 使う方針に切り替えたため）。表が無い場合も "latest" にフォールバックして更新を止めない。
 $claudePin = ""
 if ($versionsJson) {
     try {
         $claudePin = ([System.IO.File]::ReadAllText($versionsJson, [System.Text.Encoding]::UTF8) | ConvertFrom-Json).claudeCode
     } catch { $claudePin = "" }
 }
-if (-not $claudePin) {
-    Line "注意: 動作確認済みバージョン表 (tested-tool-versions.json) が見つかりません。"
-    Line "      Claude Code の更新はスキップします（7_安全パッケージを最新版に更新 を先に実行してください）。"
-}
+if (-not $claudePin) { $claudePin = "latest" }
 
 Line ""
 Line " == AI ツールを最新版に更新します =="
 Line ""
 Line " 更新するもの（入っているものだけ）:"
 Line "   ・Codex CLI    → 最新版"
-if ($claudePin) {
-    Line ("   ・Claude Code  → 動作確認済み版 (" + $claudePin + ") ※最新版にはしません")
-}
+Line "   ・Claude Code  → 最新版"
 Line "   ・OpenCode     → 最新版"
 Line " 更新しないもの:"
 Line "   ・agy (AntiGravity) → 公式の自動更新に任せます（作業フォルダの docs\09_各AIのインストール.md を参照）"
@@ -110,34 +107,9 @@ function Update-Tool($name, $cmdName, $pkg) {
 
 Update-Tool "Codex CLI" "codex" "@openai/codex@latest"
 
-# Claude Code は「最新」ではなく、パッケージが動作確認した版に合わせる。
-if ($claudePin) {
-    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-        Line ""
-        Line "── Claude Code: 入っていないためスキップします（新規インストールはしません）"
-        [void]$results.Add("Claude Code: スキップ (未インストール)")
-    } else {
-        $ccBefore = Get-ToolVersion "claude"
-        Line ""
-        $ccShown = $ccBefore
-        if (-not $ccShown) { $ccShown = "不明" }
-        Line ("── Claude Code（現在の版: " + $ccShown + " / 検証済み版: " + $claudePin + "）")
-        if ($ccBefore -and ($ccBefore -eq $claudePin)) {
-            Line "   検証済み版に一致しています。更新は不要です。"
-            [void]$results.Add("Claude Code: 検証済み版に一致 (" + $claudePin + ")")
-        } else {
-            & cmd /c ("npm install -g @anthropic-ai/claude-code@" + $claudePin)
-            if ($LASTEXITCODE -eq 0) {
-                [void]$results.Add("Claude Code: 検証済み版に更新 (" + $ccShown + " → " + $claudePin + ")")
-            } else {
-                Show-FailHint "Claude Code"
-                [void]$results.Add("Claude Code: 失敗（上のメッセージを確認）")
-            }
-        }
-    }
-} else {
-    [void]$results.Add("Claude Code: スキップ (版の表が見つからない)")
-}
+# Claude Code は最新版に追従する（2026-08-20 に固定をやめた）。Codex / OpenCode と同じ
+# Update-Tool を通す（未インストールならスキップする挙動も共通）。
+Update-Tool "Claude Code" "claude" ("@anthropic-ai/claude-code@" + $claudePin)
 
 Update-Tool "OpenCode" "opencode" "opencode-ai@latest"
 

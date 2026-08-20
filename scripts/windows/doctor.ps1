@@ -411,6 +411,34 @@ if (Test-Path -LiteralPath $drillsPathFull) {
     Add-Info "isolation: network egress (not required)" "教室プロファイル(v1.12.0)で通信は許可。OS 遮断は要件でないため未実行"
 }
 
+# --- 秘密の保管状態（API キーが平文のまま残っていないか） -------------------
+# 1Password（op run）利用者は環境変数で解決するため自動移行が走らない。だから
+# 「環境変数の有無に関係なく」平文の残骸を必ず見る（未移行が見えない状態を作らない）。
+$secretDir = Join-Path $env:USERPROFILE '.ai-safety'
+$vaultItems = @(
+    @{ Name = 'AIコーチ（Gemini）のキー'; Dpapi = 'gemini.dpapi';      Legacy = (Join-Path $secretDir 'gemini-api-key.txt') },
+    @{ Name = 'Buffer のキー';            Dpapi = 'buffer.dpapi';      Legacy = (Join-Path $secretDir 'buffer-api-key.txt') },
+    @{ Name = 'DeepSeek のキー';          Dpapi = 'deepseek.dpapi';    Legacy = (Join-Path $env:USERPROFILE '.deepseek-claude\auth') },
+    @{ Name = 'Gemini（有料）のキー';     Dpapi = 'gemini-paid.dpapi'; Legacy = (Join-Path $secretDir 'gemini-api-key-paid.txt') }
+)
+$leftoverCount = 0
+foreach ($item in $vaultItems) {
+    $dpapiPath = Join-Path $secretDir $item.Dpapi
+    $inVault = Test-Path -LiteralPath $dpapiPath -PathType Leaf
+    $inPlain = Test-Path -LiteralPath $item.Legacy -PathType Leaf
+    if ($inPlain) {
+        $leftoverCount++
+        Add-Result ("secrets: " + $item.Name) $false ("平文のまま残っています: " + $item.Legacy + " → 登録し直すと金庫へ移ります")
+    } elseif ($inVault) {
+        Add-Result ("secrets: " + $item.Name) $true "金庫(DPAPI)に入っています"
+    } else {
+        Add-Info ("secrets: " + $item.Name) "未登録"
+    }
+}
+if ($leftoverCount -eq 0) {
+    Add-Result "secrets: 平文の残骸" $true "平文のキーは残っていません"
+}
+
 $results | Format-Table -AutoSize
 $failed = @($results | Where-Object { $_.Status -ne "PASS" -and $_.Status -ne "SKIP" -and $_.Status -ne "INFO" })
 if ($failed.Count -gt 0) {

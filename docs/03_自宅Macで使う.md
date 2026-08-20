@@ -1,6 +1,6 @@
 # 自宅 Mac で使う
 
-自分の Mac で AI エージェント安全運用パッケージ v1.16.0 を使う手順です。
+自分の Mac で AI エージェント安全運用パッケージ v1.17.0 を使う手順です。
 
 > **このページは在校中（講座期間中）向けです。** 卒業した方・もうすぐ卒業する方は、まず [20_卒業後ガイド.md](20_卒業後ガイド.md) を読んでください。
 
@@ -12,7 +12,9 @@
 
 ## Mac の利点
 
-Mac では macOS の Seatbelt サンドボックスが Codex CLI と連動します。Windows ネイティブよりも **OS レベルで強い防御**が効きます。バグはありますが、それを補う層も組み込んであります。
+Mac では macOS の **Seatbelt**（`sandbox-exec`）という OS の隔離機構が使えます。このパッケージの言葉でいう「**壁**」です。**Codex CLI と Claude Code の両方**が Mac では壁つきで動きます（Windows の Claude Code には壁がありません）。
+
+ただし壁が止めるのは「**作業フォルダの外への書き込み**」と「**許可していない相手への通信**」だけで、**読み取りは止まりません**。秘密ファイルの読み取りを止めているのは、壁ではなく「**見張り**」（このパッケージの hook と権限リスト）のほうです。言葉の意味は [00_はじめに.md](00_はじめに.md) の「守られ方の言葉づかい」を見てください。
 
 ## 前提
 
@@ -66,20 +68,28 @@ bash .ai-safety/hooks/macos/launch-codex-safe.sh
 
 本パッケージの launcher は次の構成を強制します。
 
-- `--sandbox workspace-write`：workspace 外への書き込みを macOS Seatbelt が OS レベルで拒否（1 層目）
-- `network_access = false`：外部通信を全遮断（2 層目）
-- `shell_environment_policy.exclude`：`OPENAI_API_KEY` などのシークレット環境変数を AI に渡さない（3 層目）
-- `--ask-for-approval untrusted`：Codex 内部の trusted list（`cat` / `ls` / `sed` などの安全コマンド）以外が来たときに、**実行前に承認プロンプト**を出す（4 層目）
+- **壁**（`--sandbox workspace-write`）：workspace 外への書き込みを macOS Seatbelt が OS レベルで拒否します
+- **見張り**（hook = `policy/safety-policy.json`）：危ないやり方をリストと照らして実行前に止めます
+- **見張り**（`--ask-for-approval on-request`）：モデルが「これは確認が要る」と判断したときに、**実行前に承認プロンプト**を出します
+- `shell_environment_policy.exclude`：`OPENAI_API_KEY` などのシークレット環境変数を AI に渡しません
+- **記録係**：起きたことは監査ログと見守りモニターに残ります
 
-`python -c "open('.env')..."` や `curl`、`rm -rf`、`git push --force` のような trusted list 外の操作は、承認プロンプトが出る（そこで「いいえ」を押せば実行されない）か、または hook 層（`policy/safety-policy.json`）で**先に**拒否されます。`cat ~/.ssh/id_rsa` のように trusted コマンド + 危険な引数の組合せでは approval は出ませんが、hook 層と Seatbelt が止めます。**4 層のどこかで止まれば安全**というモデルです。詳細は `docs/90_守れる-守れない.md` の「なぜ『安全』は 4 層で成り立つのか」を参照。
+**正直に書いておくこと**
 
-> 注意：本パッケージの `approval_policy = "untrusted"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
+- **通信は止めていません**（`network_access = true`）。調べもの・パッケージ取得・API の動作確認を止めないためです。`curl` や `wget` 自体も自動ブロックしません。外への持ち出しは、匿名アップロード先の拒否や秘密パターンの検出といった**見張り側**で防ぎます。
+- **Seatbelt は「読み取り」を止めません。** Codex が作るサンドボックスの設定には「ファイルの読み取りは許可」が明示的に入っています（実測で `~/.ssh/config` の中身が読めることを確認済み）。秘密ファイルの読み取りを止めているのは見張り（hook）のほうです。
+
+`rm -rf` や `git push --force` のような取り返しのつかない操作は、承認プロンプトが出る（そこで「いいえ」を押せば実行されない）か、見張り（hook）が**先に**拒否します。`cat ~/.ssh/id_rsa` のように「安全なコマンド + 危険な引数」の組合せでは承認プロンプトが出ないことがありますが、そこは見張りが受け止めます。**壁・見張り・記録係のどこかで止まれば安全**というモデルです。詳細は `docs/90_守れる-守れない.md` を参照。
+
+> 注意：本パッケージの `approval_policy = "on-request"` が効くのは **Codex CLI を対話モード（TUI）で起動した時だけ**です。`codex exec` のような非対話モードは強制的に `never` に降格されます。必ず上記の launcher 経由で起動してください。
 
 Claude Code の場合：
 
 ```bash
 bash .ai-safety/hooks/macos/launch-claude-safe.sh
 ```
+
+> Mac の Claude Code には、Claude Code 純正の**壁**（Seatbelt）を有効にしてあります（実測で、作業フォルダの外へ書き込もうとすると OS に拒否されることを確認済み）。壁があると、その中で完結する作業は確認ダイアログ無しで進むので、**安全と同時に使いやすくなります**。ここでも読み取りは壁では止まらないので、見張り（hook）は 1 本も外していません。
 
 ## 自分の本物のプロジェクトで使う
 

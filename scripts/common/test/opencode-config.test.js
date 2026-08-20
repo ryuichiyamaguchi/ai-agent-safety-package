@@ -4,6 +4,11 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+
+// この検査は「鍵が未登録なら MCP に載せない」を見る。opencode-config は v1.17.0 から
+// OS の金庫も参照するので、検査を実行する PC に本物の鍵が登録されていると結果が変わる。
+// 検査専用の接頭辞に逃がして、実機の登録状態から切り離す（保存方式は変えない）。
+process.env.AI_SAFE_KEYCHAIN_PREFIX = 'ai-safety-test-opencode-config.';
 const {
   buildOpenCodeConfig,
   buildEnforcedPermissionEnv,
@@ -75,7 +80,8 @@ test('OpenCode runtime config preserves useful reads while gating mutations and 
   assert.strictEqual(config.permission.read['*.env'], 'deny');
   assert.strictEqual(config.permission.bash['*'], 'ask');
   assert.strictEqual(config.permission.bash['git status*'], 'allow');
-  assert.strictEqual(config.permission.bash['git push*'], 'deny');
+  // 2026-08-20: git push は「取り消しにくいが正当用途も多い」ので deny → ask に緩和。
+  assert.strictEqual(config.permission.bash['git push*'], 'ask');
   assert.strictEqual(config.permission.bash['rm *'], 'deny');
   assert.deepStrictEqual(config.permission.skill, { '*': 'allow' });
   assert.strictEqual(config.permission.task, 'allow');
@@ -146,14 +152,52 @@ test('prefix allow list excludes commands that can delete or redirect', () => {
   assert.strictEqual(bash['git diff*'], 'allow');
 });
 
-test('gateway bypass and irreversible commands are denied', () => {
+test('irreversible commands stay denied after the 2026-08-20 relaxation', () => {
   const bash = buildOpenCodeConfig().permission.bash;
 
-  for (const pattern of ['curl *', 'wget *', 'git reset --hard*', 'chmod -R *']) {
+  // 取り消せない破壊だけを決定的 deny として残す。
+  for (const pattern of ['rm *', 'sudo *', 'git reset --hard*']) {
     assert.strictEqual(bash[pattern], 'deny', `${pattern} が禁止になっていない`);
   }
-  for (const pattern of ['rm *', 'sudo *', 'git push*', 'npm publish*']) {
-    assert.strictEqual(bash[pattern], 'deny');
+  // 安全フックを通らない裸起動は閉じる（安全ランチャーは下の回帰テストで ask を確認）。
+  for (const pattern of ['codex*', 'claude*', 'oc-safe*']) {
+    assert.strictEqual(bash[pattern], 'deny', `${pattern} が禁止になっていない`);
+  }
+});
+
+// --- 回帰: 2026-08-20 の実用最小限への緩和 --------------------------------------
+// 撤廃したもの（curl / wget / chmod -R）が「うっかり戻る」と、また正当用途だけが止まる。
+// 戻したくなったときは、この期待値ごと意図的に書き換えること。
+test('over-broad denies removed on 2026-08-20 do not come back', () => {
+  const bash = buildOpenCodeConfig().permission.bash;
+
+  // curl / wget: パッケージ全体は v1.12.0 で一律 deny を撤廃済みなのに、この経路だけ
+  // 残っていた。しかも前方一致グロブなので `cd . && curl` で回避でき、正当用途だけを
+  // 止める規則になっていた。リモートコード実行と秘密流出は policy 側が独立して deny する。
+  assert.strictEqual(bash['curl *'], undefined, 'curl の全面 deny が復活している');
+  assert.strictEqual(bash['wget *'], undefined, 'wget の全面 deny が復活している');
+  // chmod -R: `chmod -R u+rwX,go-rwx project`（権限を締める正当操作）まで止めていた。
+  // 危険な 777 / a+w / o+w は policy の dangerousCommandRegex が引き続き決定的 deny。
+  assert.strictEqual(bash['chmod -R *'], undefined, 'chmod -R の一律 deny が復活している');
+  // 公開系は deny ではなく確認制。
+  assert.strictEqual(bash['git push*'], 'ask');
+  assert.strictEqual(bash['npm publish*'], 'ask');
+});
+
+// 壁 A の解消: 安全ランチャーのシムは通り、裸起動は止まる。OpenCode は「最後に一致した
+// ルールが勝つ」ので、ask が deny より後ろに並んでいることまで見る（順番が逆だと
+// codex-safe が deny に飲まれて安全な形が起動できなくなる）。
+test('safe launcher shims are askable and ordered after the bare-binary denies', () => {
+  const bash = buildOpenCodeConfig().permission.bash;
+  const keys = Object.keys(bash);
+
+  assert.strictEqual(bash['codex-safe*'], 'ask');
+  assert.strictEqual(bash['claude-safe*'], 'ask');
+  for (const pattern of ['codex-safe*', 'claude-safe*']) {
+    assert.ok(
+      keys.indexOf(pattern) > keys.indexOf(pattern.replace('-safe', '')),
+      `${pattern} が裸の deny より前にあると、最後の一致で打ち消される`,
+    );
   }
 });
 
@@ -176,15 +220,22 @@ test('autoupdate is disabled and built-in primary agents are turned off', () => 
 });
 
 // --- 回帰: 環境変数での二重化 --------------------------------------------------
-test('enforced permission env mirrors the config deny floor', () => {
+test('enforced permission env mirrors the config floor, including order', () => {
   const enforced = buildEnforcedPermissionEnv();
   const bash = buildOpenCodeConfig().permission.bash;
 
   assert.strictEqual(enforced.external_directory, 'deny');
+  // 環境変数側と設定側で「同じパターンが同じ判定」であること（deny も ask も）。
   for (const [pattern, action] of Object.entries(enforced.bash)) {
-    assert.strictEqual(action, 'deny', `${pattern} は deny でなければならない`);
-    assert.strictEqual(bash[pattern], 'deny', `${pattern} が設定側の deny と一致しない`);
+    assert.ok(action === 'deny' || action === 'ask', `${pattern} は deny か ask のみ`);
+    assert.strictEqual(bash[pattern], action, `${pattern} が設定側の判定と一致しない`);
   }
+  // 環境変数側でも並び順が意味を持つ（最後に一致したルールが勝つ）。ask が deny より
+  // 後ろに無いと、環境変数経由で codex-safe が deny に飲まれる。
+  const envKeys = Object.keys(enforced.bash);
+  const lastEnvDeny = envKeys.reduce((acc, k, i) => (enforced.bash[k] === 'deny' ? i : acc), -1);
+  const firstEnvAsk = envKeys.findIndex((k) => enforced.bash[k] === 'ask');
+  assert.ok(firstEnvAsk > lastEnvDeny, 'ask が deny より前にあると最後の一致で打ち消される');
   assert.ok(Object.keys(enforced.bash).length >= 8);
 });
 

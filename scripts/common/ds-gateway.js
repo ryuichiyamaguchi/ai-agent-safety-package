@@ -15,6 +15,9 @@ const { recordGatewayStart } = require('./gateway-token.js');
 const DEFAULT_PORT = Number(process.env.DS_GATEWAY_PORT || 8788);
 const DEFAULT_UPSTREAM = process.env.DS_GATEWAY_UPSTREAM || 'https://api.deepseek.com/anthropic';
 const DEFAULT_AUTH_FILE = process.env.DS_GATEWAY_AUTH_FILE || '';
+// ランチャーが解決済みの実キーを渡してくる口（この行だけの環境変数として渡される）。
+// 解決の順序（環境変数 → OS の金庫 → 旧平文）はランチャー側の責務。
+const DEFAULT_UPSTREAM_KEY = process.env.DEEPSEEK_API_KEY || '';
 // 呼び出し元認証トークン。ランチャーが起動ごとに乱数で採番して環境変数で渡す。
 const DEFAULT_TOKEN = process.env.DS_GATEWAY_TOKEN || '';
 const DEFAULT_MAX_BODY = Number(process.env.DS_GATEWAY_MAX_BODY || 10 * 1024 * 1024); // 10MB（M2: ReDoS/メモリ枯渇の上限）
@@ -363,6 +366,7 @@ function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT,
                         tokenMap = createTokenMap(), denylistTerms = loadDenylistResult(),
                         maxBody = DEFAULT_MAX_BODY,
                         upstreamAuthFile = DEFAULT_AUTH_FILE,
+                        upstreamKey = DEFAULT_UPSTREAM_KEY,
                         authToken = DEFAULT_TOKEN,
                         workspace = DEFAULT_WORKSPACE } = {}) {
   const upstreamUrl = new URL(upstream);
@@ -372,6 +376,14 @@ function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT,
     throw new Error('ds-gateway: DS_GATEWAY_TOKEN is not set; refusing to start without caller auth (fail-closed)');
   }
   const authTokenHash = sha256(callerToken);
+  // DeepSeek の実キーの受け取り方。
+  //   ・秘密の解決（環境変数 → OS の金庫 → 旧平文）は「ランチャー側」で行う。gateway は
+  //     解決済みの値を DEEPSEEK_API_KEY として受け取るだけにする。鍵が金庫に移っても
+  //     gateway のコードは変わらない、という役割分担。
+  //   ・gateway 自身にホームの平文や金庫を探させてはいけない。この関数はテストや他の
+  //     ツールからライブラリとして呼ばれるため、周囲にある本物の鍵を勝手に拾って
+  //     upstream へ送ってしまう（実際に F-3 の回帰として検出された）。
+  //   ・DS_GATEWAY_AUTH_FILE は旧構成との互換のために残す（明示指定が最優先）。
   let upstreamAuthorization = '';
   if (upstreamAuthFile) {
     let key;
@@ -382,6 +394,12 @@ function createGateway({ upstream = DEFAULT_UPSTREAM, port = DEFAULT_PORT,
     }
     if (!key || /[\r\n]/.test(key)) {
       throw new Error('ds-gateway: upstream auth file is empty or invalid (fail-closed)');
+    }
+    upstreamAuthorization = `Bearer ${key}`;
+  } else if (upstreamKey) {
+    const key = String(upstreamKey).trim();
+    if (!key || /[\r\n]/.test(key)) {
+      throw new Error('ds-gateway: upstream key is empty or invalid (fail-closed)');
     }
     upstreamAuthorization = `Bearer ${key}`;
   }

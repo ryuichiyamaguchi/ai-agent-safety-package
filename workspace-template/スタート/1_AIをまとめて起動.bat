@@ -3,7 +3,7 @@ chcp 932 >nul
 setlocal enabledelayedexpansion
 :: ============================================================
 :: 1_AIをまとめて起動.bat
-::   AIをまとめて起動（Bouncer統合版）のランチャー。番号を選ぶと、その組み合わせで
+::   AIをまとめて起動（安全装置つき）のランチャー。番号を選ぶと、その組み合わせで
 ::   AIと見守りモニターをまとめて起動する。
 ::   メニューの並びは Mac 版 1_AIをまとめて起動.command と同じ。
 :: ============================================================
@@ -11,33 +11,31 @@ set "HERE=%~dp0"
 for %%I in ("%HERE%..") do set "WORKSPACE=%%~fI"
 set "TARGET=%WORKSPACE%\.ai-safety\hooks\windows\launch-integrated.ps1"
 if not exist "%TARGET%" (
-  echo Bouncer統合版がまだ準備されていません。
+  echo 安全装置（Bouncer）がまだ準備されていません。
   echo 先に「1_安全パッケージを準備」を実行してください。
   pause
   exit /b 1
 )
 
 echo.
-echo  AIをまとめて起動（Bouncer統合版）
+echo  AIをまとめて起動（安全装置つき）
 echo ============================================================
 echo  1 Codex   標準モード（ChatGPT 課金の人・推奨）
 echo  2 Claude  標準モード（Claude 課金の人・推奨）
 echo  3 Claude  AI補助モード（Claude 課金の人）
-echo  4 Claude  最大保護モード（Claude 課金の人・ローカルGemmaが必要）
-echo  5 OpenCode + DeepSeek V4 Pro（無課金の人・少額チャージ／送信検査・Web検索OFF）
-echo  6 OpenCode + DeepSeek V4 Pro（無課金の人・少額チャージ／Web検索を確認制でON）
-echo  7 d-claude + DeepSeek V4 Pro（Claudeの操作感・送信検査・監視ON）
-echo    ※7 は在校中のみ。卒業後は使えなくなります（OpenCode へ移行 → 説明書 docs/20_卒業後ガイド）
-echo  8 OpenCode + DeepSeek V4 Pro（前回の続きから開く）
+echo  4 OpenCode + DeepSeek V4 Flash（無課金の人・少額チャージ／送信検査・Web検索OFF）
+echo  5 OpenCode + DeepSeek V4 Flash（無課金の人・少額チャージ／Web検索を確認制でON）
+echo  6 d-claude + DeepSeek V4 Flash（Claudeの操作感・送信検査・監視ON）
+echo    ※6 は在校中のみ。卒業後は使えなくなります（OpenCode へ移行 → 説明書 docs/20_卒業後ガイド）
+echo  7 OpenCode + DeepSeek V4 Flash（前回の続きから開く）
 echo ============================================================
 echo.
-choice /c 12345678 /n /m "番号を選んでください [1-8]: "
+choice /c 1234567 /n /m "番号を選んでください [1-7]: "
 
-if errorlevel 8 goto opencode_resume
-if errorlevel 7 goto d_claude
-if errorlevel 6 goto opencode_web
-if errorlevel 5 goto opencode
-if errorlevel 4 goto claude_max
+if errorlevel 7 goto opencode_resume
+if errorlevel 6 goto d_claude
+if errorlevel 5 goto opencode_web
+if errorlevel 4 goto opencode
 if errorlevel 3 goto claude_assisted
 if errorlevel 2 goto claude
 goto codex
@@ -68,9 +66,6 @@ if defined PROJECT_DIR (
 ) else (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent opencode -Profile standard
 )
-goto done
-:claude_max
-powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent claude -Profile maximum
 goto done
 :claude_assisted
 powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%" -Workspace "%WORKSPACE%" -Agent claude -Profile assisted

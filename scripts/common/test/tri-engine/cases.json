@@ -264,6 +264,13 @@
       "why": "付与先省略（過剰検知の確認）"
     },
     {
+      "id": "chmod-r-tighten-ok",
+      "group": "chmod の各形 (cycle1 Y-3)",
+      "command": "chmod -R u+rwX,go-rwx project",
+      "expect": "pass",
+      "why": "2026-08-20 追加。権限を『締める』側の再帰 chmod は正当操作なので止めない。OpenCode 経路にだけ残っていた `chmod -R *` の一律 deny（-R が付いていたら中身に関係なく止める）を同日に撤廃した回帰検査。危険な向き（777 / 666 / a+w / o+w）は上の block ケースが引き続き固定する"
+    },
+    {
       "id": "env-plain",
       "group": ".env の各形",
       "command": "cat .env",

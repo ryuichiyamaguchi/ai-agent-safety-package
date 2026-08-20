@@ -3,8 +3,8 @@
 //
 // 守りたいこと:
 //   1. スタートフォルダが新番号体系（基本 1..12・上級 1..8+9、重複なし）で揃っている
-//   2. AI ツール更新ボタンが mac/win 両方にあり、Codex/OpenCode は latest、
-//      Claude Code は動作確認済み版 (tested-tool-versions.json = SSOT) に固定される
+//   2. AI ツール更新ボタンが mac/win 両方にあり、Codex / Claude Code / OpenCode の
+//      3 つとも latest 追従になっている (2026-08-20 に Claude Code の固定を撤廃)
 //   3. agy はボタン更新の対象外（公式の自動更新に任せる）
 //   4. install が旧名ボタンを掃除する（旧新併存による番号重複を再発させない）。
 //      掃除対象は既知の旧名だけで、受講者の自作ファイルは消さない
@@ -37,11 +37,24 @@ const EXPECTED_BOTH = [
   '（上級）2_DeepSeek-Claudeを起動', // 山口さん判断 (2026-08-18): d-claude は廃止しない
   '（上級）3_モニターをコンソールで見る',
   '（上級）4_ステータスラインを入れる',
-  '（上級）5_危険コマンドをClaude全体で禁止',
-  '（上級）6_グローバル禁止を解除',
+  '（上級）5_このPC全体に最低限の安全設定を入れる',
+  '（上級）6_PC全体の安全設定を解除',
   '（上級）7_DeepSeekキーを削除',
   '（上級）8_Bufferのキーを登録',
   '（上級）9_プラグインの置き場を開く',
+  // v1.17.0 で追加した上級枠。10/11 はマスキングの対（伏せる↔戻す）を隣り合わせに置く。
+  '（上級）10_コピーした文章から秘密を伏せる',
+  '（上級）11_伏せた文章を元に戻す',
+  // 12/13 は「登録」ボタン（6・8）に対する削除ボタン。DeepSeek だけ削除があって
+  // Gemini・Buffer に無い非対称を解消したもの。
+  '（上級）12_AIコーチのキーを削除',
+  '（上級）13_Bufferのキーを削除',
+  // 14 は卒業後用。任意のフォルダに保護一式を入れて「安全な作業フォルダ」にする。
+  '（上級）14_新しい作業フォルダを安全にする',
+  // 15 は長時間おまかせモード。壁（Claude の純正サンドボックス）がある環境でしか
+  // 起動しない設計のため実質 Mac 専用だが、Windows でも「なぜ使えないか」を出す必要が
+  // あるので .bat も置く（押しても起動しないのが仕様）。
+  '（上級）15_長時間おまかせモードで起動',
 ];
 const EXPECTED_WIN_ONLY = ['11_PowerShellを開く', '12_作業フォルダを開く'];
 
@@ -68,20 +81,38 @@ test('スタートフォルダは新番号体系どおりで、重複・欠番�
 });
 
 // ── 2. 動作確認済みバージョン表 (SSOT) ──────────────────────────────────
-test('tested-tool-versions.json が SSOT として存在し、policy の版と一致する', () => {
+// 2026-08-20 に意味が変わったテスト。以前は「claudeCode は semver で、policy の
+// testedClaudeCodeVersion と一致すること」を求めていたが、Claude Code 純正サンドボックスを
+// 主防御に据える方針転換にともない**固定インストールを廃止**したので、
+//   ・claudeCode は "latest"
+//   ・policy には testedClaudeCodeVersion キーが**無い**こと（残っていると版差警告が復活する）
+//   ・導入・更新・案内文がすべて @latest を指すこと
+// を代わりに固定する。固定版に戻すときは、この期待値ごと意図的に書き換えること。
+test('tested-tool-versions.json が SSOT として存在し、全ツールが最新版追従になっている', () => {
   const versions = JSON.parse(read('configs/tested-tool-versions.json'));
-  assert.match(versions.claudeCode, /^\d+\.\d+\.\d+$/);
+  assert.strictEqual(versions.claudeCode, 'latest',
+    'Claude Code は最新版追従（2026-08-20 に固定を撤廃）');
   assert.strictEqual(versions.codex, 'latest');
   assert.strictEqual(versions.opencode, 'latest');
+  // 最後に実測した版は記録として残す（固定ではないので semver であることだけ見る）。
+  assert.match(versions.claudeCodeLastVerified, /^\d+\.\d+\.\d+$/);
 
-  // 既存の SSOT（policy の testedClaudeCodeVersion）と食い違うと診断と更新で別の版を指す。
+  // policy 側にピンが残っていないこと。残っていると launch-claude-safe / 診断 が
+  // 「版ちがい」警告を毎回出すドリフトに戻る。
   const policy = JSON.parse(read('policy/safety-policy.json'));
-  assert.strictEqual(versions.claudeCode, policy.testedClaudeCodeVersion,
-    'configs/tested-tool-versions.json と policy/safety-policy.json の Claude Code 版が食い違っている');
+  assert.strictEqual(policy.testedClaudeCodeVersion, undefined,
+    'policy に testedClaudeCodeVersion が残っている（固定インストールは 2026-08-20 に撤廃）');
 
-  // 案内文に焼き込まれた版とも一致していること（値の一致チェック）。
-  assert.ok(read('scripts/macos/launch-claude-safe.sh').includes(`claude-code@${versions.claudeCode}`));
-  assert.ok(read('scripts/windows/launch-claude-safe.ps1').includes(`claude-code@${versions.claudeCode}`));
+  // 導入・案内文もすべて @latest を指していること（固定版の直書きが残っていないこと）。
+  for (const file of [
+    'scripts/macos/launch-claude-safe.sh',
+    'scripts/windows/launch-claude-safe.ps1',
+    '0_AIツールをまとめて入れる-Mac.command',
+  ]) {
+    const text = read(file);
+    assert.ok(text.includes('claude-code@latest'), `${file} が @latest を指していない`);
+    assert.ok(!/claude-code@\d+\.\d+\.\d+/.test(text), `${file} に固定版の直書きが残っている`);
+  }
 
   // install が workspace へ配置すること（ボタンの実体が読む場所）。
   assert.match(read('scripts/macos/install.sh'), /tested-tool-versions\.json/);
@@ -89,12 +120,16 @@ test('tested-tool-versions.json が SSOT として存在し、policy の版と�
 });
 
 // ── 3. AI ツール更新スクリプト（mac / win 対称） ─────────────────────────
-test('update-ai-tools.sh: Codex/OpenCode は latest・Claude は固定版・agy は対象外', () => {
+// 2026-08-20: Claude Code の固定版インストールを撤廃したので、期待値を
+// 「pin 版で入れる／latest にしてはいけない」から「3 ツールとも latest 追従」へ変更した。
+test('update-ai-tools.sh: Codex/Claude/OpenCode は latest・agy は対象外', () => {
   const sh = read('scripts/macos/update-ai-tools.sh');
   assert.match(sh, /@openai\/codex@latest/);
   assert.match(sh, /opencode-ai@latest/);
-  assert.match(sh, /@anthropic-ai\/claude-code@\$claude_pin/, 'Claude Code は SSOT の pin 版で入れること');
-  assert.ok(!/claude-code@latest/.test(sh), 'Claude Code を latest にしてはいけない');
+  assert.match(sh, /@anthropic-ai\/claude-code@\$claude_pin/, 'Claude Code は SSOT の値で入れること');
+  assert.ok(!/claude_pin="\$\(json_value claudeCode\)"[\s\S]{0,400}?Claude Code の更新はスキップ/.test(sh),
+    '表が無いときに Claude Code の更新を丸ごとスキップする分岐は撤廃済み（latest にフォールバックする）');
+  assert.match(sh, /claude_pin="latest"/, '表が読めないときは latest にフォールバックすること');
   assert.match(sh, /command -v/, '未インストールのツールは存在確認でスキップすること');
   assert.ok(!/npm install -g\s+(agy|antigravity)/i.test(sh), 'agy をボタンから入れ直さないこと');
   assert.match(sh, /agy \(AntiGravity\) はこのボタンでは更新しません/);
@@ -111,8 +146,9 @@ test('update-ai-tools.ps1: 内容が mac 版と対称で、PowerShell 5.1 の作
   assert.match(ps, /\r\n/, '.ps1 は CRLF であること');
   assert.match(ps, /@openai\/codex@latest/);
   assert.match(ps, /opencode-ai@latest/);
-  assert.match(ps, /@anthropic-ai\/claude-code@/, 'Claude Code は pin 版で入れること');
-  assert.ok(!/claude-code@latest/.test(ps), 'Claude Code を latest にしてはいけない');
+  assert.match(ps, /@anthropic-ai\/claude-code@/, 'Claude Code は SSOT の値で入れること');
+  assert.match(ps, /\$claudePin = "latest"/, '表が読めないときは latest にフォールバックすること');
+  assert.ok(!/claude-code@\d+\.\d+\.\d+/.test(ps), '固定版の直書きが残っていないこと');
   assert.match(ps, /Get-Command/, '未インストールのツールは存在確認でスキップすること');
   assert.ok(!/npm install -g\s+(agy|antigravity)/i.test(ps), 'agy をボタンから入れ直さないこと');
   assert.match(ps, /agy \(AntiGravity\) はこのボタンでは更新しません/);
@@ -199,21 +235,25 @@ test('install 再実行で旧名ボタンは消え、受講者の自作ファイ
     '動作確認済みバージョン表が workspace に配置されること');
 });
 
-// ── 6. 統合版メニューの課金条件併記（選択肢の順序・機能は不変） ──────────
-test('統合版メニューは課金条件を併記し、番号と起動先は従来どおり', () => {
+// ── 6. 統合版メニューの課金条件併記 ──────────────────────────────────
+// v1.17.0: ローカル Gemma が要る「最大保護モード」(旧 4 番) を削除し、以降を 1 つ
+// 繰り上げた（旧 5-8 → 新 4-7）。番号を検査するのはここと opencode-launcher.test.js。
+test('統合版メニューは課金条件を併記し、番号と起動先が一致する', () => {
   const cmd = read('workspace-template/スタート/1_AIをまとめて起動.command');
   assert.match(cmd, /1\) Codex.*ChatGPT 課金/);
   assert.match(cmd, /2\) Claude.*Claude 課金/);
-  assert.match(cmd, /5\) OpenCode.*無課金/);
-  // 番号→起動先の対応は不変であること。
+  assert.match(cmd, /4\) OpenCode.*無課金/);
+  // 番号→起動先の対応。
   assert.match(cmd, /1\) exec bash "\$LAUNCHER" "\$WORKSPACE" codex standard/);
   assert.match(cmd, /2\) exec bash "\$LAUNCHER" "\$WORKSPACE" claude standard/);
-  assert.match(cmd, /7\) exec bash "\$LAUNCHER" "\$WORKSPACE" d-claude standard/, 'd-claude（7 番）は維持すること');
+  assert.match(cmd, /6\) exec bash "\$LAUNCHER" "\$WORKSPACE" d-claude standard/, 'd-claude（6 番）は維持すること');
+  assert.doesNotMatch(cmd, /最大保護/, '廃止した最大保護モードが復活していないこと');
 
   const bat = readSjis('workspace-template/スタート/1_AIをまとめて起動.bat');
   assert.match(bat, /1 Codex.*ChatGPT 課金/);
   assert.match(bat, /2 Claude.*Claude 課金/);
-  assert.match(bat, /5 OpenCode.*無課金/);
-  assert.match(bat, /choice \/c 12345678/, '選択肢の数を変えないこと');
-  assert.match(bat, /-Agent d-claude -Profile standard/, 'd-claude（7 番）は維持すること');
+  assert.match(bat, /4 OpenCode.*無課金/);
+  assert.match(bat, /choice \/c 1234567/, '選択肢は 7 つ');
+  assert.match(bat, /-Agent d-claude -Profile standard/, 'd-claude（6 番）は維持すること');
+  assert.doesNotMatch(bat, /最大保護/, '廃止した最大保護モードが復活していないこと');
 });

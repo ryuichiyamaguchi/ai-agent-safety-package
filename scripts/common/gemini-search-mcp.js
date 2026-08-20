@@ -27,14 +27,11 @@ let resolveApiKey, GEMINI_HOST;
 try {
   ({ resolveApiKey, GEMINI_HOST } = require('./gemini-client.js'));
 } catch (_e) {
-  // gemini-client が隣に無い場合のフォールバック（キーは env / 既定ファイルから解決）。
-  const fs = require('fs'), os = require('os'), path = require('path');
+  // gemini-client が隣に無い場合のフォールバック。順序は本体と同じ
+  // 「環境変数 → OS の金庫 → 旧平文」に揃える（独自順序を持たせない）。
   GEMINI_HOST = 'generativelanguage.googleapis.com';
-  resolveApiKey = function () {
-    if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
-    if (process.env.GOOGLE_API_KEY) return process.env.GOOGLE_API_KEY;
-    try { return fs.readFileSync(path.join(os.homedir(), '.ai-safety', 'gemini-api-key.txt'), 'utf8').trim(); } catch { return null; }
-  };
+  const store = require('./secret-store.js');
+  resolveApiKey = function () { return store.resolve('gemini').value; };
 }
 
 const SERVER_NAME = 'gemini-search';
@@ -51,7 +48,7 @@ function groundedSearch(query) {
   return new Promise((resolve) => {
     const key = resolveApiKey();
     if (!key) {
-      return resolve({ ok: false, message: 'Gemini API キーが未設定です（~/.ai-safety/gemini-api-key.txt）。' });
+      return resolve({ ok: false, message: 'Gemini API キーが未設定です（「6_AIコーチのキーを登録」で登録してください）。' });
     }
     const body = JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: String(query).slice(0, MAX_QUERY_CHARS) }] }],

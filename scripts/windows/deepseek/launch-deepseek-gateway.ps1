@@ -13,6 +13,31 @@ $keyFile = Join-Path $env:USERPROFILE '.deepseek-claude\auth'
 # AI コーチ(モニター)に d-claude セッションを伝える目印(別プロセスなのでファイル方式)。
 $coachLogDir = if ($env:AI_SAFE_LOG_DIR) { $env:AI_SAFE_LOG_DIR } else { Join-Path $env:USERPROFILE '.ai-safety\logs' }
 $coachMarker = Join-Path $coachLogDir 'coach-engine'
+# 秘密の解決（順序は全箇所共通: 環境変数 → OS の金庫(DPAPI) → 旧平文）。
+# DPAPI の復号は PowerShell 5.1 でも動く Marshal 経由で書く
+# （ConvertFrom-SecureString -AsPlainText は PowerShell 7.0 以降なので使わない）。
+# 金庫に入っている値は "v1:" + base64(UTF-8) の封筒に包んである。
+function Read-AiSafeSecret {
+  param([string]$DpapiName, [string]$EnvName, [string]$LegacyFile)
+  if ($EnvName) {
+    $v = [Environment]::GetEnvironmentVariable($EnvName)
+    if ($v -and $v.Trim()) { return $v.Trim() }
+  }
+  $p = Join-Path $env:USERPROFILE (Join-Path '.ai-safety' $DpapiName)
+  if (Test-Path -LiteralPath $p -PathType Leaf) {
+    try {
+      $ss = ConvertTo-SecureString ((Get-Content -LiteralPath $p -Raw).Trim())
+      $b = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss))
+      if ($b.StartsWith('v1:')) { $b = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b.Substring(3))) }
+      if ($b -and $b.Trim()) { return $b.Trim() }
+    } catch { }
+  }
+  if ($LegacyFile -and (Test-Path -LiteralPath $LegacyFile -PathType Leaf)) {
+    $t = ([System.IO.File]::ReadAllText($LegacyFile)).Trim()
+    if ($t) { return $t }
+  }
+  return ''
+}
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   Write-Host "[ERROR] node not found. Claude Code requires Node.js."; exit 1
@@ -26,8 +51,10 @@ if (-not (Test-Path $gatewayTokenJs)) {
 if (-not (Test-Path $launchClaude)) {
   Write-Host "[ERROR] launch-claude-safe.ps1 not found: $launchClaude"; exit 1
 }
-# 実キーは Gateway 子プロセスだけが読む (Claude Code 側には渡さない) ので、ここで存在を確かめる。
-if (-not (Test-Path -LiteralPath $keyFile -PathType Leaf) -or (Get-Item -LiteralPath $keyFile).Length -eq 0) {
+# 実キーは Gateway 子プロセスだけが読む (Claude Code 側には渡さない) ので、ここで解決して確かめる。
+# 順序は「環境変数 → 金庫(deepseek.dpapi) → 旧平文 .deepseek-claude\auth」。
+$dsKey = Read-AiSafeSecret -DpapiName 'deepseek.dpapi' -EnvName 'DEEPSEEK_API_KEY' -LegacyFile $keyFile
+if (-not $dsKey) {
   Write-Host "【エラー】DeepSeek APIキーが未登録です。"
   Write-Host "  先に「登録-初回だけ」を実行してから、もう一度起動してください。"
   exit 1
@@ -133,9 +160,10 @@ if (-not $gatewayReused) {
     $env:DS_GATEWAY_PORT = $candidate
     # 実キーと合言葉は gateway 子プロセスにだけ渡し、spawn 後は自分の環境から消す。
     $env:DS_GATEWAY_TOKEN = $gatewayToken
-    $env:DS_GATEWAY_AUTH_FILE = $keyFile
+    # ファイルパスではなく値そのものを渡すので、金庫にしまった鍵でもそのまま動く。
+    $env:DEEPSEEK_API_KEY = $dsKey
     $gw = Start-Process node -ArgumentList @($gatewayJs) -PassThru -WindowStyle Hidden -RedirectStandardOutput $gatewayLog -RedirectStandardError "$gatewayLog.err"
-    Remove-Item Env:\DS_GATEWAY_TOKEN, Env:\DS_GATEWAY_AUTH_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:\DS_GATEWAY_TOKEN, Env:\DEEPSEEK_API_KEY -ErrorAction SilentlyContinue
 
     # healthz の応答だけで判断してはいけない。ポートが他に取られていた場合、自分の gateway は
     # bind に失敗して終了するが、その同じポートで「別の gateway」(例: 別ワークスペースから

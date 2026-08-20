@@ -100,6 +100,19 @@ Line ""
 # 4) DeepSeek キー（「登録したのに登録しろと言われる」の確認）
 Line "■ 4. DeepSeek キーの状態"
 $auth = Join-Path $up ".deepseek-claude\auth"
+$dpapi = Join-Path $up ".ai-safety\deepseek.dpapi"
+if (Test-Path -LiteralPath $dpapi) {
+    # v1.17.0: 金庫(DPAPI)に入っている。中身は復号できるかどうかだけを見て、値も長さも出さない。
+    try {
+        $ss = ConvertTo-SecureString ((Get-Content -LiteralPath $dpapi -Raw).Trim())
+        $b = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss))
+        if ($b.StartsWith('v1:')) { $b = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b.Substring(3))) }
+        if ($b -and $b.Trim()) { OK ("金庫に登録済み（" + $dpapi + "）。中身は暗号化されています") }
+        else { BAD ("金庫のファイルはあるが中身が空: " + $dpapi) }
+    } catch {
+        BAD ("金庫のファイルを復号できません（PC を替えた／Windows を入れ直した可能性）: " + $dpapi + " → キーを作り直して登録し直してください")
+    }
+}
 if (Test-Path -LiteralPath $auth) {
     $bytes = [System.IO.File]::ReadAllBytes($auth)
     $txt = [System.IO.File]::ReadAllText($auth)
@@ -110,7 +123,18 @@ if (Test-Path -LiteralPath $auth) {
     elseif ($txt.Trim() -ne $txt) { WARN "前後に空白/改行がある → 無効トークンになりうる" }
     elseif ($txt -notmatch '^sk-') { WARN ("中身が sk- で始まらない（先頭: '" + $txt.Substring(0,[Math]::Min(4,$txt.Length)) + "'）") }
     else { OK ("キー形式OK（sk-…、" + $txt.Length + "文字）") }
-} else { BAD ("キーファイルが無い: " + $auth + " → 別ユーザー(管理者実行)で保存された可能性") }
+} elseif (-not (Test-Path -LiteralPath $dpapi)) {
+    BAD ("キーが見つかりません（金庫 " + $dpapi + " / ファイル " + $auth + " のどちらにも無い） → 「登録-初回だけ」を実行してください")
+}
+if (Test-Path -LiteralPath $auth) {
+    WARN ("平文のキーファイルがまだ残っています: " + $auth + " → 「キー削除」を実行するか、登録し直すと金庫へ移ります")
+}
+# 平文の残骸は、環境変数（1Password の op run など）の有無に関係なく必ず見る。
+foreach ($leftover in @((Join-Path $up ".ai-safety\gemini-api-key.txt"), (Join-Path $up ".ai-safety\gemini-api-key-paid.txt"), (Join-Path $up ".ai-safety\buffer-api-key.txt"))) {
+    if (Test-Path -LiteralPath $leftover) {
+        WARN ("平文のキーファイルが残っています: " + $leftover)
+    }
+}
 Line ""
 
 # 5) d-claude コマンド登録（PATH）

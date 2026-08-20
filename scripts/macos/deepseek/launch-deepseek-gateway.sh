@@ -21,13 +21,32 @@ KEY_FILE="$HOME/.deepseek-claude/auth"
 # env では渡らない＝LOG_DIR にファイルを置く。モニターはこの目印があるとき Gemini へコマンド本文を
 # 送らず分類結果だけ送る(redact)＋UI 明示。終了時に必ず消す(消し忘れ対策にモニター側も鮮度を見る)。
 COACH_MARKER="${AI_SAFE_LOG_DIR:-$HOME/.ai-safety/logs}/coach-engine"
+# 秘密の解決（順序は全箇所共通: 環境変数 → OS の金庫 → 旧平文）。
+# 金庫は Mac のキーチェーン。値は "v1:" + base64 の封筒に包んで入れてある。
+read_secret() { # $1=金庫の service 名, $2=環境変数名(省略可), $3=旧平文ファイル(省略可)
+  if [ -n "${2:-}" ]; then
+    _v="${!2:-}"
+    if [ -n "$_v" ]; then printf '%s' "$_v"; return 0; fi
+  fi
+  if [ -x /usr/bin/security ]; then
+    _v="$(/usr/bin/security find-generic-password -a "$USER" -s "$1" -w 2>/dev/null | sed 's/^v1://' | base64 --decode 2>/dev/null)"
+    if [ -n "$_v" ]; then printf '%s' "$_v"; return 0; fi
+  fi
+  if [ -n "${3:-}" ] && [ -s "$3" ]; then
+    tr -d '\r\n' < "$3"; return 0
+  fi
+  return 1
+}
+
 
 command -v node >/dev/null 2>&1 || { echo "【エラー】node が見つかりません。Claude Code には Node が必要です。"; exit 1; }
 [ -f "$GATEWAY_JS" ] || { echo "【エラー】ds-gateway.js が見つかりません: $GATEWAY_JS"; exit 1; }
 [ -f "$GATEWAY_TOKEN_JS" ] || { echo "【エラー】gateway-token.js が見つかりません: $GATEWAY_TOKEN_JS"; exit 1; }
 [ -f "$LAUNCH_CLAUDE" ] || { echo "【エラー】launch-claude-safe.sh が見つかりません: $LAUNCH_CLAUDE"; exit 1; }
-# 実キーは Gateway 子プロセスだけが読む（Claude Code 側には渡さない）ので、ここで存在を確かめる。
-[ -s "$KEY_FILE" ] || {
+# 実キーは Gateway 子プロセスだけが読む（Claude Code 側には渡さない）ので、ここで解決して確かめる。
+# 順序は「環境変数 → 金庫(ai-safety.deepseek) → 旧平文 ~/.deepseek-claude/auth」。
+DS_KEY="$(read_secret ai-safety.deepseek DEEPSEEK_API_KEY "$KEY_FILE" || true)"
+[ -n "$DS_KEY" ] || {
   echo "【エラー】DeepSeek APIキーが未登録です。"
   echo "  先に「登録-初回だけ」を実行してから、もう一度起動してください。"
   exit 1
@@ -161,11 +180,12 @@ if [ "$GATEWAY_REUSED" -ne 1 ]; then
     stop_stale_gateway "$candidate"
     # 今回の起動より前のログ行は見ない（追記式のため）。
     _log_from=$(( $(wc -l < "$GATEWAY_LOG" 2>/dev/null || echo 0) + 1 ))
-    # 実キー(DS_GATEWAY_AUTH_FILE)と合言葉(DS_GATEWAY_TOKEN)は、この行だけの環境変数として
+    # 実キー(DEEPSEEK_API_KEY)と合言葉(DS_GATEWAY_TOKEN)は、この行だけの環境変数として
     # gateway 子プロセスに渡す（export しないので Claude Code 側の環境には残らない）。
+    # ファイルパスではなく値そのものを渡すので、金庫にしまった鍵でもそのまま動く。
     DS_GATEWAY_PORT="$candidate" \
     DS_GATEWAY_TOKEN="$GATEWAY_TOKEN" \
-    DS_GATEWAY_AUTH_FILE="$KEY_FILE" \
+    DEEPSEEK_API_KEY="$DS_KEY" \
       node "$GATEWAY_JS" >>"$GATEWAY_LOG" 2>&1 &
     GW_PID=$!
     if wait_for_own_gateway "$candidate" "$_log_from"; then

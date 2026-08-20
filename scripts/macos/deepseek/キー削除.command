@@ -12,12 +12,23 @@ set -u
 
 AUTH_FILE="$HOME/.deepseek-claude/auth"
 
+SERVICE="ai-safety.deepseek"
+FOUND=0
+
 echo ""
 echo "PC 側の DeepSeek キーを削除します..."
+# 金庫（キーチェーン）側
+if [ -x /usr/bin/security ] && /usr/bin/security delete-generic-password -a "$USER" -s "$SERVICE" >/dev/null 2>&1; then
+  echo "金庫から削除しました（キーチェーンの「$SERVICE」）"
+  FOUND=1
+fi
+# 旧平文側（移行前の PC・移行に失敗した PC のために必ず両方見る）
 if [ -f "$AUTH_FILE" ]; then
   rm -f "$AUTH_FILE"
   echo "削除しました: $AUTH_FILE"
-else
+  FOUND=1
+fi
+if [ "$FOUND" -eq 0 ]; then
   echo "登録済みのキーは見つかりませんでした（既に削除済みかもしれません）。"
 fi
 # 空になった保管フォルダも片付ける（中身が無いときだけ）

@@ -12,25 +12,18 @@ function read(rel) {
   return fs.readFileSync(path.join(root, rel), 'utf8');
 }
 
-test('Windows Bouncer runner binds local services and cleans up only what it started', () => {
-  const script = read('bouncer-gateway/scripts/run-local.ps1');
-  assert.match(script, /127\.0\.0\.1/);
-  assert.match(script, /bouncer-gemma/);
-  assert.match(script, /PYTHONPATH/);
-  assert.match(script, /finally/);
-  assert.match(script, /lms.*unload/i);
-  assert.match(script, /server stop/i);
-});
-
-test('Windows integrated launcher has standard no-LLM and maximum local-Bouncer profiles', () => {
+// v1.17.0: ローカル LLM（Gemma）必須の「最大保護モード」と、その検査 Gateway
+// (bouncer-gateway/) は廃止した。受講生の PC ではほぼ動かせないのにメニューに
+// 出ていたため。ここでは「消えたまま戻ってこないこと」も一緒に見る。
+test('Windows integrated launcher has standard and assisted profiles only', () => {
   const script = read('scripts/windows/launch-integrated.ps1');
   assert.match(script, /ValidateSet\('codex','claude','opencode','d-claude'\)/);
-  assert.match(script, /ValidateSet\('standard','assisted','maximum'\)/);
+  assert.match(script, /ValidateSet\('standard','assisted'\)/);
   assert.match(script, /standard/);
-  assert.match(script, /maximum/);
-  assert.match(script, /run-local\.ps1/);
-  assert.match(script, /127\.0\.0\.1:8787\/bouncer\/health/);
-  assert.match(script, /BOUNCER_INTEGRATED_MODE/);
+  assert.doesNotMatch(script, /maximum/);
+  assert.doesNotMatch(script, /run-local\.ps1/);
+  assert.doesNotMatch(script, /8787/);
+  assert.doesNotMatch(script, /BOUNCER_INTEGRATED_MODE/);
   assert.match(script, /AI_SAFE_DRY_RUN/);
   assert.match(script, /'d-claude:standard'/);
   assert.match(script, /launch-deepseek-safe[.]ps1/);

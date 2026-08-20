@@ -9,12 +9,7 @@
     "disableBypassPermissionsMode": "disable",
     "allow": [
       "Read(./**)",
-      "LS(./**)",
-      "Glob(./**)",
-      "Grep(./**)",
       "Edit(./**)",
-      "Write(./**)",
-      "MultiEdit(./**)",
       "Bash(ls*)",
       "Bash(pwd*)",
       "Bash(cat *)",
@@ -96,9 +91,6 @@
       "WebFetch(domain:transfer.sh)",
       "WebFetch(domain:file.io)",
       "WebFetch(domain:anonfiles.com)",
-      "Write(**/.env)",
-      "Write(**/.env.*)",
-      "Write(**/.ssh/**)",
       "Edit(**/.env)",
       "Edit(**/.env.*)",
       "Edit(**/.ssh/**)",
@@ -113,9 +105,58 @@
       "Read(**/.npmrc)",
       "Read(**/.pypirc)",
       "Read(**/.ai-safety/**)",
-      "Write(**/.ai-safety/**)",
-      "Edit(**/.ai-safety/**)"
+      "Edit(**/.ai-safety/**)",
+      "Read(**/.deepseek-claude/**)",
+      "Edit(**/.deepseek-claude/**)"
     ]
+  },
+  "_comment_sandbox": "Claude Code 純正サンドボックス（macOS / Linux / WSL2 のみ。ネイティブ Windows は公式非対応なので settings.windows.json には書かない）。macOS では /usr/bin/sandbox-exec（Seatbelt）が OS カーネル側で境界を強制する。目的は『縛りを増やすこと』ではなく『縛りを減らすこと』: autoAllowBashIfSandboxed により、サンドボックスの中で完結するコマンドは確認ダイアログ無しで実行される（＝実用性が上がる）。⚠️ 重大な性質: サンドボックスが止めるのは『作業フォルダの外への書き込み』と『許可外ドメインへの通信』だけで、読み取りは設計上止まらない（Seatbelt プロファイルに (allow file-read*) が入っている。実測でホーム直下のファイルと /etc/hosts が読めた）。したがって秘密の読み取りを止めている hook（guard-write.sh / guard-webfetch.sh / guard-post-output.sh / guard-bash.sh）は 1 本も外していない。とくに guard-write は Write/Edit ツール（サンドボックスは Bash 子プロセスにしか効かない）、guard-webfetch は WebFetch（in-process ツールなので allowedDomains の対象外）、guard-post-output は出力側の最後の砦。設定していないキーについて: failIfUnavailable / strictAllowlist / allowUnsandboxedCommands は入れていない。failIfUnavailable=true はサンドボックスが起動できない環境で Claude 自体が起動しなくなり受講者が詰むため（起動できなかった場合は v1.16.0 と同じ hook のみの守りに落ちるだけで、無防備にはならない）。strictAllowlist / allowUnsandboxedCommands はプロジェクト設定から効かない可能性が公式に示唆されており、効かない設定を書いて『効いているつもり』を作らないため。",
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "statsig.anthropic.com",
+        "docs.anthropic.com",
+        "code.claude.com",
+        "console.anthropic.com",
+        "api.deepseek.com",
+        "platform.deepseek.com",
+        "generativelanguage.googleapis.com",
+        "ai.google.dev",
+        "aistudio.google.com",
+        "gemini.google.com",
+        "cloud.google.com",
+        "image.pollinations.ai",
+        "pollinations.ai",
+        "mcp.buffer.com",
+        "developers.openai.com",
+        "platform.openai.com",
+        "api.openai.com",
+        "github.com",
+        "api.github.com",
+        "raw.githubusercontent.com",
+        "objects.githubusercontent.com",
+        "codeload.github.com",
+        "docs.github.com",
+        "registry.npmjs.org",
+        "pypi.org",
+        "files.pythonhosted.org"
+      ],
+      "deniedDomains": [
+        "gist.github.com",
+        "gist.githubusercontent.com",
+        "*.pages.dev",
+        "*.workers.dev",
+        "pastebin.com",
+        "hastebin.com",
+        "0x0.st",
+        "transfer.sh",
+        "file.io",
+        "anonfiles.com"
+      ]
+    }
   },
   "hooks": {
     "UserPromptSubmit": [

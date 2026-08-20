@@ -23,9 +23,10 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM Claude Code は動作確認済みの版 (2.1.201) に固定する。最新版だと --help のフラグ構成が変わり
-REM d-claude の機能が黙ってスキップされ劣化する事故を防ぐ（期待版の SSOT=policy/safety-policy.json testedClaudeCodeVersion）。
-for %%P in (@openai/codex @anthropic-ai/claude-code@2.1.201 opencode-ai) do (
+REM 2026-08-20: Claude Code のバージョン固定 (@2.1.201) をやめ、最新版を入れる。
+REM 理由 = 純正サンドボックスを使う方針に変えたため、古い版に固定すると純正機能を使えない。
+REM 版差でフラグ検出が外れても launch-claude-safe.ps1 が --help を見て付け外しするので起動は壊れない。
+for %%P in (@openai/codex @anthropic-ai/claude-code@latest opencode-ai) do (
   echo ------------------------------------------------------------
   echo 導入中: %%P
   call npm install -g %%P

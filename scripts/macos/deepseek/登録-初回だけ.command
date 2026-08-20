@@ -29,13 +29,39 @@ if [ -z "${KEY:-}" ]; then
   exit 1
 fi
 
-mkdir -p "$AUTH_DIR"
-umask 077
-printf '%s\n' "$KEY" > "$AUTH_FILE"
-chmod 600 "$AUTH_FILE"
+# v1.17.0 から、キーは Mac の金庫（キーチェーンの「ai-safety.deepseek」）にしまいます。
+SERVICE="ai-safety.deepseek"
+SAVED=""
+
+if [ -x /usr/bin/security ]; then
+  # 金庫に入れる値は "v1:" + base64 の封筒に包む（非 ASCII で 16 進表示になるのを防ぐ）。
+  ENVELOPE="v1:$(printf '%s' "$KEY" | base64 | tr -d '\n')"
+  # -w を値なしで末尾に置くと対話プロンプトになる。標準入力から本文と確認の2回を流し込む。
+  if printf '%s\n%s\n' "$ENVELOPE" "$ENVELOPE" \
+    | /usr/bin/security add-generic-password -U -a "$USER" -s "$SERVICE" -w >/dev/null 2>&1; then
+    # 書いた直後に読み戻して一致を検証する。
+    BACK="$(/usr/bin/security find-generic-password -a "$USER" -s "$SERVICE" -w 2>/dev/null \
+      | sed 's/^v1://' | base64 --decode 2>/dev/null)"
+    if [ "$BACK" = "$KEY" ]; then
+      SAVED="keychain"
+      rm -f "$AUTH_FILE" 2>/dev/null || true
+    fi
+  fi
+fi
+
+if [ -z "$SAVED" ]; then
+  mkdir -p "$AUTH_DIR"
+  umask 077
+  printf '%s\n' "$KEY" > "$AUTH_FILE"
+  chmod 600 "$AUTH_FILE"
+fi
 
 echo ""
-echo "登録できました。保存先: $AUTH_FILE （権限 600 = 自分だけ読める）"
+if [ "$SAVED" = "keychain" ]; then
+  echo "登録できました。保存先: Mac の金庫（キーチェーンの「$SERVICE」）"
+else
+  echo "登録できました。保存先: $AUTH_FILE （権限 600 = 自分だけ読める）"
+fi
 echo "次に「起動-Claude-DeepSeek.command」をダブルクリックしてください。"
 echo ""
 read -r -p "Enter で閉じます..." _

@@ -51,7 +51,7 @@ test('macOS DeepSeek launcher replaces a stale gateway from the same package pat
   fs.mkdirSync(path.join(hooks, 'macos', 'deepseek'), { recursive: true });
   fs.mkdirSync(path.join(hooks, 'macos'), { recursive: true });
 
-  for (const file of ['ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js']) {
+  for (const file of ['ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js', 'secret-store.js']) {
     fs.copyFileSync(path.join(root, 'scripts', 'common', file), path.join(hooks, 'common', file));
   }
   fs.copyFileSync(
@@ -111,7 +111,7 @@ test('macOS DeepSeek launcher is fail-closed when the DeepSeek key is not regist
   const hooks = path.join(workspace, '.ai-safety', 'hooks');
   fs.mkdirSync(path.join(hooks, 'common'), { recursive: true });
   fs.mkdirSync(path.join(hooks, 'macos', 'deepseek'), { recursive: true });
-  for (const file of ['ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js']) {
+  for (const file of ['ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js', 'secret-store.js']) {
     fs.copyFileSync(path.join(root, 'scripts', 'common', file), path.join(hooks, 'common', file));
   }
   fs.copyFileSync(
@@ -207,7 +207,10 @@ test('macOS integrated d-claude starts monitor, consent gate, and safe gateway t
     ].join('\n') + '\n', { mode: 0o755 });
     fs.writeFileSync(path.join(hooks, 'deepseek', 'launch-deepseek-gateway.sh'), [
       '#!/usr/bin/env bash',
-      '[ -n "$ANTHROPIC_AUTH_TOKEN" ] || exit 8',
+      // v1.17.0: 実キーは統合ランチャーでは読まない（Gateway 子プロセスだけが読む）。
+      // ANTHROPIC_AUTH_TOKEN は gateway が「起動限りの合言葉」で上書きするので、
+      // ここへ来た時点では空でなければならない。
+      '[ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] || exit 8',
       '[ "$ANTHROPIC_MODEL" = "deepseek-v4-flash" ] || exit 7',
       '[ "$ANTHROPIC_DEFAULT_OPUS_MODEL" = "deepseek-v4-flash" ] || exit 10',
       '[ "$ANTHROPIC_DEFAULT_SONNET_MODEL" = "deepseek-v4-flash" ] || exit 11',
@@ -253,7 +256,7 @@ test('macOS DeepSeek launcher reuses a healthy gateway instead of restarting it'
   const hooks = path.join(workspace, '.ai-safety', 'hooks');
   fs.mkdirSync(path.join(hooks, 'common'), { recursive: true });
   fs.mkdirSync(path.join(hooks, 'macos', 'deepseek'), { recursive: true });
-  for (const file of ['ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js']) {
+  for (const file of ['ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js', 'secret-store.js']) {
     fs.copyFileSync(path.join(root, 'scripts', 'common', file), path.join(hooks, 'common', file));
   }
   fs.copyFileSync(
@@ -339,7 +342,7 @@ test('macOS DeepSeek launcher falls back to another port when 8788 is taken', as
   const hooks = path.join(workspace, '.ai-safety', 'hooks');
   fs.mkdirSync(path.join(hooks, 'common'), { recursive: true });
   fs.mkdirSync(path.join(hooks, 'macos', 'deepseek'), { recursive: true });
-  for (const file of ['ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js']) {
+  for (const file of ['ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js', 'secret-store.js']) {
     fs.copyFileSync(path.join(root, 'scripts', 'common', file), path.join(hooks, 'common', file));
   }
   fs.copyFileSync(
@@ -411,7 +414,7 @@ test('macOS DeepSeek launcher does not attach to another gateway on the same por
   const hooks = path.join(workspace, '.ai-safety', 'hooks');
   fs.mkdirSync(path.join(hooks, 'common'), { recursive: true });
   fs.mkdirSync(path.join(hooks, 'macos', 'deepseek'), { recursive: true });
-  for (const file of ['ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js']) {
+  for (const file of ['ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js', 'secret-store.js']) {
     fs.copyFileSync(path.join(root, 'scripts', 'common', file), path.join(hooks, 'common', file));
   }
   fs.copyFileSync(
@@ -437,4 +440,206 @@ test('macOS DeepSeek launcher does not attach to another gateway on the same por
   assert.ok(info.port > 0, '自分の gateway が実際に listen したポートが記録されること');
   assert.notStrictEqual(info.port, 8788, '別の gateway が応答しているポートに相乗りしてはいけない');
   assert.ok(info.pid > 0, '記録された PID は自分で立てた gateway のもの');
+});
+
+// ---------------------------------------------------------------------------
+// v1.17.0 回帰: 秘密の金庫化で旧平文 ~/.deepseek-claude/auth は削除される。
+// d-claude の起動条件がその平文ファイルの実在のままだと、金庫に鍵があるのに
+// 「未登録」で起動できない（配布前レビューで RED として実測された不具合）。
+// 判定は secret-store.js の resolve()（環境変数 → 金庫 → 旧平文）に一本化する。
+// ---------------------------------------------------------------------------
+
+const store = require('../secret-store.js');
+
+function vaultUsable() {
+  return process.platform === 'darwin' && store.available();
+}
+
+// 偽 HOME を作る。旧平文（~/.deepseek-claude/auth）は置かないが、キーチェーン本体は
+// $HOME/Library/Keychains にあるので、そこだけ実 HOME へ symlink して金庫を使えるようにする。
+// （実キーは一切使わず、テスト専用の service 接頭辞にダミー値を入れて必ず後始末する）
+function makeVaultHome(prefix) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.mkdirSync(path.join(home, 'Library'), { recursive: true });
+  fs.symlinkSync(path.join(os.homedir(), 'Library', 'Keychains'), path.join(home, 'Library', 'Keychains'));
+  return home;
+}
+
+test('統合ランチャー(mac/Windows)は旧平文ファイルの実在を起動条件にしない', () => {
+  const root = path.join(__dirname, '..', '..', '..');
+  const sh = fs.readFileSync(path.join(root, 'scripts', 'macos', 'launch-integrated.sh'), 'utf8');
+  const ps1 = fs.readFileSync(path.join(root, 'scripts', 'windows', 'launch-integrated.ps1'), 'utf8');
+  // 平文ファイルの実在チェック・平文の直読みが残っていないこと
+  assert.doesNotMatch(sh, /\[\s*-s\s+"\$auth_file"\s*\]/, 'mac: 平文ファイルの実在を条件にしている');
+  assert.doesNotMatch(sh, /ANTHROPIC_AUTH_TOKEN="\$\(cat /, 'mac: 平文キーを直読みしている');
+  assert.doesNotMatch(ps1, /Test-Path -LiteralPath \$authFile/, 'Windows: 平文ファイルの実在を条件にしている');
+  assert.doesNotMatch(ps1, /ReadAllText\(\$authFile\)/, 'Windows: 平文キーを直読みしている');
+  // 解決結果（secret-store.js）で判定していること
+  assert.match(sh, /secret-store\.js/);
+  assert.match(sh, /--has deepseek/);
+  assert.match(ps1, /secret-store\.js/);
+  assert.match(ps1, /'--has'\s*,?\s*'deepseek'/);
+});
+
+test('secret-store.js --has は値を出さずに登録の有無だけを返す', { skip: vaultUsable() ? false : 'OS の金庫を使えない環境のため skip' }, (t) => {
+  const root = path.join(__dirname, '..', '..', '..');
+  const script = path.join(root, 'scripts', 'common', 'secret-store.js');
+  const prefix = `ai-safety-test-has-${process.pid}.`;
+  const env = { ...process.env, AI_SAFE_KEYCHAIN_PREFIX: prefix, HOME: makeVaultHome('has-home-') };
+  delete env.DEEPSEEK_API_KEY;
+  const restore = process.env.AI_SAFE_KEYCHAIN_PREFIX;
+  process.env.AI_SAFE_KEYCHAIN_PREFIX = prefix;
+  t.after(() => {
+    try { store.remove('deepseek'); } catch { /* ignore */ }
+    if (restore === undefined) delete process.env.AI_SAFE_KEYCHAIN_PREFIX;
+    else process.env.AI_SAFE_KEYCHAIN_PREFIX = restore;
+    fs.rmSync(env.HOME, { recursive: true, force: true });
+  });
+
+  const run = () => require('node:child_process').spawnSync(
+    process.execPath, [script, '--has', 'deepseek'], { env, encoding: 'utf8', timeout: 60000 });
+
+  let r = run();
+  assert.strictEqual(r.stdout.trim(), 'no');
+  assert.notStrictEqual(r.status, 0);
+
+  store.set('deepseek', 'ds-dummy-key-never-log-0001');
+  r = run();
+  assert.strictEqual(r.stdout.trim(), 'yes');
+  assert.strictEqual(r.status, 0);
+  assert.doesNotMatch(r.stdout + r.stderr, /ds-dummy-key-never-log-0001/, '値そのものを出力しない');
+});
+
+// 実測: 平文を消した状態（金庫にだけ鍵がある状態）で d-claude 経路が起動できること。
+test('d-claude は平文が無く金庫にだけ鍵があるときも起動する', { skip: vaultUsable() ? false : 'OS の金庫を使えない環境のため skip' }, (t) => {
+  const root = path.join(__dirname, '..', '..', '..');
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-vault-only-'));
+  const fakeHome = makeVaultHome('ds-vault-only-home-');
+  const prefix = `ai-safety-test-vault-${process.pid}.`;
+  const restore = process.env.AI_SAFE_KEYCHAIN_PREFIX;
+  process.env.AI_SAFE_KEYCHAIN_PREFIX = prefix;
+  t.after(() => {
+    try { store.remove('deepseek'); } catch { /* ignore */ }
+    if (restore === undefined) delete process.env.AI_SAFE_KEYCHAIN_PREFIX;
+    else process.env.AI_SAFE_KEYCHAIN_PREFIX = restore;
+    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  });
+
+  const hooks = path.join(workspace, '.ai-safety', 'hooks', 'macos');
+  fs.mkdirSync(path.join(hooks, 'deepseek'), { recursive: true });
+  fs.mkdirSync(path.join(workspace, '.ai-safety', 'hooks', 'common'), { recursive: true });
+  fs.copyFileSync(path.join(root, 'scripts', 'common', 'secret-store.js'),
+    path.join(workspace, '.ai-safety', 'hooks', 'common', 'secret-store.js'));
+  fs.copyFileSync(path.join(root, 'scripts', 'macos', 'launch-integrated.sh'), path.join(hooks, 'launch-integrated.sh'));
+  fs.chmodSync(path.join(hooks, 'launch-integrated.sh'), 0o755);
+  fs.writeFileSync(path.join(hooks, 'open-monitor.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(hooks, 'launch-deepseek-safe.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(hooks, 'deepseek', 'launch-deepseek-gateway.sh'), [
+    '#!/usr/bin/env bash',
+    '[ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] || exit 8',
+    `printf gateway > "${path.join(workspace, 'gateway-called')}"`,
+  ].join('\n') + '\n', { mode: 0o755 });
+
+  // 旧平文は存在しない（金庫化で削除された状態）。
+  assert.ok(!fs.existsSync(path.join(fakeHome, '.deepseek-claude', 'auth')));
+
+  const env = {
+    ...process.env,
+    HOME: fakeHome,
+    AI_SAFE_KEYCHAIN_PREFIX: prefix,
+    AI_SAFE_LOG_DIR: path.join(fakeHome, 'logs'),
+  };
+  delete env.DEEPSEEK_API_KEY;
+  const run = () => require('node:child_process').spawnSync(
+    'bash', [path.join(hooks, 'launch-integrated.sh'), workspace, 'd-claude', 'standard'],
+    { env, encoding: 'utf8', timeout: 120000 });
+
+  // 1) 金庫にも平文にも無い → 未登録で止まる（fail-closed は維持）
+  let r = run();
+  assert.notStrictEqual(r.status, 0, '未登録なのに起動した');
+  assert.match(r.stdout + r.stderr, /DeepSeek APIキーが未登録/);
+
+  // 2) 金庫にだけダミー鍵がある → 起動できる（これが今回の RED の回帰）
+  store.set('deepseek', 'ds-dummy-key-never-log-0002');
+  r = run();
+  assert.strictEqual(r.status, 0, `金庫に鍵があるのに起動しない:\n${r.stdout}\n${r.stderr}`);
+  assert.strictEqual(fs.readFileSync(path.join(workspace, 'gateway-called'), 'utf8'), 'gateway');
+  assert.doesNotMatch(r.stdout + r.stderr, /ds-dummy-key-never-log-0002/, 'キー本文を出力しない');
+});
+
+// ---------------------------------------------------------------------------
+// v1.17.0 回帰: 上級 2「DeepSeek-Claudeを起動」
+//   (a) キーの有無を解決結果で判定する（平文の実在で誤表示しない）
+//   (b) ワークスペースをハードコードせず、自分の位置／引数から解決する
+// ---------------------------------------------------------------------------
+
+test('起動-Claude-DeepSeek.command はワークスペースを固定せず鍵も解決結果で見る', () => {
+  const root = path.join(__dirname, '..', '..', '..');
+  const cmd = fs.readFileSync(
+    path.join(root, 'scripts', 'macos', 'deepseek', '起動-Claude-DeepSeek.command'), 'utf8');
+  assert.doesNotMatch(cmd, /^WORKSPACE="\$HOME\/Documents\/my-ai-workspace"$/m, 'ワークスペースがハードコードされている');
+  assert.match(cmd, /BASH_SOURCE\[0\]/, '自分の位置から作業フォルダを解決していない');
+  assert.match(cmd, /WORKSPACE="\$1"/, '引数で作業フォルダを受け取れない');
+  assert.doesNotMatch(cmd, /ANTHROPIC_AUTH_TOKEN="\$\(cat /, '平文キーを直読みしている');
+  assert.match(cmd, /--has deepseek/, '鍵の有無を解決結果で見ていない');
+  // ラッパー（スタートのボタン）が作業フォルダを渡すこと
+  const wrapper = fs.readFileSync(
+    path.join(root, 'workspace-template', 'スタート', '（上級）2_DeepSeek-Claudeを起動.command'), 'utf8');
+  assert.match(wrapper, /bash "\$TARGET" "\$WORKSPACE"/);
+});
+
+test('起動-Claude-DeepSeek.command は自分の置き場所の作業フォルダで起動する', () => {
+  const root = path.join(__dirname, '..', '..', '..');
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-cmd-ws-'));
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-cmd-home-'));
+  try {
+    const hooks = path.join(workspace, '.ai-safety', 'hooks', 'macos');
+    fs.mkdirSync(path.join(hooks, 'deepseek'), { recursive: true });
+    fs.copyFileSync(
+      path.join(root, 'scripts', 'macos', 'deepseek', '起動-Claude-DeepSeek.command'),
+      path.join(hooks, 'deepseek', '起動-Claude-DeepSeek.command'));
+    fs.writeFileSync(path.join(hooks, 'launch-claude-safe.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(hooks, 'launch-deepseek-safe.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(hooks, 'deepseek', 'launch-deepseek-gateway.sh'), [
+      '#!/usr/bin/env bash',
+      `printf '%s' "$1" > "${path.join(workspace, 'gateway-workspace')}"`,
+    ].join('\n') + '\n', { mode: 0o755 });
+
+    const r = require('node:child_process').spawnSync(
+      'bash', [path.join(hooks, 'deepseek', '起動-Claude-DeepSeek.command')],
+      { env: { ...process.env, HOME: fakeHome }, cwd: os.tmpdir(), encoding: 'utf8', input: '', timeout: 120000 });
+    assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+    assert.strictEqual(
+      fs.realpathSync(fs.readFileSync(path.join(workspace, 'gateway-workspace'), 'utf8')),
+      fs.realpathSync(workspace),
+      '自分の置き場所ではない作業フォルダで起動した');
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+});
+
+test('Windows の 起動-Claude-DeepSeek.bat もワークスペース固定をやめ鍵は解決結果で見る', () => {
+  const root = path.join(__dirname, '..', '..', '..');
+  const p = path.join(root, 'scripts', 'windows', 'deepseek', '起動-Claude-DeepSeek.bat');
+  const raw = fs.readFileSync(p);
+  // 配布条件: .bat は CP932 + CRLF（BOM なし）
+  assert.strictEqual(raw.subarray(0, 3).equals(Buffer.from([0xEF, 0xBB, 0xBF])), false, '.bat に BOM が付いている');
+  const lf = raw.toString('binary').split('\n').length - 1;
+  const crlf = raw.toString('binary').split('\r\n').length - 1;
+  assert.strictEqual(lf, crlf, '.bat の改行が CRLF でない');
+  const bat = new TextDecoder('shift_jis').decode(raw);
+
+  assert.doesNotMatch(bat, /^set "WORKSPACE=%USERPROFILE%\\Documents\\my-ai-workspace"$/m,
+    'ワークスペースが無条件でハードコードされている');
+  assert.match(bat, /%~dp0\.\.\\\.\.\\\.\.\\\.\./, '自分の位置から作業フォルダを解決していない');
+  assert.match(bat, /if not "%~1"=="" set "WORKSPACE=%~1"/, '引数で作業フォルダを受け取れない');
+  assert.doesNotMatch(bat, /for \/f "usebackq delims=" %%K in \("%AUTH_FILE%"\)/, '平文キーを直読みしている');
+  assert.match(bat, /--has deepseek/, '鍵の有無を解決結果で見ていない');
+
+  const wrapperRaw = fs.readFileSync(
+    path.join(root, 'workspace-template', 'スタート', '（上級）2_DeepSeek-Claudeを起動.bat'));
+  const wrapper = new TextDecoder('shift_jis').decode(wrapperRaw);
+  assert.match(wrapper, /call "%TARGET%" "%WORKSPACE%"/, 'ラッパーが作業フォルダを渡していない');
 });

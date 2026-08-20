@@ -247,6 +247,30 @@ verify_hash_listed() {
   verify_hash "$rel_path"
 }
 
+# v1.17.0: 秘密の金庫・マスキング・PC 全体設定・フォルダ保護・長時間おまかせモードの実体も
+# 改ざん検知の対象に入れる。これらは「安全装置そのもの」なので、設定ファイルだけ守っても足りない。
+# 表に行が無いファイルは素通しする実装なので、片 OS 分しか入っていない配布でも壊れない。
+for _sec in \
+  "scripts/common/secret-store.js" \
+  "scripts/common/secret-migrate.js" \
+  "scripts/common/secret-patterns.js" \
+  "scripts/common/clipboard-mask.js" \
+  "scripts/common/apply-global-guard.js" \
+  "scripts/common/apply-global-codex.js" \
+  "scripts/common/apply-global-agy.js" \
+  "scripts/common/apply-global-opencode.js" \
+  "scripts/common/apply-global-deny.js" \
+  "scripts/macos/apply-global-guard.sh" \
+  "scripts/macos/uninstall-global-guard.sh" \
+  "scripts/macos/protect-folder.sh" \
+  "scripts/macos/launch-claude-longrun.sh" \
+  "scripts/windows/apply-global-guard.ps1" \
+  "scripts/windows/uninstall-global-guard.ps1" \
+  "scripts/windows/protect-folder.ps1" \
+  "scripts/windows/launch-claude-longrun.ps1"; do
+  verify_hash "$_sec"
+done
+
 verify_hash "configs/gemini/policies/safety.toml"
 verify_hash "workspace-template/aiexclude.template"
 verify_hash_listed "workspace-template/dist-skills/hearing-ladder/SKILL.md"
@@ -273,6 +297,12 @@ copy_with_backup() {
 
 cp "$package_root/policy/safety-policy.json" "$workspace/.ai-safety/policy/safety-policy.json"
 
+# コピー元パッケージの場所を残す。「新しい作業フォルダを安全にする」ボタンは、
+# ワークスペース側から実行されたときにこれを辿ってパッケージ本体（configs / policy /
+# workspace-template）を見つける。見つからなければボタン側が案内して止まる。
+printf '%s\n' "$package_root" > "$workspace/.ai-safety/package-source.txt"
+chmod 600 "$workspace/.ai-safety/package-source.txt" 2>/dev/null || true
+
 # agent-monitor 解説カード一式を .ai-safety/cards/ に配置する。
 if [ -d "$package_root/configs/safety/cards" ]; then
   rm -rf "$workspace/.ai-safety/cards"
@@ -295,17 +325,14 @@ fi
 # DeepSeek 送信検査 Gateway（クロスプラットフォーム・Node 実装）を配置
 cp -R "$package_root/scripts/common" "$workspace/.ai-safety/hooks/"
 
-# Bouncer最大保護モード用のローカルGateway。標準モードでは起動しないため、
-# ローカルLLMを動かせないPCでもCodex/Claude/OpenCodeの標準モードを利用できる。
-if [ -d "$package_root/bouncer-gateway" ]; then
-  bouncer_dest="$workspace/.ai-safety/bouncer"
-  if [ -e "$bouncer_dest" ]; then
-    safe_name="$(printf '%s' "$bouncer_dest" | sed 's#[/:]#_#g')"
-    cp -R "$bouncer_dest" "$backup_dir/$safe_name"
-    rm -rf "$bouncer_dest"
-  fi
-  cp -R "$package_root/bouncer-gateway" "$bouncer_dest"
-  chmod +x "$bouncer_dest/scripts/"*.zsh 2>/dev/null || true
+# 旧「最大保護モード」で使っていたローカル検査 Gateway（ローカル LLM 必須）は v1.17.0 で
+# 廃止した。受講生の PC ではほぼ動かせないのにメニューに出ていたため。既存の作業フォルダに
+# 残っている古い配置はバックアップしてから片付ける。
+legacy_bouncer="$workspace/.ai-safety/bouncer"
+if [ -e "$legacy_bouncer" ]; then
+  safe_name="$(printf '%s' "$legacy_bouncer" | sed 's#[/:]#_#g')"
+  cp -R "$legacy_bouncer" "$backup_dir/$safe_name" 2>/dev/null || true
+  rm -rf "$legacy_bouncer"
 fi
 
 # Remove stale foreign-OS hook directories when single-platform install
@@ -422,7 +449,11 @@ if [ -d "$package_root/workspace-template/スタート" ]; then
 （上級）11_Bufferのキーを登録.command
 （上級）11_Bufferのキーを登録.bat
 （上級）12_プラグインの置き場を開く.command
-（上級）12_プラグインの置き場を開く.bat'
+（上級）12_プラグインの置き場を開く.bat
+（上級）5_危険コマンドをClaude全体で禁止.command
+（上級）5_危険コマンドをClaude全体で禁止.bat
+（上級）6_グローバル禁止を解除.command
+（上級）6_グローバル禁止を解除.bat'
   for _old in "$workspace/スタート"/*; do
     [ -f "$_old" ] || continue
     _old_name="$(normalize_hash_rel_path "$(basename "$_old")")"
@@ -560,6 +591,113 @@ if [ -f "$oc_template" ]; then
       echo "$path_line"
     } >> "$zshrc"
     echo "PATH に追加しました（新しいターミナルから oc-safe が使えます）: $oc_bin_dir"
+  fi
+fi
+
+# --- 安全ランチャーのシム（codex-safe / claude-safe / agy-safe） -------------
+# 壁 A の解消。安全ランチャーの実体は <ワークスペース>/.ai-safety/hooks/macos/ にあるが、
+# `.ai-safety` は決定的 deny 床の保護パスなので、AI がそのパスを書いた瞬間に deny される。
+# その結果「安全フックを通る形は禁止され、フックを通らない裸の codex / claude だけが通る」
+# という反転が起きていた（2026-08-20 実測）。PATH 上に短い名前のシムを置くことで、
+# コマンド文字列に `.ai-safety` を書かずに安全な形を起動できるようにする。
+# deny 床（policy/safety-policy.json）は 1 文字も緩めていない。
+# Windows は setup-commands.ps1 が元から同名のシムを作っており、これは mac 側の欠落を
+# 埋めて対称にするもの。
+agent_template="$package_root/scripts/macos/agent-safe.template.sh"
+if [ -f "$agent_template" ]; then
+  mkdir -p "$oc_bin_dir"
+  for _pair in "codex-safe:codex" "claude-safe:claude" "agy-safe:agy"; do
+    _name="${_pair%%:*}"
+    _agent="${_pair##*:}"
+    if [ ! -f "$workspace/.ai-safety/hooks/macos/launch-${_agent}-safe.sh" ]; then
+      continue
+    fi
+    awk -v ws="$workspace" -v nm="$_name" -v ag="$_agent" \
+      '{ gsub(/__WORKSPACE__/, ws); gsub(/__NAME__/, nm); gsub(/__AGENT__/, ag); print }' \
+      "$agent_template" > "$oc_bin_dir/$_name"
+    chmod 755 "$oc_bin_dir/$_name"
+    echo "起動コマンドを配置しました: $oc_bin_dir/$_name"
+  done
+fi
+
+# --- ~/.ai-safety の権限を締める（600 / 700） --------------------------------
+# ここには API キーの平文ファイル（gemini-api-key.txt / gemini-api-key-paid.txt /
+# buffer-api-key.txt 等）と、AI の実行ログが置かれる。ところが作成経路がボタン・
+# ランチャー・手作業とばらばらで、実測で gemini-api-key-paid.txt が 644（同じ PC の
+# 他ユーザーから読める）になっていた。導入のたびに実際の権限へ落とし直す。
+# ・ディレクトリ 700（本人だけが開ける）
+# ・鍵/トークンのファイル 600（本人だけが読める）
+# bin/ 配下の起動コマンドは実行できる必要があるので 700 を維持し、中身は 755 のまま。
+if [ -d "$HOME/.ai-safety" ]; then
+  chmod 700 "$HOME/.ai-safety" 2>/dev/null || true
+  for _d in bin logs cache backups doctor-logs rescue worktrees plugins; do
+    [ -d "$HOME/.ai-safety/$_d" ] && chmod 700 "$HOME/.ai-safety/$_d" 2>/dev/null || true
+  done
+  # 鍵・トークンの平文ファイルは 600 に落とす（存在するものだけ）。
+  for _f in "$HOME/.ai-safety/"*api-key*.txt "$HOME/.ai-safety/"*token*.txt "$HOME/.ai-safety/"*.key; do
+    [ -f "$_f" ] && chmod 600 "$_f" 2>/dev/null || true
+  done
+  echo "権限を締めました: $HOME/.ai-safety（フォルダ 700 / 鍵ファイル 600）"
+fi
+
+# --- 秘密の自動移行（受講生の操作ゼロ / v1.17.0） ---------------------------
+# 旧平文の API キーを OS の金庫（キーチェーン）へ移す。各キーごとに冪等で、
+# 「金庫へ書く → 読み戻して一致を検証 → 一致したときだけ平文を削除」の順に進む。
+# 一致しなければ平文はそのまま残し、次回もう一度試す。
+_secret_migrate="$workspace/.ai-safety/hooks/common/secret-migrate.js"
+if [ -f "$_secret_migrate" ] && command -v node >/dev/null 2>&1; then
+  echo "登録済みのキーを金庫（キーチェーン）へ移します..."
+  node "$_secret_migrate" || true
+fi
+
+# --- 作業フォルダを「信頼済み」にする（v1.17.0） ---------------------------
+# Claude Code は初回に対話で信頼ダイアログを承認するまで、そのフォルダの
+# permissions.allow を丸ごと無視する（実測: 「Ignoring 68 permissions.allow
+# entries ... this workspace has not been trusted」）。受講者はボタンから
+# 起動するため対話でダイアログを承認する機会が無く、意図した許可設定が効かない
+# まま使うことになる。そこで install が ~/.claude.json に承認済みを記録する。
+# 対象は「このスクリプトが今セットアップした作業フォルダ」だけで、他のフォルダは触らない。
+_claude_json="$HOME/.claude.json"
+if command -v node >/dev/null 2>&1; then
+  if AI_SAFE_CLAUDE_JSON="$_claude_json" AI_SAFE_WORKSPACE="$workspace" AI_SAFE_BACKUP_DIR="$backup_dir" node -e '
+const fs = require("fs");
+const path = require("path");
+const file = process.env.AI_SAFE_CLAUDE_JSON;
+const ws = process.env.AI_SAFE_WORKSPACE;
+const backupDir = process.env.AI_SAFE_BACKUP_DIR;
+let data = {};
+if (fs.existsSync(file)) {
+  const raw = fs.readFileSync(file, "utf8");
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    // 壊れた設定を上書きして利用者の環境を壊さない。何もせず終了する。
+    process.exit(3);
+  }
+  // 既存ファイルは必ず控えを取ってから触る。
+  try { fs.copyFileSync(file, path.join(backupDir, "claude.json")); } catch (e) {}
+}
+if (!data.projects || typeof data.projects !== "object") data.projects = {};
+if (!data.projects[ws] || typeof data.projects[ws] !== "object") data.projects[ws] = {};
+if (data.projects[ws].hasTrustDialogAccepted === true) process.exit(1);
+data.projects[ws].hasTrustDialogAccepted = true;
+const tmp = file + ".ai-safety-tmp";
+fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+fs.renameSync(tmp, file);
+process.exit(0);
+'; then
+    echo "作業フォルダを Claude の信頼済みに登録しました（許可設定が最初から有効になります）。"
+  else
+    _trust_rc=$?
+    if [ "$_trust_rc" = "1" ]; then
+      : # すでに登録済み。何も言わない。
+    elif [ "$_trust_rc" = "3" ]; then
+      echo "注意: $_claude_json を読めなかったため、信頼済み登録をスキップしました。"
+      echo "      Claude を1回ふつうに起動して、信頼の確認に「はい」と答えてください。"
+    else
+      echo "注意: 信頼済み登録に失敗しました。Claude を1回ふつうに起動して、"
+      echo "      信頼の確認に「はい」と答えてください。"
+    fi
   fi
 fi
 

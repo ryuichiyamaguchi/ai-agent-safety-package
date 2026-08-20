@@ -10,12 +10,11 @@ unset AI_SAFE_POLICY AI_SAFE_ROOT
 usage() {
   cat <<'EOF'
 Usage:
-  launch-integrated.sh [workspace] [codex|claude|opencode|d-claude] [standard|assisted|maximum] [--websearch] [--resume] [--project=<フォルダ>]
+  launch-integrated.sh [workspace] [codex|claude|opencode|d-claude] [standard|assisted] [--websearch] [--resume] [--project=<フォルダ>]
 
 Profiles:
   standard  Safety hooks + approval monitor. No local LLM is required.
   assisted  Claude only. Standard profile plus two-key AI review for gray commands.
-  maximum   Claude only. Adds the local Gemma Bouncer gateway and full response review.
 
 OpenCode:
   standard only. DeepSeek V4 Pro/Flash is routed through the send inspection gateway.
@@ -42,9 +41,9 @@ case "$agent" in
 esac
 
 case "$profile" in
-  standard|assisted|maximum) ;;
+  standard|assisted) ;;
   -h|--help) usage; exit 0 ;;
-  *) echo "profile must be standard, assisted, or maximum" >&2; usage >&2; exit 2 ;;
+  *) echo "profile must be standard or assisted" >&2; usage >&2; exit 2 ;;
 esac
 
 if [ "$agent" = "codex" ] && [ "$profile" != "standard" ]; then
@@ -93,17 +92,13 @@ log_dir="${AI_SAFE_LOG_DIR:-$HOME/.ai-safety/logs}"
 mkdir -p "$log_dir"
 
 [ -x "$hooks/open-monitor.sh" ] || {
-  echo "Bouncer統合版がこの作業フォルダに導入されていません。" >&2
+  echo "安全装置（Bouncer）がこの作業フォルダに導入されていません。" >&2
   echo "先に統合版のインストーラーを実行してください。" >&2
   exit 2
 }
 
 if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
-  if [ "$profile" = "maximum" ] && [ ! -x "$root/bouncer/scripts/run-local.zsh" ]; then
-    echo "ローカルBouncer Gatewayが見つかりません: $root/bouncer" >&2
-    exit 2
-  fi
-  echo "Bouncer統合版 dry-run"
+  echo "安全装置（Bouncer）dry-run"
   echo "  workspace: $workspace"
   echo "  agent:     $agent"
   echo "  profile:   $profile"
@@ -120,9 +115,7 @@ if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
     echo "  session:   $_session"
     [ -n "$_project" ] && echo "  project:   $_project"
   fi
-  if [ "$profile" = "maximum" ]; then
-    echo "  gateway:   http://127.0.0.1:8787 (local only)"
-  elif [ "$agent" = "opencode" ] || [ "$agent" = "d-claude" ]; then
+  if [ "$agent" = "opencode" ] || [ "$agent" = "d-claude" ]; then
     echo "  gateway:   http://127.0.0.1:8788 (send inspection, no local LLM)"
   else
     echo "  gateway:   bypassed (AIの応答速度を優先)"
@@ -131,10 +124,8 @@ if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
 fi
 
 monitor_pid=""
-gateway_pid=""
 
 cleanup() {
-  if [ -n "$gateway_pid" ]; then kill "$gateway_pid" 2>/dev/null || true; fi
   if [ -n "$monitor_pid" ]; then kill "$monitor_pid" 2>/dev/null || true; fi
 }
 trap cleanup EXIT INT TERM HUP
@@ -142,35 +133,6 @@ trap cleanup EXIT INT TERM HUP
 AI_SAFE_PROFILE="$profile" AI_SAFE_AGENT="$agent" \
   bash "$hooks/open-monitor.sh" >"$log_dir/integrated-monitor.log" 2>&1 &
 monitor_pid=$!
-
-if [ "$profile" = "maximum" ]; then
-  bouncer="$root/bouncer"
-  [ -x "$bouncer/scripts/run-local.zsh" ] || {
-    echo "ローカルBouncer Gatewayが見つかりません: $bouncer" >&2
-    exit 2
-  }
-
-  echo "ローカルGemmaとBouncer Gatewayを準備しています。"
-  BOUNCER_REVIEW_MODE=block \
-  BOUNCER_AI_FAILURE_MODE=block \
-    zsh "$bouncer/scripts/run-local.zsh" >"$log_dir/bouncer-gateway.log" 2>&1 &
-  gateway_pid=$!
-
-  ready=0
-  for _i in $(seq 1 180); do
-    if curl -fsS --max-time 1 http://127.0.0.1:8787/bouncer/health >/dev/null 2>&1; then
-      ready=1
-      break
-    fi
-    if ! kill -0 "$gateway_pid" 2>/dev/null; then break; fi
-    sleep 1
-  done
-  if [ "$ready" -ne 1 ]; then
-    echo "Bouncer Gatewayを起動できませんでした。" >&2
-    echo "確認先: $log_dir/bouncer-gateway.log" >&2
-    exit 1
-  fi
-fi
 
 case "$agent:$profile" in
   codex:standard)
@@ -182,28 +144,32 @@ case "$agent:$profile" in
   claude:assisted)
     bash "$hooks/launch-claude-safe.sh" --assisted "$workspace"
     ;;
-  claude:maximum)
-    export BOUNCER_INTEGRATED_MODE=1
-    export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
-    bash "$hooks/launch-claude-safe.sh" "$workspace"
-    ;;
   opencode:standard)
     bash "$hooks/opencode/launch-opencode-deepseek.sh" "$workspace" "$extra" "$extra2"
     ;;
   d-claude:standard)
     consent="$hooks/launch-deepseek-safe.sh"
-    auth_file="$HOME/.deepseek-claude/auth"
     gateway="$hooks/deepseek/launch-deepseek-gateway.sh"
+    secret_store="$root/hooks/common/secret-store.js"
     [ -f "$consent" ] || { echo "DeepSeek同意ゲートが見つかりません: $consent" >&2; exit 2; }
     [ -f "$gateway" ] || { echo "DeepSeek送信検査Gatewayが見つかりません: $gateway" >&2; exit 2; }
-    [ -s "$auth_file" ] || {
-      echo "DeepSeek APIキーが未登録です。" >&2
-      echo "スタート/（上級）1_DeepSeekキーを登録 を先に実行してください。" >&2
-      exit 2
-    }
+    # 鍵の有無は「環境変数 → OS の金庫 → 旧平文」の解決結果で判定する。
+    # 金庫化(secret-migrate.js)で旧平文 ~/.deepseek-claude/auth は削除されるので、
+    # 平文ファイルの実在を条件にすると金庫に鍵があっても起動できなくなる（実測で再現済み）。
+    # 順序の SSOT は scripts/common/secret-store.js の resolve()。ここはそれを呼ぶだけ。
+    # node や secret-store.js が無い環境では判定を保留し、gateway 側の同じ 3 段解決に任せる
+    # （ここで「未登録」と断定すると、鍵があるのに起動できない側へ倒れるため）。
+    if command -v node >/dev/null 2>&1 && [ -f "$secret_store" ]; then
+      if [ "$(node "$secret_store" --has deepseek 2>/dev/null || true)" != "yes" ]; then
+        echo "DeepSeek APIキーが未登録です。" >&2
+        echo "スタート/（上級）1_DeepSeekキーを登録 を先に実行してください。" >&2
+        exit 2
+      fi
+    fi
     bash "$consent" --consent-only
-    export ANTHROPIC_AUTH_TOKEN
-    ANTHROPIC_AUTH_TOKEN="$(cat "$auth_file")"
+    # 実キーはここでは読まない。Gateway 子プロセスだけが読む（Claude Code には渡さない）。
+    # gateway は同じ 3 段解決で鍵を取り、ANTHROPIC_AUTH_TOKEN は起動限りの合言葉で上書きする。
+    unset ANTHROPIC_AUTH_TOKEN
     # モデル名に [1m]（1M コンテキスト指定）を付けると、Claude Code 2.1.226 以降は
     # それを名前の一部として扱い「そんなモデルは無い」で起動できなくなる（実機で再現）。
     # DeepSeek が公開しているのは deepseek-v4-flash / deepseek-v4-pro の 2 つだけ。

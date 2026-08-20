@@ -447,8 +447,8 @@
             <span class="ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 8h.01M11 12h1v4h1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
             <div>
               <b>どれを入れる？　あなたの課金状況で決めてください。</b><br>
-              ・<b>無課金</b> → AntiGravity（無料）。Claude のような使い心地が欲しいなら OpenCode + DeepSeek（少額チャージ）も<br>
-              ・<b>ChatGPT に課金している</b> → Codex<br>
+              ・<b>無課金</b> → AntiGravity（無料）。<b>Codex のデスクトップアプリは無料プランでも使えます</b>。Claude のような使い心地が欲しいなら OpenCode + DeepSeek（少額チャージ）も<br>
+              ・<b>ChatGPT に課金している</b> → Codex（CLI がどのプランで使えるかは変わるので<b>公式で確認</b>してください）<br>
               ・<b>Claude に課金している</b> → Claude Code（<b>無料プランでは使えません</b>）<br>
               くわしい表は docs フォルダの <b>00_はじめに</b> と <b>20_卒業後ガイド</b> にあります。
             </div>
@@ -457,7 +457,7 @@
           <p class="cmd-label">Codex（コーデックス）を使う人</p>
           <div class="cmd"><span class="prompt">$</span><code>npm install -g @openai/codex</code><button type="button" class="copy" data-copy="npm install -g @openai/codex" onclick="copyText(this)">コピー</button></div>
           <p class="cmd-label">Claude Code（クロードコード）を使う人</p>
-          <div class="cmd"><span class="prompt">$</span><code>npm install -g @anthropic-ai/claude-code@2.1.201</code><button type="button" class="copy" data-copy="npm install -g @anthropic-ai/claude-code@2.1.201" onclick="copyText(this)">コピー</button></div>
+          <div class="cmd"><span class="prompt">$</span><code>npm install -g @anthropic-ai/claude-code@latest</code><button type="button" class="copy" data-copy="npm install -g @anthropic-ai/claude-code@latest" onclick="copyText(this)">コピー</button></div>
           <p class="cmd-label">OpenCode（オープンコード）+ DeepSeek を使う人</p>
           <div class="cmd"><span class="prompt">$</span><code>npm install -g opencode-ai</code><button type="button" class="copy" data-copy="npm install -g opencode-ai" onclick="copyText(this)">コピー</button></div>
           <p class="cmd-label">AntiGravity（アンチグラビティ）を使う人</p>
@@ -612,7 +612,18 @@
 
           <p class="muted">AGI Cockpit（1 つのアプリで AI を使い分けるアプリ）で Claude を使いたい人は、docs フォルダの <b>11_AGI-Cockpitで使う</b> を読んでください（作業フォルダを my-ai-workspace にすれば保護が効きます。Codex だけは上の 2_ ボタンから）。</p>
 
-          <p class="muted">慣れてきたら：<span class="fname">（上級）5_危険コマンドをClaude全体で禁止<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … Claude と Codex を<b>どのフォルダから起動しても</b>危険コマンド（再帰削除・.env の読み取り・外部への送信など）を止めます。元に戻したいときは <span class="fname">（上級）6_グローバル禁止を解除<span class="os-win">.bat</span><span class="os-mac">.command</span></span> を実行してください（適用前のバックアップから元の設定に戻します）。</p>
+          <p class="muted">慣れてきたら：<span class="fname">（上級）5_このPC全体に最低限の安全設定を入れる<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … Claude Code・Codex・AntiGravity・OpenCode を<b>どのフォルダから起動しても</b>危険コマンド（再帰削除・.env の読み取り・外部への送信など）を止めます。<b>Codex はデスクトップアプリも同じ設定ファイルを読むので、アプリ側にも同時に効きます。</b>元に戻したいときは <span class="fname">（上級）6_PC全体の安全設定を解除<span class="os-win">.bat</span><span class="os-mac">.command</span></span> を実行してください（適用前のバックアップから元の設定に戻します）。</p>
+
+          <p class="muted"><span class="fname">my-ai-workspace</span> 以外のフォルダで作業したくなったら：<span class="fname">（上級）14_新しい作業フォルダを安全にする<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … フォルダを選ぶと、そこに安全ルール・見張り・スタートフォルダをまとめて入れます（案件ごとに 1 つフォルダを作るのがおすすめです）。</p>
+
+          <p class="muted os-mac">目を離して AI に長く作業させたいとき：<span class="fname">（上級）15_長時間おまかせモードで起動<span class="os-mac">.command</span></span> … 確認ダイアログをほとんど出さずに進めます。<b>承認を省けるのは「OS の壁（サンドボックス）が作業フォルダの外への書き込みと許可外の通信を止めているから」</b>で、全部素通しにするわけではありません。再帰削除・秘密ファイルの読み取り・<span class="fname">sudo</span>・<span class="fname">git push</span> などは<b>止まったまま</b>です。壁が使える <b>Mac の Claude 専用</b>で、安全パッケージが入った作業フォルダでしか起動しません。<b>この作業フォルダに大事なファイルを置かないでください。</b>くわしくは docs フォルダの <a class="ext" href="docs/20_卒業後ガイド.md">20_卒業後ガイド</a> へ。</p>
+
+          <p class="muted os-win">（上級）15_長時間おまかせモードで起動 は <b>Windows では使えません</b>。このモードは「OS の壁があるから確認を省ける」という作りで、Claude Code の壁は Windows では使えないためです。ボタンを押すと理由が表示されて起動しません。Windows の方は <span class="fname">3_セーフClaudeを起動</span> を使ってください。</p>
+
+          <div class="info">
+            <span class="ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z" stroke="currentColor" stroke-width="1.6"/><path d="M12 10v4M12 8h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+            <div><b>守られ方は、AI ツールごとに違います。</b>　Codex は Mac でも Windows でも「壁」（パソコン本体が力ずくで止める仕組み）が効きます。Claude Code は Mac では壁が効きますが、<b>Windows では壁が使えません</b>（Claude Code 自体が未対応のため）。OpenCode には壁がありません（作った人たち自身が「これは隔離ではない」と公式に書いています）。そして<b>どの壁も「読み取り」は止めません</b>。秘密のファイルを守っているのは <span class="fname">.ai-safety</span> フォルダの見張りなので、<b>ここを消さないでください</b>。くわしくは docs フォルダの <a class="ext" href="docs/91_やさしい仕組み解説.md">91_やさしい仕組み解説</a> へ。</div>
+          </div>
 
           <div class="meta">
             <div class="row why"><span class="k">なぜ</span><span>「安全モード」で起動することで、危険な操作にガードがかかった状態でAIを使えます。</span></div>
@@ -732,8 +743,22 @@
 
           <div class="info">
             <span class="ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z" stroke="currentColor" stroke-width="1.6"/><path d="M12 10v4M12 8h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
-            <div><b>卒業後の全部のこと（費用・キーが使えなくなったときの対処・困ったときの調べ方）は、docs フォルダの <a class="ext" href="docs/20_卒業後ガイド.md">20_卒業後ガイド</a> に 1 枚でまとまっています。</b>　講座中に d-claude を使っていた人は、必ず一度読んでください。</div>
+            <div><b>卒業後の全部のこと（アプリと CLI の選び方・費用・キーが使えなくなったときの対処・困ったときの調べ方）は、docs フォルダの <a class="ext" href="docs/20_卒業後ガイド.md">20_卒業後ガイド</a> に 1 枚でまとまっています。</b>　講座中に d-claude を使っていた人は、必ず一度読んでください。</div>
           </div>
+
+          <h3>卒業後の選び方（3 行）</h3>
+          <ul>
+            <li>🖥️ <b>手軽に・安全に・実用優先</b> → <b>デスクトップアプリ</b></li>
+            <li>⌨️ <b>仕組みを学びながら深く使えるようになりたい</b> → <b>CLI</b>（このパッケージのボタン）</li>
+            <li>💰 <b>無料で使いたい</b> → <b>Codex アプリ</b>、または <b>OpenCode + DeepSeek</b></li>
+          </ul>
+          <p class="muted">アプリと CLI の違いは「<b>できることの差</b>」ではなく「<b>守られ方の差</b>」です。アプリでも自動化も定期実行もできます。違うのは、このパッケージの安全装置が効くかどうかです（<a class="ext" href="docs/20_卒業後ガイド.md">20_卒業後ガイド</a> の 4 章に全部書いてあります）。</p>
+
+          <h3>あわせて読んでおくもの</h3>
+          <ul>
+            <li><a class="ext" href="docs/12_設定ファイルの置き場マップ.md">12_設定ファイルの置き場マップ</a> … どこに何の設定ファイルができるか。<b>素の CLI をホームで起動すると設定ゼロ＝全権限</b>になる、という一番危ない使い方の説明つき</li>
+            <li><a class="ext" href="docs/13_秘密の入れ物-APIキーの安全な持ち方.md">13_秘密の入れ物-APIキーの安全な持ち方</a> … API キーを平文で置かない方法。無料で始める方法と、本来おすすめの正しいやり方（1Password）の両方</li>
+          </ul>
         </div>
       </section>
 

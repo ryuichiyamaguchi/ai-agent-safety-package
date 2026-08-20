@@ -1,6 +1,6 @@
 # Claude Code を安全に使う（個人利用向け）
 
-v1.16.0
+v1.17.0
 
 ## このドキュメントは誰のものか
 
@@ -48,11 +48,13 @@ npm --version
 ## ステップ 2：Claude Code をインストール
 
 ```bash
-npm install -g @anthropic-ai/claude-code@2.1.201
+npm install -g @anthropic-ai/claude-code@latest
 claude --version
 ```
 
-バージョン確認できれば成功です（`2.1.201` など）。
+バージョン確認できれば成功です（`2.1.236` など、数字は入れた時期で変わります）。
+
+> **Claude Code は最新版に更新して使ってください。** 以前のこのパッケージは「パッケージが動作確認した版に合わせる」方式で版を固定していましたが、いまは**最新版追従**に変えました。Claude Code 純正の壁（サンドボックス）は新しい版でないと使えないためです。2 回目以降は、スタートフォルダの **「8_AIツールを最新版に更新」** をダブルクリックすれば更新できます。
 
 **参考**：公式ドキュメント https://docs.claude.com/ja/docs/claude-code/quickstart
 
@@ -95,28 +97,45 @@ powershell -File ".ai-safety\hooks\windows\launch-claude-safe.ps1"
 
 > ※ `my-ai-workspace` の部分は、インストール時に自分でつけたフォルダ名に読み替えてください（例：`Desktop\my-project` など）。
 
+> **短い呼び名も使えます**：長いパスを打つ代わりに、`claude-safe` と入力しても同じ安全起動ができます（Codex は `codex-safe`、AntiGravity は `agy-safe`）。導入時に用意される呼び名で、中で上の launcher に橋渡ししています。ターミナルを開き直しても呼び名が見つからないときは、これまでどおり上のコマンドを使ってください。
+
 ※ 事前に `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` を実行済みであることが前提です（docs/01 / docs/02 のステップ 0 参照）。
 
-launcher が次の防御を自動で有効にします。
+launcher が次の防御を自動で有効にします。ここは **Mac と Windows で中身が違います**。ごまかさずに書きます。
 
-- `--sandbox workspace-write`：workspace の外への書き込みを OS レベルで拒否（1 層目）
-- `network_access = false`：外部通信を全遮断（hook 層 + サンドボックス）
-- `--ask-for-approval untrusted`：Codex の trusted list（`cat`、`ls` などの安全コマンド）以外が来たときに、実行前に承認プロンプトを出す（4 層目）。`cat ~/.ssh/id_rsa` のような trusted コマンド + 危険な引数の組合せは approval をスキップするので、hook 層（`policy/safety-policy.json`）が代わりに止めます。**4 層のどこかで止まれば安全**というモデル。詳細は [docs/90_守れる-守れない.md](90_守れる-守れない.md) の「なぜ『安全』は 4 層で成り立つのか」を参照
-- `shell_environment_policy.exclude`：`OPENAI_API_KEY` などのシークレット環境変数を AI に渡さない
+**Mac（壁 + 見張り + 記録係）**
+
+- **壁**：Claude Code 純正のサンドボックス（macOS の Seatbelt）を有効にしてあります（`configs/claude/settings.mac.json` の `sandbox` ブロック）。作業フォルダの外への書き込みと、許可していない相手への通信を、OS が力ずくで止めます（実測確認済み）
+- 壁があるおかげで、**その中で完結するコマンドは確認ダイアログ無しで実行されます**（`autoAllowBashIfSandboxed`）。安全にしながら、同時に使いやすくなっています
+- **見張り**：hook（`policy/safety-policy.json` + guard 系）と、`.claude/settings.json` の権限リスト（`allow` / `ask` / `deny`）
+- **記録係**：監査ログと見守りモニター
+
+**Windows（見張り + 記録係。壁はありません）**
+
+- ⚠️ **Claude Code の OS サンドボックスは、ネイティブ Windows では使えません。** 公式が「Native Windows is not supported. On Windows, run Claude Code inside a WSL2 distribution.」と明記しています。そのため Windows 用の設定ファイルには `sandbox` を意図的に書いていません
+- Windows の Claude Code は**見張り（hook と権限リスト）と記録係だけ**で守ります。壁も欲しい場合は、Codex を使う（Codex は Windows でも壁が効きます）か、Claude Code を WSL2 の中で動かしてください
+
+**両方に共通する、いちばん大事な注意**
+
+**壁は「読み取り」を止めません。** Claude Code が作るサンドボックスの設定にも「ファイルの読み取りは許可」が入っています。`.env` や SSH 鍵のような秘密ファイルの読み取りを止めているのは、壁ではなく**見張り**（下の `permissions.deny`）のほうです。だから Mac で壁を入れたあとも、見張りの hook は 1 本も外していません。
+
+言葉の意味（壁・見張り・記録係）は [00_はじめに.md](00_はじめに.md) の「守られ方の言葉づかい」を、守れる／守れないの全体像は [docs/90_守れる-守れない.md](90_守れる-守れない.md) を見てください。
+
+> **導入（インストール）が作業フォルダを Claude の「信頼済み」に登録します。** この登録が無いと、Claude Code は権限の設定そのものを無視してしまいます。**別のフォルダで作業したくなったら**、スタートフォルダの **「（上級）14_新しい作業フォルダを安全にする」** をダブルクリックして、そのフォルダを選んでください（安全ルール・見張り・信頼済み登録がまとめて入ります）。
 
 ### v1.2.1 で追加：Claude Code 内部ツールの deny
 
-Day3 の実機検証で「Codex CLI が**内部 WebFetch でサイト読み取り** + **内部 Write でデスクトップに HTML 生成**」を素通りさせたことが判明しました。AI CLI には**シェル経由ツール**（OS サンドボックス・network_access・承認ダイアログが効く）と、**内部ツール**（CLI 本体が直接 OS API を呼ぶので上記の防御を素通りする）の 2 種類があり、AI は便利な内部ツールを選びがちです。
+Day3 の実機検証で「Codex CLI が**内部 WebFetch でサイト読み取り** + **内部 Write でデスクトップに HTML 生成**」を素通りさせたことが判明しました。AI CLI には**シェル経由ツール**（壁と承認ダイアログが効く）と、**内部ツール**（CLI 本体が直接 OS の機能を呼ぶので壁を素通りする）の 2 種類があり、AI は便利な内部ツールを選びがちです。**壁は Bash の子プロセスにしか効かない**ので、内部ツールは見張りで止めるしかありません。
 
 Claude Code は `.claude/settings.json` の `permissions.deny` に**内部ツール単位の deny** を書けるため、v1.2.1 から次を deny に追加しました（`configs/claude/settings.{mac,windows}.json`）。
 
 - **WebFetch (exfil ドメイン)**：`gist.github.com` / `gist.githubusercontent.com` / `pastebin.com` / `hastebin.com` / `0x0.st` / `transfer.sh` / `file.io` / `anonfiles.com` — プロンプトインジェクション経由のデータ流出経路を塞ぐ
 - **Write / Edit (シークレット)**：`.env` / `.env.*` / `.ssh/**` — AI が `.env` や SSH 鍵を書き換えられない
-- **Read (シークレット)**：`.env` / `.env.*` / `.ssh/**` / `.aws/**` / `.azure/**` / `.kube/**` / `.config/gcloud/**` / `.docker/config.json` / `.npmrc` / `.pypirc` — AI が API キー・クラウド認証ファイルを読み取れない（**API キー漏洩防止の最重要層**）
+- **Read (シークレット)**：`.env` / `.env.*` / `.ssh/**` / `.aws/**` / `.azure/**` / `.kube/**` / `.config/gcloud/**` / `.docker/config.json` / `.npmrc` / `.pypirc` — AI が API キー・クラウド認証ファイルを読み取れない（**API キー漏洩を防いでいる最重要の見張り**。壁は読み取りを止めないので、ここが無いと秘密が読まれます）
 
 Desktop / Documents 配下への Write/Edit は deny **しません**（受講者の通常作業を阻害しないため）。代わりに「シークレットを直接保護する」方向で守ります。
 
-> Codex CLI 側にはツール単位 deny が現状（v0.130 系）存在しないため、これは **Claude Code 利用者のみが受ける恩恵**です。Codex は引き続き approval ダイアログと OS サンドボックスで守ります。
+> Codex CLI 側にはツール単位 deny が存在しないため、これは **Claude Code 利用者のみが受ける恩恵**です。Codex は引き続き、承認ダイアログ・このパッケージの hook（見張り）・OS サンドボックス（壁）で守ります。
 
 ## ステップ 5：動作確認（重要）
 
@@ -198,7 +217,7 @@ Claude Code を使うには **Claude の有料プラン（Pro 以上）** が必
 ### Claude Code がインストールできない
 
 ```bash
-npm install -g @anthropic-ai/claude-code@2.1.201
+npm install -g @anthropic-ai/claude-code@latest
 ```
 
 が失敗する場合：
@@ -220,7 +239,7 @@ npm install -g @anthropic-ai/claude-code@2.1.201
    mkdir -p ~/.npm-global
    npm config set prefix ~/.npm-global
    # PATH に ~/.npm-global/bin を追加（~/.zshrc 等に export PATH=~/.npm-global/bin:$PATH）
-   npm install -g @anthropic-ai/claude-code@2.1.201
+   npm install -g @anthropic-ai/claude-code@latest
    ```
 
 #### 最終手段：`--force`（非推奨）
@@ -228,7 +247,7 @@ npm install -g @anthropic-ai/claude-code@2.1.201
 上の方法が使えない / うまく動かない場合の**最後の手段**としてのみ：
 
 ```bash
-npm install -g @anthropic-ai/claude-code@2.1.201 --force
+npm install -g @anthropic-ai/claude-code@latest --force
 ```
 
 `--force` は依存関係の解決エラーや権限関連の警告を **黙らせる** ためのフラグです。本来は「原因を調べて直すべきエラー」まで通してしまうので、極力使わないでください。使った場合は「なぜそれが必要だったのか」を後で講師に共有して、根本原因を残さないようにすること。

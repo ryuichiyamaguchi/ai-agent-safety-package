@@ -40,11 +40,8 @@ export AI_SAFE_LOG_DIR="$HOME/.ai-safety/logs"
 # (ANTHROPIC_AUTH_TOKEN) と Gateway の BASE_URL/MODEL を「使う」ために渡してくる。
 # その経路では gateway が DS_CLAUDE_MODE=1 を立てるので unset をスキップする
 # （ここで消すと DeepSeek に繋がらず claude が "not logged in" になる）。
-if [ "${DS_CLAUDE_MODE:-}" != "1" ] && [ "${BOUNCER_INTEGRATED_MODE:-}" != "1" ]; then
+if [ "${DS_CLAUDE_MODE:-}" != "1" ]; then
   unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL CLAUDE_CODE_EFFORT_LEVEL ANTHROPIC_CUSTOM_MODEL_OPTION
-elif [ "${BOUNCER_INTEGRATED_MODE:-}" = "1" ]; then
-  # Bouncer最大保護は通常のClaude認証を使い、接続先だけloopbackへ向ける。
-  unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL CLAUDE_CODE_EFFORT_LEVEL ANTHROPIC_CUSTOM_MODEL_OPTION
 fi
 
 [ -f "$settings" ] || { echo "Claude の安全設定ファイルが見つかりませんでした。" >&2; echo "先に「導入(インストール)」を実行してから、もう一度この起動ボタンを押してください。" >&2; echo "（確認した場所: ${settings}）" >&2; exit 2; }
@@ -53,7 +50,7 @@ fi
 # claude バイナリ検出（PATH 不在時は日本語で案内し、bash の "command not found" を防ぐ）。
 if ! command -v claude >/dev/null 2>&1; then
   echo "claude コマンドが見つかりません。" >&2
-  echo "先に Claude Code をインストールしてください（例: npm install -g @anthropic-ai/claude-code@2.1.201）。" >&2
+  echo "先に Claude Code をインストールしてください（例: npm install -g @anthropic-ai/claude-code@latest）。" >&2
   echo "インストール済みなのに出る場合は、ターミナルを開き直すか PATH を確認してください。" >&2
   exit 1
 fi

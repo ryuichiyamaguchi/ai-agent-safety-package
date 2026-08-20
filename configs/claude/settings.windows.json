@@ -9,12 +9,7 @@
     "disableBypassPermissionsMode": "disable",
     "allow": [
       "Read(./**)",
-      "LS(./**)",
-      "Glob(./**)",
-      "Grep(./**)",
       "Edit(./**)",
-      "Write(./**)",
-      "MultiEdit(./**)",
       "Bash(ls*)",
       "Bash(pwd*)",
       "Bash(cat *)",
@@ -99,9 +94,6 @@
       "WebFetch(domain:transfer.sh)",
       "WebFetch(domain:file.io)",
       "WebFetch(domain:anonfiles.com)",
-      "Write(**/.env)",
-      "Write(**/.env.*)",
-      "Write(**/.ssh/**)",
       "Edit(**/.env)",
       "Edit(**/.env.*)",
       "Edit(**/.ssh/**)",
@@ -116,10 +108,12 @@
       "Read(**/.npmrc)",
       "Read(**/.pypirc)",
       "Read(**/.ai-safety/**)",
-      "Write(**/.ai-safety/**)",
-      "Edit(**/.ai-safety/**)"
+      "Edit(**/.ai-safety/**)",
+      "Read(**/.deepseek-claude/**)",
+      "Edit(**/.deepseek-claude/**)"
     ]
   },
+  "_comment_sandbox": "Windows には sandbox 節を意図的に置いていない（mac 側 settings.mac.json には置いてある）。理由: Claude Code の純正サンドボックスは公式に macOS / Linux / WSL2 のみ対応で、ネイティブ Windows は非対応と明記されている（公式 https://code.claude.com/docs/en/sandboxing 「Native Windows is not supported. On Windows, run Claude Code inside a WSL2 distribution.」）。バイナリには Windows 実装（srt-win / WFP / NTFS ACL）が同梱されているが feature gate で無効化されており、実行時に『The Windows sandbox is not enabled on this build.』を返す。したがって Windows 側は v1.16.0 と同じく hook（guard-bash.ps1 / guard-write.ps1 / guard-webfetch.ps1 / guard-post-output.ps1 / guard-prompt.ps1 / guard-observe.ps1）＋ permissions リストで守る。mac との非対称はここだけで、保護の中身（deny 床・保護パス・秘密検出）は 3 エンジン共通の policy/safety-policy.json で同一。将来 Windows で feature gate が開いたら、この節を settings.mac.json と同じ内容に差し替える。",
   "hooks": {
     "UserPromptSubmit": [
       {

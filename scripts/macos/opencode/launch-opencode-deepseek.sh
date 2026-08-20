@@ -12,6 +12,23 @@ PORT="${DS_GATEWAY_PORT:-8788}"
 KEY_DIR="$HOME/.deepseek-claude"
 KEY_FILE="$KEY_DIR/auth"
 LOG_DIR="${AI_SAFE_LOG_DIR:-$HOME/.ai-safety/logs}"
+# 秘密の解決（順序は全箇所共通: 環境変数 → OS の金庫 → 旧平文）。
+# 金庫は Mac のキーチェーン。値は "v1:" + base64 の封筒に包んで入れてある。
+read_secret() { # $1=金庫の service 名, $2=環境変数名(省略可), $3=旧平文ファイル(省略可)
+  if [ -n "${2:-}" ]; then
+    _v="${!2:-}"
+    if [ -n "$_v" ]; then printf '%s' "$_v"; return 0; fi
+  fi
+  if [ -x /usr/bin/security ]; then
+    _v="$(/usr/bin/security find-generic-password -a "$USER" -s "$1" -w 2>/dev/null | sed 's/^v1://' | base64 --decode 2>/dev/null)"
+    if [ -n "$_v" ]; then printf '%s' "$_v"; return 0; fi
+  fi
+  if [ -n "${3:-}" ] && [ -s "$3" ]; then
+    tr -d '\r\n' < "$3"; return 0
+  fi
+  return 1
+}
+
 COACH_MARKER="$LOG_DIR/coach-engine"
 
 # 第 2 引数以降はフラグ。順不同で受ける。
@@ -100,7 +117,7 @@ if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
     echo "  gateway:   http://127.0.0.1:8788/v1 (mandatory / 使用中なら 8789-8797 から自動選択)"
   fi
   echo "  config:    OPENCODE_CONFIG_CONTENT"
-  echo "  model:     DeepSeek V4 Pro / small: V4 Flash"
+  echo "  model:     DeepSeek V4 Flash / small: V4 Flash"
   if [ "$WEBSEARCH" = "--websearch" ]; then
     echo "  websearch: opt-in (approval required)"
   else
@@ -123,7 +140,11 @@ if ! node --check "$MONITOR_PLUGIN" >/dev/null 2>&1; then
 fi
 OPENCODE_BIN="${OPENCODE_BIN:-$(command -v opencode 2>/dev/null || true)}"
 [ -n "$OPENCODE_BIN" ] || { echo "OpenCode が見つかりません。先に OpenCode をインストールしてください。" >&2; exit 1; }
-[ -s "$KEY_FILE" ] || { echo "DeepSeek APIキーが未登録です。先に「DeepSeekキーを登録」を実行してください。" >&2; exit 1; }
+# 実キーはここで一度だけ解決する（環境変数 → 金庫 → 旧平文）。金庫に移したあとは
+# 旧平文が消えるので、ファイルの有無で判定してはいけない。
+# 解決できなければ fail-closed（鍵なしで gateway を立てると素通しの中継になる）。
+DS_KEY="$(read_secret ai-safety.deepseek DEEPSEEK_API_KEY "$KEY_FILE" || true)"
+[ -n "$DS_KEY" ] || { echo "DeepSeek APIキーが未登録です。先に「DeepSeekキーを登録」を実行してください。" >&2; exit 1; }
 
 VERSION="$("$OPENCODE_BIN" --version 2>/dev/null | head -n1 | tr -d '\r')"
 if ! node -e 'const m=require(process.argv[1]);process.exit(m.isSupportedVersion(process.argv[2])?0:1)' "$CONFIG_JS" "$VERSION"; then
@@ -249,7 +270,7 @@ if [ "$GATEWAY_REUSED" -ne 1 ]; then
     _log_from=$(( $(wc -l < "$GATEWAY_LOG" 2>/dev/null || echo 0) + 1 ))
     DS_GATEWAY_PORT="$candidate" \
     DS_GATEWAY_UPSTREAM="https://api.deepseek.com" \
-    DS_GATEWAY_AUTH_FILE="$KEY_FILE" \
+    DEEPSEEK_API_KEY="$DS_KEY" \
     DS_GATEWAY_TOKEN="$GATEWAY_TOKEN" \
     DS_GATEWAY_WORKSPACE="$WORKSPACE" \
       node "$GATEWAY_JS" >>"$GATEWAY_LOG" 2>&1 &
@@ -324,7 +345,7 @@ fi
 # 書く場所）だけを見るので、環境変数しか持っていない人にはここで案内を出す。
 SECRET_ENV_VARS="$(node "$CONFIG_JS" --print-secret-env)"
 [ -n "$SECRET_ENV_VARS" ] || { echo "OpenCode 安全設定を生成できませんでした。" >&2; exit 1; }
-if [ -n "${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-}" ] && [ ! -s "$HOME/.ai-safety/gemini-api-key.txt" ]; then
+if [ -n "${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-}" ] && ! read_secret ai-safety.gemini '' "$HOME/.ai-safety/gemini-api-key.txt" >/dev/null 2>&1; then
   echo "注意: 環境変数の Gemini キーは OpenCode へ渡しません（AI から見えてしまうため）。" >&2
   echo "      検索と画像読み取りを使うときは「6_AIコーチのキーを登録」で登録してください。" >&2
 fi
@@ -612,7 +633,7 @@ if ! printf '%s' "$resolved" | node "$CONFIG_JS" --verify-resolved; then
   resolved_safe="${resolved//$GATEWAY_TOKEN/REDACTED}"
   # 解決済み設定には、リモート MCP（Buffer 等）の鍵も Authorization ヘッダとして入る。
   # 診断ファイルは講師へ共有してもらう前提なので、鍵は残さず伏せる。
-  _remote_key="$(tr -d '\r\n' < "$HOME/.ai-safety/buffer-api-key.txt" 2>/dev/null || true)"
+  _remote_key="$(read_secret ai-safety.buffer '' "$HOME/.ai-safety/buffer-api-key.txt" || true)"
   [ -n "$_remote_key" ] && resolved_safe="${resolved_safe//$_remote_key/REDACTED}"
   unset _remote_key
   ( umask 077; printf '%s' "$resolved_safe" > "$FAILED_RESOLVED" ) 2>/dev/null || true
@@ -649,7 +670,7 @@ node "$MONITOR_PLUGIN" --watchdog --timeout-ms 30000 >/dev/null 2>&1 &
 WATCHDOG_PID=$!
 
 printf 'opencode-deepseek' > "$COACH_MARKER" 2>/dev/null || true
-echo "Bouncer送信検査: 有効 / モデル: DeepSeek V4 Pro / 補助: V4 Flash"
+echo "送信検査（伏せる人）: 有効 / モデル: DeepSeek V4 Flash / 補助: V4 Flash"
 echo "変更操作は確認、外部フォルダは禁止、Web検索は${WEBSEARCH:+許可時のみ}$( [ -n "$WEBSEARCH" ] || printf '無効' )です。"
 echo "危険なコマンド（まとめて削除・鍵の読み出し・ネットから拾った実行）は確認なしで止まります。"
 

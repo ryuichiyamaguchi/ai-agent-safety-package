@@ -161,6 +161,31 @@ function Test-DistributionHashListed([string]$RelPath) {
     Test-DistributionHash $RelPath
 }
 
+# v1.17.0: 秘密の金庫・マスキング・PC 全体設定・フォルダ保護・長時間おまかせモードの実体も
+# 改ざん検知の対象に入れる。これらは「安全装置そのもの」なので、設定ファイルだけ守っても足りない。
+# 表に行が無いファイルは素通しする実装なので、片 OS 分しか入っていない配布でも壊れない。
+foreach ($sec in @(
+    'scripts/common/secret-store.js',
+    'scripts/common/secret-migrate.js',
+    'scripts/common/secret-patterns.js',
+    'scripts/common/clipboard-mask.js',
+    'scripts/common/apply-global-guard.js',
+    'scripts/common/apply-global-codex.js',
+    'scripts/common/apply-global-agy.js',
+    'scripts/common/apply-global-opencode.js',
+    'scripts/common/apply-global-deny.js',
+    'scripts/macos/apply-global-guard.sh',
+    'scripts/macos/uninstall-global-guard.sh',
+    'scripts/macos/protect-folder.sh',
+    'scripts/macos/launch-claude-longrun.sh',
+    'scripts/windows/apply-global-guard.ps1',
+    'scripts/windows/uninstall-global-guard.ps1',
+    'scripts/windows/protect-folder.ps1',
+    'scripts/windows/launch-claude-longrun.ps1'
+)) {
+    Test-DistributionHash $sec
+}
+
 Test-DistributionHash "configs/gemini/policies/safety.toml"
 Test-DistributionHash "workspace-template/aiexclude.template"
 Test-DistributionHashListed "workspace-template/dist-skills/hearing-ladder/SKILL.md"
@@ -237,6 +262,11 @@ if (-not (Test-Path -LiteralPath $pluginsReadme)) {
 
 Copy-Item -LiteralPath (Join-Path $packageRoot "policy\safety-policy.json") -Destination (Join-Path $Workspace ".ai-safety\policy\safety-policy.json") -Force
 
+# コピー元パッケージの場所を残す。「新しい作業フォルダを安全にする」ボタンは、
+# ワークスペース側から実行されたときにこれを辿ってパッケージ本体 (configs / policy /
+# workspace-template) を見つける。見つからなければボタン側が案内して止まる。
+Set-Content -LiteralPath (Join-Path $Workspace ".ai-safety\package-source.txt") -Value $packageRoot -Encoding UTF8 -Force
+
 # agent-monitor 解説カード一式を .ai-safety\cards\ に配置する。
 $cardsSrc = Join-Path $packageRoot "configs\safety\cards"
 $cardsDest = Join-Path $Workspace ".ai-safety\cards"
@@ -295,18 +325,15 @@ if (Test-Path -LiteralPath $commonDest) {
 New-Item -ItemType Directory -Force -Path $commonDest | Out-Null
 Copy-Item -Path (Join-Path $packageRoot "scripts\common\*") -Destination $commonDest -Recurse -Force
 
-# Bouncer最大保護モード用のローカルGateway。標準モードでは起動しないため、
-# ローカルLLMを動かせないPCでも標準モードはそのまま利用できる。
-$bouncerSrc = Join-Path $packageRoot "bouncer-gateway"
-if (Test-Path -LiteralPath $bouncerSrc) {
-    $bouncerDest = Join-Path $Workspace ".ai-safety\bouncer"
-    if (Test-Path -LiteralPath $bouncerDest) {
-        $relativeName = ($bouncerDest -replace "[:\\\/]+", "_")
-        New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
-        Copy-Item -LiteralPath $bouncerDest -Destination (Join-Path $backupDir $relativeName) -Recurse -Force
-        Remove-Item -LiteralPath $bouncerDest -Recurse -Force
-    }
-    Copy-Item -LiteralPath $bouncerSrc -Destination $bouncerDest -Recurse -Force
+# 旧「最大保護モード」で使っていたローカル検査 Gateway（ローカル LLM 必須）は v1.17.0 で
+# 廃止した。受講生の PC ではほぼ動かせないのにメニューに出ていたため。既存の作業フォルダに
+# 残っている古い配置はバックアップしてから片付ける。
+$legacyBouncer = Join-Path $Workspace ".ai-safety\bouncer"
+if (Test-Path -LiteralPath $legacyBouncer) {
+    $relativeName = ($legacyBouncer -replace "[:\\\/]+", "_")
+    New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+    Copy-Item -LiteralPath $legacyBouncer -Destination (Join-Path $backupDir $relativeName) -Recurse -Force
+    Remove-Item -LiteralPath $legacyBouncer -Recurse -Force
 }
 
 # Defensive cleanup: remove stale foreign-OS hook dirs on single-platform install.
@@ -437,7 +464,9 @@ if (Test-Path -LiteralPath $startSrc) {
         "（上級）9_DeepSeekキーを削除.command", "（上級）9_DeepSeekキーを削除.bat",
         "（上級）10_ccmuxを入れる.command", "（上級）10_ccmuxを入れる.bat",
         "（上級）11_Bufferのキーを登録.command", "（上級）11_Bufferのキーを登録.bat",
-        "（上級）12_プラグインの置き場を開く.command", "（上級）12_プラグインの置き場を開く.bat"
+        "（上級）12_プラグインの置き場を開く.command", "（上級）12_プラグインの置き場を開く.bat",
+        "（上級）5_危険コマンドをClaude全体で禁止.command", "（上級）5_危険コマンドをClaude全体で禁止.bat",
+        "（上級）6_グローバル禁止を解除.command", "（上級）6_グローバル禁止を解除.bat"
     )
     foreach ($legacyName in $legacyStartNames) {
         $legacyPath = Join-Path $startDest $legacyName
@@ -581,6 +610,93 @@ if ($InstallGlobalClaudeSettings) {
         if ($LASTEXITCODE -ne 0) { Write-Warning "global deny merge failed (skipped)." }
     } else {
         Write-Warning "node not found; skipped global Claude deny merge (Node.js が必要です)."
+    }
+}
+
+# --- %USERPROFILE%\.ai-safety の権限を締める（mac の chmod 700/600 と対称） -----
+# ここには API キーの平文ファイル（gemini-api-key.txt など）と AI の実行ログが置かれる。
+# mac 側は install.sh が chmod 700/600 を掛け直す。Windows に chmod は無いので、
+# 継承を切って「現在のユーザーだけがフル制御」の ACL に落とす（icacls の /inheritance:r と
+# /grant:r）。既定でもユーザープロファイル配下は他ユーザーから読めないが、フォルダを
+# 別の場所から移動・コピーしてきた場合に緩い ACL が付いたまま残ることがあるため明示する。
+# 失敗しても導入は止めない（権限の締め直しは追加の保険であって、保護の本体ではない）。
+$aiSafeHome = Join-Path $env:USERPROFILE ".ai-safety"
+if ((Test-Path -LiteralPath $aiSafeHome) -and ($IsWindows -ne $false)) {
+    try {
+        $me = "$env:USERDOMAIN\$env:USERNAME"
+        & icacls "$aiSafeHome" /inheritance:r /grant:r ("{0}:(OI)(CI)F" -f $me) /T /C /Q 2>&1 | Out-Null
+        Write-Host ("権限を締めました: " + $aiSafeHome + "（現在のユーザーだけがアクセスできる ACL）")
+    } catch {
+        Write-Warning ("権限の締め直しに失敗しました(スキップ): " + $_.Exception.Message)
+    }
+}
+
+# --- 秘密の自動移行（受講生の操作ゼロ / v1.17.0） ---------------------------
+# 旧平文の API キーを OS の金庫（DPAPI）へ移す。各キーごとに冪等で、
+# 「金庫へ書く → 読み戻して一致を検証 → 一致したときだけ平文を削除」の順に進む。
+# 一致しなければ平文はそのまま残し、次回もう一度試す。
+$secretMigrate = Join-Path $Workspace '.ai-safety\hooks\common\secret-migrate.js'
+if ((Test-Path -LiteralPath $secretMigrate -PathType Leaf) -and (Get-Command node -ErrorAction SilentlyContinue)) {
+    Write-Host "登録済みのキーを金庫（DPAPI）へ移します..."
+    try { & node $secretMigrate } catch { Write-Warning ("キーの移行をスキップしました: " + $_.Exception.Message) }
+}
+
+# --- 作業フォルダを「信頼済み」にする（v1.17.0） ---------------------------
+# Claude Code は初回に対話で信頼ダイアログを承認するまで、そのフォルダの
+# permissions.allow を丸ごと無視する（mac 実測で確認）。受講者はボタンから
+# 起動するため承認の機会が無く、意図した許可設定が効かないまま使うことになる。
+# そこで install が %USERPROFILE%\.claude.json に承認済みを記録する。
+# 対象は「このスクリプトが今セットアップした作業フォルダ」だけ。
+$claudeJson = Join-Path $env:USERPROFILE '.claude.json'
+if (Get-Command node -ErrorAction SilentlyContinue) {
+    $env:AI_SAFE_CLAUDE_JSON = $claudeJson
+    $env:AI_SAFE_WORKSPACE = $Workspace
+    $env:AI_SAFE_BACKUP_DIR = $backupDir
+    $trustScript = @'
+const fs = require("fs");
+const path = require("path");
+const file = process.env.AI_SAFE_CLAUDE_JSON;
+const ws = process.env.AI_SAFE_WORKSPACE;
+const backupDir = process.env.AI_SAFE_BACKUP_DIR;
+let data = {};
+if (fs.existsSync(file)) {
+  const raw = fs.readFileSync(file, "utf8");
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    process.exit(3);
+  }
+  try { fs.copyFileSync(file, path.join(backupDir, "claude.json")); } catch (e) {}
+}
+if (!data.projects || typeof data.projects !== "object") data.projects = {};
+if (!data.projects[ws] || typeof data.projects[ws] !== "object") data.projects[ws] = {};
+if (data.projects[ws].hasTrustDialogAccepted === true) process.exit(1);
+data.projects[ws].hasTrustDialogAccepted = true;
+const tmp = file + ".ai-safety-tmp";
+fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n");
+fs.renameSync(tmp, file);
+process.exit(0);
+'@
+    $trustFile = Join-Path $env:TEMP ("ai-safety-trust-" + [System.Guid]::NewGuid().ToString("N") + ".js")
+    try {
+        Set-Content -LiteralPath $trustFile -Value $trustScript -Encoding UTF8
+        & node $trustFile
+        $trustRc = $LASTEXITCODE
+        if ($trustRc -eq 0) {
+            Write-Host "作業フォルダを Claude の信頼済みに登録しました（許可設定が最初から有効になります）。"
+        } elseif ($trustRc -eq 1) {
+            # すでに登録済み。何も言わない。
+        } elseif ($trustRc -eq 3) {
+            Write-Host ("注意: " + $claudeJson + " を読めなかったため、信頼済み登録をスキップしました。")
+            Write-Host "      Claude を1回ふつうに起動して、信頼の確認に「はい」と答えてください。"
+        } else {
+            Write-Host "注意: 信頼済み登録に失敗しました。Claude を1回ふつうに起動して、"
+            Write-Host "      信頼の確認に「はい」と答えてください。"
+        }
+    } catch {
+        Write-Warning ("信頼済み登録をスキップしました: " + $_.Exception.Message)
+    } finally {
+        Remove-Item -LiteralPath $trustFile -Force -ErrorAction SilentlyContinue
     }
 }
 

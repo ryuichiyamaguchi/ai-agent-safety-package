@@ -21,10 +21,13 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-# Claude Code は動作確認済みの版 (2.1.201) に固定する。最新版だと --help のフラグ構成が変わり、
-# d-claude の正直プロンプト/MCP/権限モードが「黙ってスキップ」され劣化する事故が起きるため。
-# 期待版の SSOT は policy/safety-policy.json の testedClaudeCodeVersion（起動時/診断で照合）。
-for pkg in "@openai/codex" "@anthropic-ai/claude-code@2.1.201" "opencode-ai"; do
+# 2026-08-20: Claude Code のバージョン固定 (@2.1.201) をやめ、最新版を入れる。
+# 理由 = (a) Claude Code 純正サンドボックス（settings の sandbox 節）を使う方針に変えたため、
+# 古い版に固定すると純正機能の恩恵を受けられない (b) 固定版は日々古びる一方で、受講者の
+# 環境には npm の都合で最新が入りがちで、毎回「版ちがい」警告が出るドリフトになっていた。
+# 版差でランチャーのフラグ検出が外れる懸念は残るが、launch-claude-safe.{sh,ps1} が --help を
+# 見て「対応していないフラグは付けない」実装なので起動は壊れない（機能が減るだけ）。
+for pkg in "@openai/codex" "@anthropic-ai/claude-code@latest" "opencode-ai"; do
   echo "------------------------------------------------------------"
   echo "導入中: $pkg"
   if npm install -g "$pkg"; then

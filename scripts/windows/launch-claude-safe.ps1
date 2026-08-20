@@ -28,12 +28,8 @@ $env:AI_SAFE_LOG_DIR = Join-Path $HOME ".ai-safety\logs"
 # ただし d-claude (DeepSeek 駆動) は gateway 経由でこのスクリプトを呼び、DeepSeek キーと
 # Gateway の BASE_URL/MODEL を「使う」ために渡してくる。その経路では gateway が
 # DS_CLAUDE_MODE=1 を立てるので Remove をスキップする (消すと "not logged in" になる)。
-if ($env:DS_CLAUDE_MODE -ne '1' -and $env:BOUNCER_INTEGRATED_MODE -ne '1') {
+if ($env:DS_CLAUDE_MODE -ne '1') {
     foreach ($v in @('ANTHROPIC_AUTH_TOKEN','ANTHROPIC_BASE_URL','ANTHROPIC_MODEL','ANTHROPIC_DEFAULT_OPUS_MODEL','ANTHROPIC_DEFAULT_SONNET_MODEL','ANTHROPIC_DEFAULT_HAIKU_MODEL','CLAUDE_CODE_SUBAGENT_MODEL','CLAUDE_CODE_EFFORT_LEVEL','ANTHROPIC_CUSTOM_MODEL_OPTION')) {
-        if (Test-Path "Env:\$v") { Remove-Item "Env:\$v" -ErrorAction SilentlyContinue }
-    }
-} elseif ($env:BOUNCER_INTEGRATED_MODE -eq '1') {
-    foreach ($v in @('ANTHROPIC_AUTH_TOKEN','ANTHROPIC_MODEL','ANTHROPIC_DEFAULT_OPUS_MODEL','ANTHROPIC_DEFAULT_SONNET_MODEL','ANTHROPIC_DEFAULT_HAIKU_MODEL','CLAUDE_CODE_SUBAGENT_MODEL','CLAUDE_CODE_EFFORT_LEVEL','ANTHROPIC_CUSTOM_MODEL_OPTION')) {
         if (Test-Path "Env:\$v") { Remove-Item "Env:\$v" -ErrorAction SilentlyContinue }
     }
 }
@@ -62,7 +58,7 @@ if (-not $Claude) {
 }
 if (-not $Claude) {
     Write-Host "claude コマンドが見つかりません。"
-    Write-Host "「0_AIツールをまとめて入れる-Windows.bat」を実行したか、'npm install -g @anthropic-ai/claude-code@2.1.201' を確認してください。"
+    Write-Host "「0_AIツールをまとめて入れる-Windows.bat」を実行したか、'npm install -g @anthropic-ai/claude-code@latest' を確認してください。"
     Write-Host "（場所を手動指定する場合は環境変数 CLAUDE_BIN にフルパスを設定）"
     exit 1
 }

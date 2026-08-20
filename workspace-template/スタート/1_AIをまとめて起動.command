@@ -6,24 +6,23 @@ WORKSPACE="$(cd "$HERE/.." && pwd)"
 LAUNCHER="$WORKSPACE/.ai-safety/hooks/macos/launch-integrated.sh"
 
 if [ ! -x "$LAUNCHER" ]; then
-  echo "Bouncer統合版がまだ準備されていません。"
+  echo "安全装置（Bouncer）がまだ準備されていません。"
   echo "先にインストーラーを実行してください。"
   read -r -p "Enterで閉じます: " _
   exit 2
 fi
 
 echo
-echo "AIをまとめて起動（Bouncer統合版）"
+echo "AIをまとめて起動（安全装置つき）"
 echo "────────────────────────────────"
 echo "1) Codex   標準モード（ChatGPT 課金の人・推奨）"
 echo "2) Claude  標準モード（Claude 課金の人・推奨）"
 echo "3) Claude  AI補助モード（Claude 課金の人）"
-echo "4) Claude  最大保護モード（Claude 課金の人・ローカルGemmaが必要）"
-echo "5) OpenCode + DeepSeek V4 Pro（無課金の人・少額チャージ／送信検査・Web検索OFF）"
-echo "6) OpenCode + DeepSeek V4 Pro（無課金の人・少額チャージ／Web検索を確認制でON）"
-echo "7) d-claude + DeepSeek V4 Pro（Claudeの操作感・送信検査・監視ON）"
-echo "   ※7 は在校中のみ。卒業後は使えなくなります（OpenCode へ移行 → 説明書 docs/20_卒業後ガイド）"
-echo "8) OpenCode + DeepSeek V4 Pro（前回の続きから開く）"
+echo "4) OpenCode + DeepSeek V4 Flash（無課金の人・少額チャージ／送信検査・Web検索OFF）"
+echo "5) OpenCode + DeepSeek V4 Flash（無課金の人・少額チャージ／Web検索を確認制でON）"
+echo "6) d-claude + DeepSeek V4 Flash（Claudeの操作感・送信検査・監視ON）"
+echo "   ※6 は在校中のみ。卒業後は使えなくなります（OpenCode へ移行 → 説明書 docs/20_卒業後ガイド）"
+echo "7) OpenCode + DeepSeek V4 Flash（前回の続きから開く）"
 echo
 read -r -p "番号を入力してください [1]: " choice
 choice="${choice:-1}"
@@ -88,13 +87,12 @@ case "$choice" in
   1) exec bash "$LAUNCHER" "$WORKSPACE" codex standard ;;
   2) exec bash "$LAUNCHER" "$WORKSPACE" claude standard ;;
   3) exec bash "$LAUNCHER" "$WORKSPACE" claude assisted ;;
-  4) exec bash "$LAUNCHER" "$WORKSPACE" claude maximum ;;
-  5) choose_project; exec bash "$LAUNCHER" "$WORKSPACE" opencode standard "$PROJECT_FLAG" ;;
-  6) choose_project; exec bash "$LAUNCHER" "$WORKSPACE" opencode standard --websearch "$PROJECT_FLAG" ;;
-  7) exec bash "$LAUNCHER" "$WORKSPACE" d-claude standard ;;
-  8) choose_project; exec bash "$LAUNCHER" "$WORKSPACE" opencode standard --resume "$PROJECT_FLAG" ;;
+  4) choose_project; exec bash "$LAUNCHER" "$WORKSPACE" opencode standard "$PROJECT_FLAG" ;;
+  5) choose_project; exec bash "$LAUNCHER" "$WORKSPACE" opencode standard --websearch "$PROJECT_FLAG" ;;
+  6) exec bash "$LAUNCHER" "$WORKSPACE" d-claude standard ;;
+  7) choose_project; exec bash "$LAUNCHER" "$WORKSPACE" opencode standard --resume "$PROJECT_FLAG" ;;
   *)
-    echo "1〜8の番号を選んでください。"
+    echo "1〜7の番号を選んでください。"
     read -r -p "Enterで閉じます: " _
     exit 2
     ;;

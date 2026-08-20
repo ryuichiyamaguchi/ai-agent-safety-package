@@ -109,17 +109,41 @@ fi
 rm -f "$win_installer_txt"
 
 # 9) 期待される番号ファイルが揃う（v1.16.0 番号再編後: 基本 1..10 と 上級1..8）
-for base in "1_AIをまとめて起動" "2_セーフCodexを起動" "3_セーフClaudeを起動" "4_セーフAntiGravityを起動" "5_見守りモニターを起動" "6_AIコーチのキーを登録" "7_安全パッケージを最新版に更新" "8_AIツールを最新版に更新" "9_困ったとき診断" "10_野良d-claudeを退治" "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）3_モニターをコンソールで見る" "（上級）4_ステータスラインを入れる" "（上級）5_危険コマンドをClaude全体で禁止" "（上級）6_グローバル禁止を解除" "（上級）7_DeepSeekキーを削除" "（上級）8_Bufferのキーを登録" "（上級）9_プラグインの置き場を開く"; do
+for base in "1_AIをまとめて起動" "2_セーフCodexを起動" "3_セーフClaudeを起動" "4_セーフAntiGravityを起動" "5_見守りモニターを起動" "6_AIコーチのキーを登録" "7_安全パッケージを最新版に更新" "8_AIツールを最新版に更新" "9_困ったとき診断" "10_野良d-claudeを退治" "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）3_モニターをコンソールで見る" "（上級）4_ステータスラインを入れる" "（上級）5_このPC全体に最低限の安全設定を入れる" "（上級）6_PC全体の安全設定を解除" "（上級）7_DeepSeekキーを削除" "（上級）8_Bufferのキーを登録" "（上級）9_プラグインの置き場を開く" "（上級）14_新しい作業フォルダを安全にする" "（上級）15_長時間おまかせモードで起動"; do
   [ -f "$START_DIR/$base.command" ] || { note "FAIL: $base.command がない"; fail=1; }
   [ -f "$START_DIR/$base.bat" ] || { note "FAIL: $base.bat がない"; fail=1; }
 done
 
-# 9b) グローバル禁止（上級5）と その取り消し（上級6）が正しい wrapper を呼ぶ（claude と codex の両対応）
-grep -q 'apply-global-guard.sh' "$START_DIR/（上級）5_危険コマンドをClaude全体で禁止.command" || { note "FAIL: 上級5 .command が apply-global-guard.sh を呼ばない"; fail=1; }
-grep -q 'apply-global-guard.ps1' "$START_DIR/（上級）5_危険コマンドをClaude全体で禁止.bat" || { note "FAIL: 上級5 .bat が apply-global-guard.ps1 を呼ばない"; fail=1; }
-grep -q 'uninstall-global-guard.sh' "$START_DIR/（上級）6_グローバル禁止を解除.command" || { note "FAIL: 上級6 .command が uninstall-global-guard.sh を呼ばない"; fail=1; }
-grep -q 'uninstall-global-guard.ps1' "$START_DIR/（上級）6_グローバル禁止を解除.bat" || { note "FAIL: 上級6 .bat が uninstall-global-guard.ps1 を呼ばない"; fail=1; }
+# 9b) PC 全体の安全設定（上級5）と その解除（上級6）が正しい wrapper を呼ぶ（4 エンジン対応）
+grep -q 'apply-global-guard.sh' "$START_DIR/（上級）5_このPC全体に最低限の安全設定を入れる.command" || { note "FAIL: 上級5 .command が apply-global-guard.sh を呼ばない"; fail=1; }
+grep -q 'apply-global-guard.ps1' "$START_DIR/（上級）5_このPC全体に最低限の安全設定を入れる.bat" || { note "FAIL: 上級5 .bat が apply-global-guard.ps1 を呼ばない"; fail=1; }
+grep -q 'uninstall-global-guard.sh' "$START_DIR/（上級）6_PC全体の安全設定を解除.command" || { note "FAIL: 上級6 .command が uninstall-global-guard.sh を呼ばない"; fail=1; }
+grep -q 'uninstall-global-guard.ps1' "$START_DIR/（上級）6_PC全体の安全設定を解除.bat" || { note "FAIL: 上級6 .bat が uninstall-global-guard.ps1 を呼ばない"; fail=1; }
 grep -Fq '（上級）5' "$HTML" || { note "FAIL: スタート.html に 上級5 の案内がない"; fail=1; }
 grep -Fq '（上級）6' "$HTML" || { note "FAIL: スタート.html に 上級6 の案内がない"; fail=1; }
+
+# 9c) 新しい作業フォルダを安全にする（上級14）が protect-folder を呼ぶ
+grep -q 'protect-folder.sh' "$START_DIR/（上級）14_新しい作業フォルダを安全にする.command" || { note "FAIL: 上級14 .command が protect-folder.sh を呼ばない"; fail=1; }
+grep -q 'protect-folder.ps1' "$START_DIR/（上級）14_新しい作業フォルダを安全にする.bat" || { note "FAIL: 上級14 .bat が protect-folder.ps1 を呼ばない"; fail=1; }
+grep -Fq '（上級）14' "$HTML" || { note "FAIL: スタート.html に 上級14 の案内がない"; fail=1; }
+
+# 9c-2) 長時間おまかせモード（上級15）。壁（サンドボックス）がある環境でしか起動しない設計。
+#       Windows 版は「起動しない」ことが仕様なので、拒否する ps1 を呼んでいることまで見る。
+grep -q 'launch-claude-longrun.sh' "$START_DIR/（上級）15_長時間おまかせモードで起動.command" || { note "FAIL: 上級15 .command が launch-claude-longrun.sh を呼ばない"; fail=1; }
+grep -q 'launch-claude-longrun.ps1' "$START_DIR/（上級）15_長時間おまかせモードで起動.bat" || { note "FAIL: 上級15 .bat が launch-claude-longrun.ps1 を呼ばない"; fail=1; }
+grep -Fq '（上級）15' "$HTML" || { note "FAIL: スタート.html に 上級15 の案内がない"; fail=1; }
+for _need in 'sandbox-exec' 'sandbox.enabled' 'disableBypassPermissionsMode' 'p.ask = \[\]' 'mktemp -d'; do
+  grep -q "$_need" "$ROOT/scripts/macos/launch-claude-longrun.sh" || { note "FAIL: 長時間おまかせモードに $_need の守りがない"; fail=1; }
+done
+grep -q 'bypassPermissions' "$ROOT/scripts/macos/launch-claude-longrun.sh" || { note "FAIL: 長時間おまかせモードが bypassPermissions を封じる記述を失っている"; fail=1; }
+grep -q 'exit 2' "$ROOT/scripts/windows/launch-claude-longrun.ps1" || { note "FAIL: Windows の長時間おまかせモードが起動を拒否しない"; fail=1; }
+
+# 9d) 全体設定の反映／解除ラッパーが 4 エンジン分の実体を呼ぶ
+for _js in apply-global-guard.js apply-global-codex.js apply-global-agy.js apply-global-opencode.js; do
+  grep -q "$_js" "$ROOT/scripts/macos/apply-global-guard.sh" || { note "FAIL: apply-global-guard.sh が $_js を呼ばない"; fail=1; }
+  grep -q "$_js" "$ROOT/scripts/macos/uninstall-global-guard.sh" || { note "FAIL: uninstall-global-guard.sh が $_js を呼ばない"; fail=1; }
+  grep -q "$_js" "$ROOT/scripts/windows/apply-global-guard.ps1" || { note "FAIL: apply-global-guard.ps1 が $_js を呼ばない"; fail=1; }
+  grep -q "$_js" "$ROOT/scripts/windows/uninstall-global-guard.ps1" || { note "FAIL: uninstall-global-guard.ps1 が $_js を呼ばない"; fail=1; }
+done
 
 if [ $fail -eq 0 ]; then note "ALL PASS"; else note "FAILURES ABOVE"; exit 1; fi
