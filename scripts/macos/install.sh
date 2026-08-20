@@ -652,7 +652,22 @@ if [ -d "$HOME/.ai-safety" ]; then
   for _f in "$HOME/.ai-safety/"*api-key*.txt "$HOME/.ai-safety/"*token*.txt "$HOME/.ai-safety/"*.key; do
     [ -f "$_f" ] && chmod 600 "$_f" 2>/dev/null || true
   done
-  echo "権限を締めました: $HOME/.ai-safety（フォルダ 700 / 鍵ファイル 600）"
+  # v1.17.2: 締めたあと「本人が実際に読み書きできること」を必ず確かめる。
+  #   Windows 側は icacls の名前解決に失敗して本人まで締め出す事故が実機で起きた
+  #   （USERDOMAIN\USERNAME が解決できない PC で、誰も権限を持たないフォルダが残る）。
+  #   mac の chmod は SID の名前解決を伴わず、所有者に対する 700/600 は失敗しようがない
+  #   ので同型の事故は起きない。それでも「締めたが入れない」状態で先へ進めない原則は
+  #   両 OS で同じにしておく。読み書きできなければ 755/644 へ戻して警告する。
+  _perm_probe="$HOME/.ai-safety/.perm-check-$$"
+  if printf 'ok' > "$_perm_probe" 2>/dev/null && [ "$(cat "$_perm_probe" 2>/dev/null)" = "ok" ] && ls "$HOME/.ai-safety" >/dev/null 2>&1; then
+    rm -f "$_perm_probe" 2>/dev/null || true
+    echo "権限を締めました: $HOME/.ai-safety（フォルダ 700 / 鍵ファイル 600・読み書きできることを確認済み）"
+  else
+    rm -f "$_perm_probe" 2>/dev/null || true
+    chmod 755 "$HOME/.ai-safety" 2>/dev/null || true
+    echo "[!] 権限を締めたあと自分で読み書きできませんでした。元に近い権限(755)へ戻しました: $HOME/.ai-safety" >&2
+    echo "    この行が出たら講師に連絡してください（キーの作り直しは不要です）。" >&2
+  fi
 fi
 
 # --- 秘密の自動移行（受講生の操作ゼロ / v1.17.0） ---------------------------

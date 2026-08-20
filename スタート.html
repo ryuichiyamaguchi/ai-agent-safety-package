@@ -739,6 +739,7 @@
           <div class="meta">
             <div class="row why"><span class="k">なぜ</span><span>AIツールは更新が速く、古いままだと安全装置と噛み合わなくなることがあるからです。月に1回くらい押すのがおすすめです。</span></div>
             <div class="row"><span class="k">何が起きる</span><span>黒い画面が開いて、いまの版 → 新しい版が表示されます。困ったら <span class="fname">10_困ったとき診断</span> を押してください。</span></div>
+            <div class="row os-win"><span class="k">Windows</span><span>診断や AI コーチのキー登録で「<b>アクセスが拒否されました</b>」と出たら、<span class="fname">14_フォルダのアクセス権を直す</span> を押してください。API キーの金庫フォルダの鍵が壊れているだけで、<b>キーは無事です（作り直し不要）</b>。手で直すときは <b>コマンドプロンプト（cmd）</b> を開いて <code>icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q</code> を貼り付けて実行します（<b>PowerShell では %USERPROFILE% が展開されないため動きません</b>）。コマンドが苦手なときは、<b>%USERPROFILE%</b> を開く → <b>.ai-safety</b> を右クリック → プロパティ → セキュリティ → 詳細設定 → 「継承の有効化」→「子オブジェクトのアクセス許可エントリすべてを…置き換える」にチェック → OK でも直せます。詳しくは <a class="ext" href="docs/99_known_issues.md">99_known_issues</a>。</span></div>
           </div>
 
           <div class="info">

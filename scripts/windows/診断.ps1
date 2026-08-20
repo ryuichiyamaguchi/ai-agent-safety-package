@@ -9,6 +9,124 @@ function Line($s){ Write-Host $s }
 function OK($s){ Write-Host ("  [OK] " + $s) -ForegroundColor Green }
 function WARN($s){ Write-Host ("  [注意] " + $s) -ForegroundColor Yellow }
 function BAD($s){ Write-Host ("  [問題] " + $s) -ForegroundColor Red }
+# --- アクセス権の判定（v1.17.2 追加・読み取り専用） ---------------------------
+# v1.17.1 までの install.ps1 は `icacls /inheritance:r /grant:r "USERDOMAIN\USERNAME:..."`
+# で権限を締めていた。この名前が解決できない PC（Microsoft アカウント / AzureAD 参加 /
+# USERDOMAIN が期待と違う等）では「継承は消えたが誰も権限を持たない」フォルダが残り、
+# 利用者本人ですら読み書きできなくなる。旧版の診断はこれを「PC を替えた可能性」と
+# 誤診していたので、**アクセス拒否と復号失敗をはっきり分ける**。
+#
+# ここは読み取り専用の診断なので、テストファイルは作らない。
+#   ・一覧できるか            → Get-ChildItem
+#   ・既存ファイルを読めるか  → File.ReadAllBytes
+#   ・書けるか                → ACL を読んで自分（SID とその所属グループ）への許可を見る
+function Test-AccessDeniedError($ErrorRecord) {
+    if ($null -eq $ErrorRecord) { return $false }
+    $ex = $ErrorRecord.Exception
+    while ($null -ne $ex) {
+        if ($ex -is [System.UnauthorizedAccessException]) { return $true }
+        if ($ex -is [System.Security.SecurityException]) { return $true }
+        $ex = $ex.InnerException
+    }
+    $msg = [string]$ErrorRecord.Exception.Message
+    return ($msg -match 'アクセスが拒否|へのアクセスが|Access to the path|is denied|UnauthorizedAccess')
+}
+
+function Get-SafetyHomeAccess([string]$Dir) {
+    $r = [pscustomobject]@{
+        Exists     = (Test-Path -LiteralPath $Dir -PathType Container)
+        CanList    = $false
+        Unreadable = @()
+        CanWrite   = $null   # $true / $false / $null（判定できず）
+        AclError   = ''
+    }
+    if (-not $r.Exists) { return $r }
+    $files = @()
+    try {
+        $files = @(Get-ChildItem -LiteralPath $Dir -File -Force -ErrorAction Stop)
+        $r.CanList = $true
+    } catch {
+        return $r
+    }
+    foreach ($f in $files) {
+        if ($f.Name -notlike '*.dpapi' -and $f.Name -notlike '*.txt' -and $f.Name -notlike '*.key') { continue }
+        try { $null = [System.IO.File]::ReadAllBytes($f.FullName) } catch { $r.Unreadable += $f.FullName }
+    }
+    try {
+        $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        $mine = New-Object 'System.Collections.Generic.HashSet[string]'
+        $null = $mine.Add($id.User.Value)
+        foreach ($g in @($id.Groups)) { $null = $mine.Add($g.Value) }
+        # ⚠️ Get-Acl は使わない。セキュリティ記述子を広く取得するため SACL（監査情報）が
+        #    混ざると SeSecurityPrivilege が要求され、標準ユーザーでは失敗する（実機で確認）。
+        #    ここは DACL だけ読めればよいので、セクションを明示できるコンストラクタを使う
+        #    （このコンストラクタは Windows PowerShell 5.1 / PowerShell 7 の両方にある）。
+        $acl = New-Object System.Security.AccessControl.DirectorySecurity(
+            $Dir, [System.Security.AccessControl.AccessControlSections]::Access)
+        $allow = $false
+        $deny = $false
+        $writeMask = [System.Security.AccessControl.FileSystemRights]::WriteData -bor
+                     [System.Security.AccessControl.FileSystemRights]::CreateFiles -bor
+                     [System.Security.AccessControl.FileSystemRights]::Modify -bor
+                     [System.Security.AccessControl.FileSystemRights]::FullControl
+        foreach ($ace in @($acl.Access)) {
+            $aceSid = $null
+            try { $aceSid = $ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $aceSid = $null }
+            if ($null -eq $aceSid -or -not $mine.Contains($aceSid)) { continue }
+            if (([int]$ace.FileSystemRights -band [int]$writeMask) -eq 0) { continue }
+            if ($ace.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Deny) { $deny = $true }
+            else { $allow = $true }
+        }
+        $r.CanWrite = ($allow -and -not $deny)
+    } catch {
+        $r.AclError = [string]$_.Exception.Message
+    }
+    return $r
+}
+
+# ⚠️ ここに出す回復手順は **実機（受講者の Windows）で成功が確認された形だけ**にすること。
+#    実機で失敗した方法（この案内に書き戻してはいけないもの）:
+#      ・icacls ... /grant "<SID>:(OI)(CI)F"
+#          → 「アカウント名とセキュリティ ID の間のマッピングは実行されませんでした」。
+#            icacls に SID を渡すには `*` の前置が必須で、受講者が写し間違えやすい。
+#      ・takeown /F <path> /R /D Y
+#          → 「アクセスが拒否されました」が大量発生。そもそも不要だった。
+#      ・PowerShell の Get-Acl / Set-Acl
+#          → SeSecurityPrivilege が無く PrivilegeNotHeldException（所有者でも既定で持たない）。
+#    成功したのは `icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q` を **cmd** で実行する形だけ。
+#    PowerShell では %USERPROFILE% が展開されないため、必ず「コマンドプロンプト(cmd)」と書くこと。
+function Show-PermissionRepairHint([string]$Dir) {
+    Line ""
+    Line "    ● これは「PC を替えた」ではなく **アクセス権（フォルダの鍵）が壊れている** 状態です。"
+    Line "       v1.17.1 までの導入スクリプトが、環境によっては解決できない名前"
+    Line "       （USERDOMAIN\USERNAME）に権限を与えていたため、あなた自身の権限が消えました。"
+    Line "    ● 直し方（どれか 1 つで直ります）:"
+    Line ""
+    Line "       (A) スタート フォルダの「14_フォルダのアクセス権を直す」を実行する ←おすすめ"
+    Line ""
+    Line "       (B) コマンドプロンプト（cmd）を開いて、次の 1 行をそのまま貼り付けて実行する:"
+    Line ""
+    Line ('           icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q')
+    Line ""
+    Line "           ※ 必ず「コマンドプロンプト（cmd）」で実行してください。"
+    Line "              PowerShell では %USERPROFILE% が展開されないため、この行は動きません。"
+    Line "           ※ 管理者として実行する必要はありません。"
+    Line ("           ※ 実際のフォルダは " + $Dir + " です。")
+    Line ""
+    Line "       (C) エクスプローラーだけで直す（コマンドが苦手な方向け）:"
+    Line "           1. エクスプローラーのアドレス欄に %USERPROFILE% と入れて開く"
+    Line "           2. .ai-safety を右クリック → プロパティ"
+    Line "           3. セキュリティ タブ → 詳細設定"
+    Line "           4. 「継承の有効化」を押す"
+    Line "           5. 「子オブジェクトのアクセス許可エントリすべてを、このオブジェクトからの"
+    Line "              継承可能なアクセス許可エントリで置き換える」にチェック"
+    Line "           6. OK で閉じる"
+    Line ""
+    Line "    ● 直したあと、この診断をもう一度実行して [問題] が消えることを確認してください。"
+    Line "       キーの作り直しは **不要** です（金庫の中身は消えていません）。"
+    Line ""
+}
+
 function Get-DClaudeProfileDefinitionHits($Path) {
     $out = @()
     $lines = @(Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)
@@ -101,6 +219,28 @@ Line ""
 Line "■ 4. DeepSeek キーの状態"
 $auth = Join-Path $up ".deepseek-claude\auth"
 $dpapi = Join-Path $up ".ai-safety\deepseek.dpapi"
+# ★ v1.17.2: キーの中身を見る前に、そもそも**自分がこのフォルダに入れるか**を見る。
+#    ここが壊れていると、この下の判定（読めない・作られていない）はすべて誤診になる。
+$safetyHome = Join-Path $up ".ai-safety"
+$homeAccess = Get-SafetyHomeAccess $safetyHome
+$permBroken = $false
+if ($homeAccess.Exists) {
+    if (-not $homeAccess.CanList) {
+        $permBroken = $true
+        BAD ("金庫のフォルダを開けません（アクセスが拒否されました）: " + $safetyHome)
+    } elseif ($homeAccess.Unreadable.Count -gt 0) {
+        $permBroken = $true
+        BAD ("金庫のファイルを読めません（アクセスが拒否されました）: " + ($homeAccess.Unreadable -join ', '))
+    } elseif ($homeAccess.CanWrite -eq $false) {
+        $permBroken = $true
+        BAD ("金庫のフォルダに書き込めません（あなた自身への許可がありません）: " + $safetyHome)
+    } elseif ($null -eq $homeAccess.CanWrite) {
+        WARN ("アクセス権を確認できませんでした（判定不能）: " + $safetyHome + " " + $homeAccess.AclError)
+    } else {
+        OK ("金庫のフォルダにアクセスできます: " + $safetyHome)
+    }
+    if ($permBroken) { Show-PermissionRepairHint $safetyHome }
+}
 if (Test-Path -LiteralPath $dpapi) {
     # v1.17.0: 金庫(DPAPI)に入っている。中身は復号できるかどうかだけを見て、値も長さも出さない。
     try {
@@ -110,7 +250,17 @@ if (Test-Path -LiteralPath $dpapi) {
         if ($b -and $b.Trim()) { OK ("金庫に登録済み（" + $dpapi + "）。中身は暗号化されています") }
         else { BAD ("金庫のファイルはあるが中身が空: " + $dpapi) }
     } catch {
-        BAD ("金庫のファイルを復号できません（PC を替えた／Windows を入れ直した可能性）: " + $dpapi + " → キーを作り直して登録し直してください")
+        # ★ v1.17.2: 「アクセス拒否」と「復号失敗」を必ず分ける。
+        #   旧版はどちらも「PC を替えた／Windows を入れ直した可能性 → 作り直してください」と
+        #   案内していたため、実際にはアクセス権が壊れているだけの受講者に、直らないうえに
+        #   有効なキーを捨てさせる誤った手順を出していた。
+        if (Test-AccessDeniedError $_) {
+            BAD ("金庫のファイルを読めません（アクセスが拒否されました＝アクセス権の問題）: " + $dpapi)
+            Line "       ※ 中身が壊れたわけではありません。キーの作り直しは不要です。"
+            if (-not $permBroken) { Show-PermissionRepairHint $safetyHome; $permBroken = $true }
+        } else {
+            BAD ("金庫のファイルを復号できません（PC を替えた／Windows を入れ直した可能性）: " + $dpapi + " → キーを作り直して登録し直してください")
+        }
     }
 }
 if (Test-Path -LiteralPath $auth) {
@@ -124,7 +274,11 @@ if (Test-Path -LiteralPath $auth) {
     elseif ($txt -notmatch '^sk-') { WARN ("中身が sk- で始まらない（先頭: '" + $txt.Substring(0,[Math]::Min(4,$txt.Length)) + "'）") }
     else { OK ("キー形式OK（sk-…、" + $txt.Length + "文字）") }
 } elseif (-not (Test-Path -LiteralPath $dpapi)) {
-    BAD ("キーが見つかりません（金庫 " + $dpapi + " / ファイル " + $auth + " のどちらにも無い） → 「登録-初回だけ」を実行してください")
+    if ($permBroken) {
+        BAD ("キーの有無を判定できません（フォルダのアクセス権が壊れています）: " + $dpapi + " → 先に上の修復を行ってから、もう一度この診断を実行してください")
+    } else {
+        BAD ("キーが見つかりません（金庫 " + $dpapi + " / ファイル " + $auth + " のどちらにも無い） → 「登録-初回だけ」を実行してください")
+    }
 }
 if (Test-Path -LiteralPath $auth) {
     WARN ("平文のキーファイルがまだ残っています: " + $auth + " → 「キー削除」を実行するか、登録し直すと金庫へ移ります")
@@ -149,7 +303,12 @@ foreach ($k in $otherKeys) {
     $kInPlain = Test-Path -LiteralPath $k.Legacy
     if ($kInVault) { OK ($k.Name + ": 金庫に登録済み（" + $kDpapi + "）") }
     if ($kInPlain) { WARN ($k.Name + ": 平文のキーファイルが残っています: " + $k.Legacy + " → 登録し直すと金庫へ移ります") }
-    if (-not $kInVault -and -not $kInPlain) { Line ("  " + $k.Name + ": 未登録") }
+    if (-not $kInVault -and -not $kInPlain) {
+        # ★ v1.17.2: アクセス権が壊れていると Test-Path は「無い」を返す。それを
+        #   「未登録」と書くと、実際は登録済みなのに登録し直しへ誘導してしまう。
+        if ($permBroken) { Line ("  " + $k.Name + ": 判定できません（フォルダのアクセス権が壊れています。先に上の修復を行ってください）") }
+        else { Line ("  " + $k.Name + ": 未登録") }
+    }
 }
 # 「金庫へ書けなかった」履歴。平文が残る原因のほとんどはここなので、必ず見せる。
 $migrateLog = Join-Path $up ".ai-safety\logs\secret-migrate-events.jsonl"
@@ -246,5 +405,11 @@ foreach ($cmdName in @('claude-safe','codex-safe','agy-safe','monitor')) {
 Line ""
 
 Line "============================================================"
+if ($permBroken) {
+    Line "  ★ 最優先: 「14_フォルダのアクセス権を直す」を実行してください。"
+    Line "     APIキーの金庫フォルダにあなた自身が入れない状態です（キーは無事です）。"
+    Line "     直してから、もう一度この診断を実行してください。"
+    Line "------------------------------------------------------------"
+}
 Line "  診断おわり。[問題] の行が今のPCの原因です。この画面を講師に共有してください。"
 Line "============================================================"

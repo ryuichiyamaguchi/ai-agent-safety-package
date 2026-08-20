@@ -60,7 +60,11 @@ const EXPECTED_BOTH = [
   // 進む（旧仕様の「Windows では起動しない」は撤廃）。
   '（上級）15_長時間おまかせモードで起動',
 ];
-const EXPECTED_WIN_ONLY = ['12_PowerShellを開く', '13_作業フォルダを開く'];
+// Windows 専用ボタン。14 は v1.17.2 新設のアクセス権修復口で、Windows の ACL 固有の
+// 事故（v1.17.1 までの install が `USERDOMAIN\USERNAME` という解決できない名前へ権限を
+// 与え、`/inheritance:r` と合わさって受講者本人まで締め出していた）からの回復に使う。
+// mac は chmod なので同型の事故が起きず、対になる .command は作らない。
+const EXPECTED_WIN_ONLY = ['12_PowerShellを開く', '13_作業フォルダを開く', '14_フォルダのアクセス権を直す'];
 
 test('スタートフォルダは新番号体系どおりで、重複・欠番・旧名がない', () => {
   const files = fs.readdirSync(startDir).filter((f) => !f.startsWith('.')).sort();

@@ -116,9 +116,14 @@ for base in "1_AIをまとめて起動" "2_セーフCodexを起動" "3_セーフ
   [ -f "$START_DIR/$base.bat" ] || { note "FAIL: $base.bat がない"; fail=1; }
 done
 # Windows だけの追加ボタン（.command は無い）。番号の繰り下げに追従しているか。
-for base in "12_PowerShellを開く" "13_作業フォルダを開く"; do
+#   14 は v1.17.2 新設のアクセス権修復ボタン。Windows の ACL 固有の事故（install が
+#   USERDOMAIN\USERNAME という解決できない名前に権限を与え、本人まで締め出す）への
+#   回復口なので mac 版は無い。
+for base in "12_PowerShellを開く" "13_作業フォルダを開く" "14_フォルダのアクセス権を直す"; do
   [ -f "$START_DIR/$base.bat" ] || { note "FAIL: $base.bat がない"; fail=1; }
 done
+grep -q 'repair-permissions.ps1' "$START_DIR/14_フォルダのアクセス権を直す.bat" || { note "FAIL: 14 のボタンが repair-permissions.ps1 を呼ばない"; fail=1; }
+grep -Fq '14_フォルダのアクセス権を直す' "$HTML" || { note "FAIL: スタート.html に 14_フォルダのアクセス権を直す の案内がない"; fail=1; }
 # 旧番号が残っていないこと（旧新併存で番号が重複すると受講者が迷う）。
 for old in "5_見守りモニターを起動" "6_AIコーチのキーを登録" "7_安全パッケージを最新版に更新" \
            "8_AIツールを最新版に更新" "9_困ったとき診断" "10_野良d-claudeを退治" \

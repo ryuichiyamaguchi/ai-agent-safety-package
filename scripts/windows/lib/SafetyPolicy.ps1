@@ -383,25 +383,78 @@ function ConvertTo-RedactedText([string]$Text, [object]$Policy) {
 function Set-AuditLogAcl([string]$Path) {
     # M4: マルチユーザー環境で他ユーザーから監査ログが読まれないよう、
     # ACL を継承解除して CurrentUser のみ FullControl に絞る。失敗しても本処理は継続。
+    #
+    # ⚠️ v1.17.2 で 2 点直した。旧実装は `Get-Acl` → `Set-Acl` で、付与先に
+    #    `WindowsIdentity::GetCurrent().Name` という**名前**を渡していた。
+    #    (1) Get-Acl/Set-Acl はセキュリティ記述子を広く扱うので **SACL（監査情報）** が混ざり、
+    #        **SeSecurityPrivilege** が要求される。この特権はファイルの所有者であっても
+    #        既定では持っていないため、受講者の Windows 実機では
+    #        PrivilegeNotHeldException になっていた。つまりこの ACL 絞り込みは
+    #        **実機ではそもそも一度も効いておらず**、フックが動くたびに warn を吐いていた。
+    #    (2) 名前は環境によって解決できない（Microsoft アカウント / AzureAD 参加など）。
+    #        継承ルールを全部消したあとで名前解決に失敗すると、**誰も権限を持たない
+    #        監査ログ**が残る。~/.ai-safety で実際に起きた事故とまったく同じ形。
+    #    そこで AccessControlSections::Access を明示して **DACL だけ**を扱い、付与先は
+    #    必ず SID にした。SID は環境に依存せず必ず解決でき、所有者は WRITE_DAC を暗黙に
+    #    持つので、絞り込んだあとでも本人は取り戻せる。
+    #    実装は scripts\windows\install.ps1 / repair-permissions.ps1 と同じ形
+    #    （フックの読み込み経路に新しい依存を増やさないため、あえて各所で自己完結させてある）。
+    # mac / Linux の PowerShell（3 エンジン照合テストなど）では ACL の概念が無い。
+    # 呼ぶだけ無駄で、フックの stderr に毎回 warn を出すノイズにしかならないので抜ける。
+    if ($IsWindows -eq $false) { return }
     try {
-        $acl = Get-Acl -LiteralPath $Path
+        $sections = [System.Security.AccessControl.AccessControlSections]::Access
+        $fi = New-Object System.IO.FileInfo $Path
+
+        # .NET Framework(PS5.1) はインスタンスメソッド、.NET Core(PS7) は
+        # FileSystemAclExtensions の拡張メソッド。PowerShell は拡張メソッドを
+        # インスタンス呼び出しに解決しないので、両方を反射で探す。
+        $extType = [Type]::GetType('System.IO.FileSystemAclExtensions, System.IO.FileSystem.AccessControl')
+        if ($null -eq $extType) { $extType = [Type]::GetType('System.IO.FileSystemAclExtensions') }
+
+        $acl = $null
+        $getMi = $fi.GetType().GetMethod('GetAccessControl', [type[]]@([System.Security.AccessControl.AccessControlSections]))
+        if ($null -ne $getMi) {
+            $acl = $getMi.Invoke($fi, @($sections))
+        } elseif ($null -ne $extType) {
+            $getSm = $extType.GetMethod('GetAccessControl', [type[]]@([System.IO.FileInfo], [System.Security.AccessControl.AccessControlSections]))
+            if ($null -ne $getSm) { $acl = $getSm.Invoke($null, @($fi, $sections)) }
+        }
+        if ($null -eq $acl) {
+            $acl = New-Object System.Security.AccessControl.FileSecurity($Path, $sections)
+        }
+
         $acl.SetAccessRuleProtection($true, $false)
         # 既存の継承ルールを完全に取り除く
         $existing = @($acl.Access)
         foreach ($r in $existing) {
             [void]$acl.RemoveAccessRule($r)
         }
-        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+        # ファイルなので継承フラグは None（ContainerInherit/ObjectInherit はフォルダ専用）。
         $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
             $identity,
-            'FullControl',
-            'Allow'
-        )
+            [System.Security.AccessControl.FileSystemRights]::FullControl,
+            [System.Security.AccessControl.InheritanceFlags]::None,
+            [System.Security.AccessControl.PropagationFlags]::None,
+            [System.Security.AccessControl.AccessControlType]::Allow)
         $acl.SetAccessRule($rule)
-        Set-Acl -LiteralPath $Path -AclObject $acl
+
+        $setMi = $fi.GetType().GetMethod('SetAccessControl', [type[]]@($acl.GetType()))
+        if ($null -ne $setMi) {
+            [void]$setMi.Invoke($fi, @($acl))
+        } elseif ($null -ne $extType) {
+            $setSm = $extType.GetMethod('SetAccessControl', [type[]]@([System.IO.FileInfo], $acl.GetType()))
+            if ($null -eq $setSm) { throw "SetAccessControl が使えません" }
+            [void]$setSm.Invoke($null, @($fi, $acl))
+        } else {
+            throw "SetAccessControl が使えません"
+        }
     } catch {
         # ACL 設定失敗は致命ではない（ログ出力は継続させる）
-        [Console]::Error.WriteLine("warn: failed to harden ACL on " + $Path + ": " + $_.Exception.Message)
+        $inner = $_.Exception
+        while ($null -ne $inner.InnerException) { $inner = $inner.InnerException }
+        [Console]::Error.WriteLine("warn: failed to harden ACL on " + $Path + ": " + $inner.Message)
     }
 }
 

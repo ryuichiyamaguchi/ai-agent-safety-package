@@ -421,11 +421,56 @@ $vaultItems = @(
     @{ Name = 'DeepSeek のキー';          Dpapi = 'deepseek.dpapi';    Legacy = (Join-Path $env:USERPROFILE '.deepseek-claude\auth') },
     @{ Name = 'Gemini（有料）のキー';     Dpapi = 'gemini-paid.dpapi'; Legacy = (Join-Path $secretDir 'gemini-api-key-paid.txt') }
 )
+# ★ v1.17.2: キーの有無を見る前に、自分がこのフォルダに入れるかを確認する。
+#   v1.17.1 までの install は `icacls /inheritance:r /grant:r "USERDOMAIN\USERNAME:..."`
+#   で権限を締めており、この名前が解決できない PC では本人の権限まで消えた。その状態だと
+#   Test-Path は一律 $false を返すため、下の判定はすべて「未登録」という誤診になる。
+$secretDirAccessible = $true
+$secretDirDetail = ''
+if (Test-Path -LiteralPath $secretDir -PathType Container) {
+    try {
+        $probeFiles = @(Get-ChildItem -LiteralPath $secretDir -File -Force -ErrorAction Stop |
+                        Where-Object { $_.Name -like '*.dpapi' -or $_.Name -like '*.txt' -or $_.Name -like '*.key' })
+        $unreadable = @()
+        foreach ($pf in $probeFiles) {
+            try { $null = [System.IO.File]::ReadAllBytes($pf.FullName) } catch { $unreadable += $pf.Name }
+        }
+        if ($unreadable.Count -gt 0) {
+            $secretDirAccessible = $false
+            $secretDirDetail = "読めないファイルがあります（アクセス拒否）: " + ($unreadable -join ', ')
+        }
+    } catch {
+        $secretDirAccessible = $false
+        $secretDirDetail = "フォルダを開けません（アクセス拒否）: " + $_.Exception.Message
+    }
+    if ($secretDirAccessible) {
+        Add-Result "secrets: 金庫フォルダのアクセス権" $true ("あなた自身が読める: " + $secretDir)
+    } else {
+        # ⚠️ 案内するコマンドは **実機で成功が確認された形だけ**にすること。
+        #    実機では icacls /grant "<SID>:..."（* の前置漏れ）・takeown・Get-Acl/Set-Acl が
+        #    すべて失敗した（順に「マッピングは実行されませんでした」「アクセスが拒否されました」
+        #    「SeSecurityPrivilege がありません」）。成功したのは icacls /reset だけ。
+        #    PowerShell では %USERPROFILE% が展開されないので「cmd で」と必ず書く。
+        Add-Result "secrets: 金庫フォルダのアクセス権" $false ($secretDirDetail +
+            " → スタート\14_フォルダのアクセス権を直す を実行してください（キーの作り直しは不要）。" +
+            " 手作業で直すなら、コマンドプロンプト（cmd）で次の 1 行:" +
+            ' icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q' +
+            "（PowerShell では %USERPROFILE% が展開されないため動きません）。" +
+            " エクスプローラーで直す場合: %USERPROFILE% を開く → .ai-safety を右クリック → プロパティ" +
+            " → セキュリティ → 詳細設定 → 「継承の有効化」→「子オブジェクトのアクセス許可エントリすべてを…置き換える」にチェック → OK。" +
+            " 下の各キーの判定は信用できません")
+    }
+}
+
 $leftoverCount = 0
 foreach ($item in $vaultItems) {
     $dpapiPath = Join-Path $secretDir $item.Dpapi
     $inVault = Test-Path -LiteralPath $dpapiPath -PathType Leaf
     $inPlain = Test-Path -LiteralPath $item.Legacy -PathType Leaf
+    if (-not $secretDirAccessible) {
+        Add-Info ("secrets: " + $item.Name) "判定できません（金庫フォルダのアクセス権が壊れています）"
+        continue
+    }
     if ($inPlain) {
         $leftoverCount++
         Add-Result ("secrets: " + $item.Name) $false ("平文のまま残っています: " + $item.Legacy + " → 登録し直すと金庫へ移ります")
@@ -435,7 +480,9 @@ foreach ($item in $vaultItems) {
         Add-Info ("secrets: " + $item.Name) "未登録"
     }
 }
-if ($leftoverCount -eq 0) {
+if (-not $secretDirAccessible) {
+    Add-Info "secrets: 平文の残骸" "判定できません（金庫フォルダのアクセス権が壊れています）"
+} elseif ($leftoverCount -eq 0) {
     Add-Result "secrets: 平文の残骸" $true "平文のキーは残っていません"
 }
 

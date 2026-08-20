@@ -7,6 +7,56 @@
 
 $ErrorActionPreference = "Stop"
 
+# --- DACL（アクセス権）だけを扱う小さなヘルパー（v1.17.2） ------------------
+# ⚠️ `Get-Acl` / `Set-Acl` コマンドレットは使わないこと。
+#    これらはセキュリティ記述子を広く取得・書き戻すため **SACL（監査情報）** が混ざり、
+#    そうなると **SeSecurityPrivilege** 特権が要求される。この特権は
+#    **フォルダ/ファイルの所有者であっても既定では持っていない**ため、受講者の Windows 実機で
+#        Set-Acl : プロセスにはこの操作に必要な 'SeSecurityPrivilege' 特権が与えられていません。
+#        [Set-Acl], PrivilegeNotHeldException
+#    となって処理そのものが動かなかった。管理者権限（UAC 昇格）は要求しない方針なので、
+#    AccessControlSections::Access を明示して DACL だけを読み書きする。
+#
+#    取得・書き戻しの API は実行環境で提供形態が違う:
+#      Windows PowerShell 5.1 (.NET Framework) … FileInfo/DirectoryInfo の**インスタンスメソッド**
+#      PowerShell 7 (.NET Core)                … FileSystemAclExtensions の**拡張メソッド**
+#    PowerShell は C# の拡張メソッドをインスタンス呼び出しに解決しないので、
+#    `$di.GetAccessControl(...)` と書くと PowerShell 7 では「メソッドが見つかりません」で落ちる
+#    （mac の pwsh 7 で実測確認済み）。よって両方を反射で探す。
+#    同じ実装が scripts\windows\repair-permissions.ps1 にもある（あちらは救済ツールなので、
+#    lib が壊れていても単独で動くようわざと自己完結させてある）。
+function Get-AiSafeAclExtensionType {
+    $t = [Type]::GetType('System.IO.FileSystemAclExtensions, System.IO.FileSystem.AccessControl')
+    if ($null -eq $t) { $t = [Type]::GetType('System.IO.FileSystemAclExtensions') }
+    return $t
+}
+
+function Get-AiSafeDacl([System.IO.FileSystemInfo]$Item) {
+    $sections = [System.Security.AccessControl.AccessControlSections]::Access
+    $mi = $Item.GetType().GetMethod('GetAccessControl', [type[]]@([System.Security.AccessControl.AccessControlSections]))
+    if ($null -ne $mi) { return $mi.Invoke($Item, @($sections)) }
+    $t = Get-AiSafeAclExtensionType
+    if ($null -ne $t) {
+        $sm = $t.GetMethod('GetAccessControl', [type[]]@($Item.GetType(), [System.Security.AccessControl.AccessControlSections]))
+        if ($null -ne $sm) { return $sm.Invoke($null, @($Item, $sections)) }
+    }
+    if ($Item -is [System.IO.DirectoryInfo]) {
+        return (New-Object System.Security.AccessControl.DirectorySecurity($Item.FullName, $sections))
+    }
+    return (New-Object System.Security.AccessControl.FileSecurity($Item.FullName, $sections))
+}
+
+function Set-AiSafeDacl([System.IO.FileSystemInfo]$Item, [object]$Acl) {
+    $mi = $Item.GetType().GetMethod('SetAccessControl', [type[]]@($Acl.GetType()))
+    if ($null -ne $mi) { [void]$mi.Invoke($Item, @($Acl)); return }
+    $t = Get-AiSafeAclExtensionType
+    if ($null -ne $t) {
+        $sm = $t.GetMethod('SetAccessControl', [type[]]@($Item.GetType(), $Acl.GetType()))
+        if ($null -ne $sm) { [void]$sm.Invoke($null, @($Item, $Acl)); return }
+    }
+    throw "この PowerShell ではアクセス権の書き戻し方法が見つかりませんでした（SetAccessControl が使えません）。"
+}
+
 # B-3: workspace 既定値を安全なデフォルトに。空・相対パスは $env:USERPROFILE\Documents\my-ai-workspace へ。
 # CWD が ZIP 展開直後のパッケージフォルダ ($PSScriptRoot の 2 階層上) だった場合も同様に安全デフォルトへ。
 $packageRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
@@ -181,7 +231,10 @@ foreach ($sec in @(
     'scripts/windows/apply-global-guard.ps1',
     'scripts/windows/uninstall-global-guard.ps1',
     'scripts/windows/protect-folder.ps1',
-    'scripts/windows/launch-longrun.ps1'
+    'scripts/windows/launch-longrun.ps1',
+    # v1.17.2: アクセス権の修復口。これ自体が壊れる/差し替えられると受講者が
+    # 自分のフォルダへ戻れなくなるので、改ざん検知の対象に入れる。
+    'scripts/windows/repair-permissions.ps1'
 )) {
     Test-DistributionHash $sec
 }
@@ -301,18 +354,41 @@ if ($Platform -in 'mac','both') {
     New-Item -ItemType Directory -Force -Path $macDest | Out-Null
     Copy-Item -Path (Join-Path $packageRoot "scripts\macos\*") -Destination $macDest -Recurse -Force
     # Foreign-OS hooks become read-only to shrink attack surface (H3).
+    #
+    # ⚠️ v1.17.2 で 2 点直した。旧実装は `Get-Acl` → `Set-Acl` で、付与先に
+    #    `WindowsIdentity::GetCurrent().Name` という**名前**を渡していた。
+    #    (1) Get-Acl/Set-Acl はセキュリティ記述子を広く扱うため SACL（監査情報）が混ざり、
+    #        標準ユーザーでは 'SeSecurityPrivilege' が無くて PrivilegeNotHeldException になる
+    #        （受講者の Windows 実機で確認。所有者であってもこの特権は既定で持っていない）。
+    #        しかもこのブロックには try/catch が無く $ErrorActionPreference='Stop' なので、
+    #        失敗すると**導入全体が途中で止まる**。
+    #    (2) 名前は環境によって解決できない（Microsoft アカウント / AzureAD 参加など）。
+    #        解決に失敗すると継承も消えたうえで誰も権限を持たないファイルが残る＝
+    #        ~/.ai-safety で起きた事故とまったく同じ形になる。
+    #    そこで DACL だけを明示的に扱い、付与先は必ず SID にした。SID は必ず解決でき、
+    #    かつ所有者は WRITE_DAC を暗黙に持つので「Read だけ」にしても後から戻せる。
     $aclPath = Join-Path $Workspace ".ai-safety\hooks\macos"
-    if (Test-Path -LiteralPath $aclPath) {
-        Get-ChildItem -Path $aclPath -Recurse -File | ForEach-Object {
-            $acl = Get-Acl $_.FullName
-            $acl.SetAccessRuleProtection($true, $false)
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-                [System.Security.Principal.WindowsIdentity]::GetCurrent().Name,
-                'Read',
-                'Allow'
-            )
-            $acl.SetAccessRule($rule)
-            Set-Acl -Path $_.FullName -AclObject $acl
+    if ((Test-Path -LiteralPath $aclPath) -and ($IsWindows -ne $false)) {
+        try {
+            $meSidForHooks = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+            $accessOnly = [System.Security.AccessControl.AccessControlSections]::Access
+            Get-ChildItem -Path $aclPath -Recurse -File | ForEach-Object {
+                $fi = New-Object System.IO.FileInfo $_.FullName
+                $acl = Get-AiSafeDacl $fi
+                $acl.SetAccessRuleProtection($true, $false)
+                # ファイルなので継承フラグは None（ContainerInherit/ObjectInherit はフォルダ専用）。
+                $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    $meSidForHooks,
+                    [System.Security.AccessControl.FileSystemRights]::Read,
+                    [System.Security.AccessControl.InheritanceFlags]::None,
+                    [System.Security.AccessControl.PropagationFlags]::None,
+                    [System.Security.AccessControl.AccessControlType]::Allow)
+                $acl.SetAccessRule($rule)
+                Set-AiSafeDacl $fi $acl
+            }
+        } catch {
+            # 読み取り専用化は追加の保険であって保護の本体ではない。失敗しても導入は止めない。
+            Write-Warning ("mac 側フックの読み取り専用化をスキップしました: " + $_.Exception.Message)
         }
     }
 }
@@ -622,21 +698,62 @@ if ($InstallGlobalClaudeSettings) {
     }
 }
 
-# --- %USERPROFILE%\.ai-safety の権限を締める（mac の chmod 700/600 と対称） -----
-# ここには API キーの平文ファイル（gemini-api-key.txt など）と AI の実行ログが置かれる。
-# mac 側は install.sh が chmod 700/600 を掛け直す。Windows に chmod は無いので、
-# 継承を切って「現在のユーザーだけがフル制御」の ACL に落とす（icacls の /inheritance:r と
-# /grant:r）。既定でもユーザープロファイル配下は他ユーザーから読めないが、フォルダを
-# 別の場所から移動・コピーしてきた場合に緩い ACL が付いたまま残ることがあるため明示する。
-# 失敗しても導入は止めない（権限の締め直しは追加の保険であって、保護の本体ではない）。
+# --- %USERPROFILE%\.ai-safety の権限を整える（mac の chmod 700/600 と対称） -----
+# ここには API キーの平文ファイル（gemini-api-key.txt など）と金庫（*.dpapi）、
+# AI の実行ログが置かれる。mac 側は install.sh が chmod 700/600 を掛け直す。
+#
+# ⚠️ v1.17.2 で方式を全面的に入れ替えた。v1.17.1 まではここで
+#       icacls <path> /inheritance:r /grant:r "$env:USERDOMAIN\$env:USERNAME:(OI)(CI)F" /T
+#    を実行していた。`/inheritance:r` で継承 ACL を全消しし、そのうえで
+#    「USERDOMAIN\USERNAME」という**文字列**に権限を与える形である。ところがこの名前は
+#    Microsoft アカウント / AzureAD 参加 / USERDOMAIN が期待と違う PC では解決できず、
+#    解決に失敗すると「継承は消えたが誰も権限を持たない」フォルダが残って
+#    **利用者本人ですら読み書きできなくなる**（実機で発生: 金庫ファイルが作れない・
+#    既存の金庫が読めない・診断が「PC を替えた可能性」と誤診する）。
+#
+#    新方式は scripts\windows\repair-permissions.ps1 に集約した。要点:
+#      (1) ★ **すでに本人が読み書きできる場合は、アクセス権に一切触らない**。
+#          新規導入は必ずこの分岐なので、**導入が権限を壊す経路そのものが存在しない**。
+#          ここがこの修正の肝で、install から「締める」操作が完全に消えた。
+#      (2) 壊れているときの第一の手段は `icacls "<path>" /reset /T /C /Q`。
+#          親から継承される既定の権限へ戻すだけなので、名前解決も SID の書式も
+#          SeSecurityPrivilege も所有権も関係しない（**受講者の実機で成功を確認済み**）。
+#      (3) 第二の手段は DACL だけを扱う .NET API で、付与先は**現在のユーザーの SID**。
+#          `Get-Acl`/`Set-Acl` は使わない（SACL が混ざり SeSecurityPrivilege が要る）。
+#      (4) **継承は消さない**。広すぎる明示 ACE（Everyone / Users / Authenticated Users 等）
+#          だけを外す。%USERPROFILE% 配下はもともと他の標準ユーザーから読めない
+#      (5) 変更のたびに**本人が実際に読み書きできることを検証**し、失敗したら**元に戻す**
+#    導入時は takeown を使わない（-NoTakeown）。というより takeown は既定で走らない
+#    （実機では「アクセスが拒否されました」が大量発生し、しかも不要だった）。
+#    所有権ごと失った例外的なケースだけ、受講者が -Takeown を明示して実行する。
+# 失敗しても導入は止めない（権限の整えは追加の保険であって、保護の本体ではない）。
 $aiSafeHome = Join-Path $env:USERPROFILE ".ai-safety"
+$aclFixer = Join-Path $packageRoot "scripts\windows\repair-permissions.ps1"
 if ((Test-Path -LiteralPath $aiSafeHome) -and ($IsWindows -ne $false)) {
-    try {
-        $me = "$env:USERDOMAIN\$env:USERNAME"
-        & icacls "$aiSafeHome" /inheritance:r /grant:r ("{0}:(OI)(CI)F" -f $me) /T /C /Q 2>&1 | Out-Null
-        Write-Host ("権限を締めました: " + $aiSafeHome + "（現在のユーザーだけがアクセスできる ACL）")
-    } catch {
-        Write-Warning ("権限の締め直しに失敗しました(スキップ): " + $_.Exception.Message)
+    if (Test-Path -LiteralPath $aclFixer -PathType Leaf) {
+        try {
+            $global:LASTEXITCODE = 0
+            & $aclFixer -Path $aiSafeHome -Quiet -NoTakeown
+            # 修復スクリプトの終了コード: 0=アクセスできる / 1=直せなかった / 2=元に戻した / 3=対象が無い。
+            # 「整えました」と書いてよいのは 0 のときだけ。検証していない成功宣言はしない。
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host ("権限を整えました: " + $aiSafeHome + "（あなた自身が読み書きできることを検証済み）")
+            } elseif ($LASTEXITCODE -eq 3) {
+                Write-Host ("権限の調整はスキップしました（対象がまだありません）: " + $aiSafeHome)
+            } else {
+                Write-Warning ("権限を確認できませんでした（変更は元に戻してあります）: " + $aiSafeHome)
+                Write-Warning "  スタート\14_フォルダのアクセス権を直す.bat を実行してください。"
+                # 実機で成功が確認された形だけを案内する。cmd 指定は必須
+                # （PowerShell では %USERPROFILE% が展開されないため動かない）。
+                Write-Warning '  または コマンドプロンプト(cmd) で: icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q'
+            }
+        } catch {
+            Write-Warning ("権限の調整に失敗しました(スキップ): " + $_.Exception.Message)
+            Write-Warning ("  必要なら スタート\14_フォルダのアクセス権を直す.bat を実行してください。")
+            Write-Warning '  または コマンドプロンプト(cmd) で: icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q'
+        }
+    } else {
+        Write-Warning "repair-permissions.ps1 が見つからないため、権限の調整をスキップしました。"
     }
 }
 

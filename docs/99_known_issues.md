@@ -2,6 +2,174 @@
 
 本パッケージで把握している既知の問題と回避策。
 
+## ★重大: Windows で自分の `.ai-safety` フォルダに入れなくなる（v1.17.2 以前・v1.17.2 で修正）
+
+**症状**（受講者の Windows 実機で確認）:
+
+- 「10_困ったとき診断」に `Get-Content : パス 'C:\Users\<名前>\.ai-safety\deepseek.dpapi' へのアクセスが拒否されました。`
+  （`UnauthorizedAccessException`）が出る
+- 診断が **「金庫のファイルを復号できません（PC を替えた／Windows を入れ直した可能性）→ キーを作り直して登録し直してください」** と表示する
+- AIコーチ（Gemini）のキーが金庫に入らず、平文のキーファイルだけが残る
+- 「金庫への書き込みに失敗した記録はありません」と出るのに、金庫が作られていない
+
+**原因**: v1.17.2 までの `scripts/windows/install.ps1` は、導入の最後に次を実行していました。
+
+```
+icacls "%USERPROFILE%\.ai-safety" /inheritance:r /grant:r "%USERDOMAIN%\%USERNAME%:(OI)(CI)F" /T
+```
+
+`/inheritance:r` は**継承 ACL を全部消し**、そのうえで `USERDOMAIN\USERNAME` という**文字列**に権限を与えます。
+ところがこの名前は環境によって解決できません。
+
+- Microsoft アカウント（表示名とローカルアカウント名が違う）
+- AzureAD / Entra 参加 PC（正しくは `AzureAD\...` で `USERDOMAIN` は別の値）
+- ドメイン参加・アカウント改名後・`USERDOMAIN` が期待と違う値になっている PC
+
+名前の解決に失敗すると **「継承は消えたが、誰も権限を持たないフォルダ」** が残り、**利用者本人ですら
+読み書きできなくなります**。上の症状はすべてこれ 1 つで説明できます（金庫を新しく作れない ＝ 書き込み不可、
+既存の金庫が読めない ＝ 権限が壊れる前に書かれていた、診断の誤診 ＝ アクセス拒否を復号失敗と取り違えていた）。
+
+**金庫の中身は消えていません。キーの作り直しは不要です。**
+
+### 回復方法（受講者向け・どれか 1 つ）★実機で成功を確認済み
+
+1. **「スタート」フォルダの `14_フォルダのアクセス権を直す` を実行する**（おすすめ・ボタン 1 つ）
+2. **コマンドプロンプト（cmd）** を開いて、次の 1 行をそのまま貼り付けて実行する:
+
+```
+icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q
+```
+
+> **必ず「コマンドプロンプト（cmd）」で実行してください。**
+> PowerShell では `%USERPROFILE%` が展開されないため、この行は動きません。
+> **管理者として実行する必要はありません。**
+>
+> `/reset` は「親フォルダから継承される既定の権限へ戻す」だけの操作です。だから
+> SID の書き方も、特権も、所有権も関係ありません。`/T` で配下も一括、`/C` はエラーが出ても続行、
+> `/Q` は成功メッセージの抑制です。
+>
+> 実行後に `type "%USERPROFILE%\.ai-safety\deepseek.dpapi"` を実行して、
+> 暗号化された文字列が表示されれば回復しています（**鍵は無傷です**）。
+
+3. **エクスプローラーだけで直す**（コマンドが苦手な方向け・上と同じことをします）:
+
+   `%USERPROFILE%` を開く → `.ai-safety` を右クリック → プロパティ → セキュリティ → 詳細設定
+   → 「継承の有効化」→「子オブジェクトのアクセス許可エントリすべてを、このオブジェクトからの
+   継承可能なアクセス許可エントリで置き換える」にチェック → OK
+
+### ★実機で失敗した方法（同じ轍を踏まないための記録・案内に書き戻さないこと）
+
+受講者の Windows 実機で次を順に試し、**すべて失敗**しました。上の `/reset` だけが通りました。
+
+| 試した方法 | 実機での結果 |
+|---|---|
+| `icacls ... /grant "<SID>:(OI)(CI)F"` | `アカウント名とセキュリティ ID の間のマッピングは実行されませんでした`。**icacls に SID を渡すには `*` の前置が必須**（`/grant "*<SID>:..."`）。この一文字を落としやすいので、受講者向けの案内では SID を使う形を出さない |
+| `takeown /F ... /R /D Y` | **「アクセスが拒否されました」が大量発生**。そもそも不要だった（install は所有権を触っていないので、所有者は WRITE_DAC を暗黙に持つ。標準ユーザーは SeTakeOwnershipPrivilege を持たないので、本当に所有権を失っていても通らない） |
+| `Get-Acl` → `SetAccessRuleProtection` → `Set-Acl` | `SeSecurityPrivilege` 特権が無く `PrivilegeNotHeldException`（次節） |
+| `GetAccessControl([AccessControlSections]::Access)` + `SetAccessControl` | **未検証**。`/reset` で解決したため実機で試す前に問題が消えた。理屈上は DACL だけを扱うので通るはずだが確認できていない |
+
+### 2 度目の失敗: `Set-Acl` は標準ユーザーでは動かない（SeSecurityPrivilege）
+
+最初の修正は `Get-Acl` → `SetAccessRuleProtection` → `Set-Acl` という素直な実装でしたが、
+受講者の Windows 実機で次のエラーになり、**修復処理そのものが動きませんでした**。
+
+```
+Set-Acl : プロセスにはこの操作に必要な 'SeSecurityPrivilege' 特権が与えられていません。
+    + CategoryInfo          : PermissionDenied: (...) [Set-Acl], PrivilegeNotHeldException
+```
+
+原因は、`Get-Acl` / `Set-Acl` コマンドレットがセキュリティ記述子を広く取得・書き戻すため、
+そこに **SACL（監査情報）** が含まれると **`SeSecurityPrivilege` 特権**が要求されることです。
+この特権は **フォルダの所有者であっても既定では持っていません**（管理者が明示的に昇格して初めて有効になる種類の特権）。
+つまり「所有者だから大丈夫」は成り立ちません。
+
+**この経路は第一の手段からは外し、`icacls /reset` のフォールバック（第二の手段）にしました。**
+第一の手段が実機で成功した `icacls /reset` である以上、`Get-Acl`/`Set-Acl` へ戻る理由はどこにもありません。
+第二の手段でも SACL には一切触れず、DACL（アクセス権）だけを明示して扱います。
+
+- 取得: `GetAccessControl([AccessControlSections]::Access)`
+- 書き戻し: `SetAccessControl(...)`（Access セクションしか変更していないので DACL だけが書かれる）
+- 控え・復元も Access セクションだけを SDDL 文字列でやり取りする
+- **`Get-Acl` / `Set-Acl` コマンドレットは使いません**（使った瞬間に SACL が混ざって同じエラーに戻る）
+- **管理者権限（UAC 昇格）は要求しません。** SeSecurityPrivilege 無しで完結することが要件です
+
+なお、`GetAccessControl` / `SetAccessControl` の提供形態は実行環境で違います。
+
+| 実行環境 | 提供形態 |
+|---|---|
+| Windows PowerShell 5.1（.NET Framework） | `FileInfo` / `DirectoryInfo` の**インスタンスメソッド** |
+| PowerShell 7（.NET Core） | `System.IO.FileSystemAclExtensions` の**拡張メソッド** |
+
+PowerShell は C# の拡張メソッドをインスタンス呼び出しに解決しないため、`$di.GetAccessControl(...)` と
+書くと **PowerShell 7 では「メソッドが見つかりません」で落ちます**（mac の pwsh 7 で実測確認済み）。
+そのため実装は両方を反射で探します。`repair-permissions.ps1 -SelfTest` を実行すると、
+その PowerShell で DACL 層が結線できるかを確認できます。
+
+**同じ誤りが他に 2 箇所ありました**（今回あわせて修正）。
+
+| 箇所 | 内容 |
+|---|---|
+| `install.ps1` の mac フック読み取り専用化 | `Get-Acl`/`Set-Acl` ＋ 名前ベースの付与。しかも `try/catch` が無く `$ErrorActionPreference = "Stop"` なので、失敗すると**導入全体が途中で止まる**（`-Platform mac`/`both` のときのみ実行される経路） |
+| `lib/SafetyPolicy.ps1` の `Set-AuditLogAcl` | 監査ログを本人だけに絞る処理。`Get-Acl`/`Set-Acl` ＋ 名前ベース ＋ 継承ルールの全削除。実機では毎回 `PrivilegeNotHeldException` で失敗しており、**この絞り込みは一度も効いていなかった**うえ、フックが動くたびに警告を出していた |
+
+### v1.17.2 での修正
+
+- **修復の第一の手段を `icacls "<フォルダ>" /reset /T /C /Q` にしました**（実機で成功が確認された唯一の方法）。
+  親フォルダから継承される既定の権限へ戻すだけなので、名前解決も SID の書式も
+  `SeSecurityPrivilege` も所有権も関係しません。
+- **第二の手段**として、DACL だけを扱う .NET API（`GetAccessControl([AccessControlSections]::Access)` /
+  `SetAccessControl`）で継承を復活させ、現在のユーザーの **SID** にフル制御を付ける経路を残しました。
+  `Get-Acl` / `Set-Acl` コマンドレットは使いません（上の「2 度目の失敗」参照）。
+  この経路は**実機未検証**です。
+- **`takeown` は既定で実行しません。** 実機では「アクセスが拒否されました」が大量発生し、しかも不要でした。
+  `-Takeown` を明示指定したときだけ走る最後の手段として残してあります
+  （`install.ps1` も `14_フォルダのアクセス権を直す` も渡しません）。
+- **すでに読み書きできる場合は、アクセス権に一切触りません。** 導入時（`install.ps1` から呼ばれる通常ケース）は
+  この分岐で終わるため、**導入が権限を壊す経路そのものが存在しません**。
+- **`/inheritance:r`（継承の全削除）をやめました。** `%USERPROFILE%` 配下は既定で他の標準ユーザーから
+  読めないため、継承削除で増える安全性はごくわずかである一方、失敗時の被害（本人が締め出される）が
+  大きすぎます。代わりに **Everyone / Authenticated Users / BUILTIN\Users / Guests / ANONYMOUS への
+  明示的な許可だけ**を外します（別の場所からコピーしてきたフォルダに緩い ACE が残る形はこれで消えます）。
+- **権限を変えるたびに、本人が実際に読み書きできることを検証**します（テストファイルを作る → 書く →
+  読み返す → 消す ＋ 既存の `*.dpapi` を実際に読む）。**検証に失敗したら変更前の ACL へ戻します。**
+  「締めたが誰も入れない」状態で先へ進みません。
+- 実体は `scripts/windows/repair-permissions.ps1` に集約し、導入時（`install.ps1` から `-Quiet -NoTakeown`）と
+  修復ボタン（`14_フォルダのアクセス権を直す`）が**同じコード**を通ります。
+- 受講者に見せるコマンドは、診断・`doctor`・`14_…bat`・本ドキュメント・`docs/13_…`・`スタート.html` の
+  すべてで `icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q` に統一し、
+  **「コマンドプロンプト（cmd）で実行する」**と明記しました（PowerShell では `%USERPROFILE%` が展開されません）。
+  コマンドが苦手な人向けに**エクスプローラーでの手順**も併記しています。
+- 診断（`診断.ps1`）と `doctor.ps1` が **アクセス拒否と復号失敗を区別**するようになりました。
+  アクセス拒否のときは「PC を替えた可能性」ではなく権限の問題として、修復手順を表示します。
+- mac 側（`install.sh` の `chmod 700/600`）は SID の名前解決を伴わないので同型の事故は起きませんが、
+  同じ原則をそろえるため、締めたあとに読み書きを検証し、失敗したら 755 へ戻して警告します。
+
+**回帰テスト**: `scripts/common/test/acl-permissions.test.js`
+
+### まだ確認できていないこと（**実機確認が必要**）
+
+mac の開発機では Windows の ACL を再現できないため、以下は **Windows 実機での確認が必要**です。
+上のテストはコードの形（SID を使う／検証する／失敗時に戻す／`/inheritance:r` を使わない）を固定しているだけです。
+
+**確認済み（実機）**: `icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q` を cmd で実行 → 回復。
+`type "%USERPROFILE%\.ai-safety\deepseek.dpapi"` で暗号化された鍵が読め、**鍵は無傷**でした。
+
+**未確認**:
+
+- 壊れた実機で `14_フォルダのアクセス権を直す` **ボタン**を押して回復すること
+  （成功が確認できているのは、同じ `icacls /reset` を手で叩いた場合）
+- **第二の手段（`GetAccessControl`/`SetAccessControl`）が実機で通ること**。
+  `-SelfTest` は「型とメソッドが結線できる」ことしか測れず、実際の書き戻しが
+  `SeSecurityPrivilege` 無しで通るかは実機でしか分からない
+- Windows PowerShell 5.1（ボタンが使う `powershell.exe`）と PowerShell 7 の**両方**で動くこと
+  （5.1 はインスタンスメソッド、7 は拡張メソッドという別経路を通るため）
+- 継承を切られた**配下のファイル・フォルダ**（旧 `/T` の後始末）が `/reset /T` で継承へ戻ること
+- Microsoft アカウント / AzureAD 参加 / ローカルアカウントのそれぞれで、新規導入時に
+  「権限を整えました（読み書きできることを検証済み）」が出ること
+- 所有権まで失っているケースの `-Takeown`（実機では takeown 自体がアクセス拒否だったため、
+  このフォールバックが役に立つ場面は確認できていない）
+- 修復後に「10_困ったとき診断」の `■ 4` / `■ 5` が正しい結果へ変わること
+
 ## Windows で「なぜ止まったのか」の日本語が化けていた（修正済み・実機での最終確認待ち）
 
 **症状**: 日本語 Windows で、安全ガード（hook）が出す日本語のメッセージが読めない文字列になる。とくに
