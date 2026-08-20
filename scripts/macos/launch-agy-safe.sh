@@ -11,7 +11,12 @@ unset AI_SAFE_POLICY AI_SAFE_ROOT
 workspace="${1:-$(pwd)}"
 prompt="${2:-}"
 auto=0
+# --longrun = 長時間おまかせモード。呼び出し元（launch-longrun.sh）が「この環境には壁が
+# 無い」ことを受講者へ示して同意を取ったうえで来るので、doctor の隔離チェック結果に
+# 関わらず承認を省いて走らせる。--sandbox は維持し、決定的 deny 床も外さない。
+longrun=0
 [ "${3:-}" = "--auto" ] && auto=1
+[ "${3:-}" = "--longrun" ] && longrun=1
 workspace="$(cd "$workspace" && pwd)"
 
 export AI_SAFE_ROOT="$workspace/.ai-safety"
@@ -85,6 +90,12 @@ if [ "$auto" -eq 1 ]; then
     echo "⚠ オートを有効にできません: agy の隔離チェックに失敗しました。" >&2
     echo "  → 安全のため通常モード(--sandbox のみ)で起動します。" >&2
   fi
+fi
+
+if [ "$longrun" -eq 1 ]; then
+  auto_args=(--dangerously-skip-permissions)
+  echo "ℹ 長時間おまかせモードで起動します(agy)。確認は出ません。" >&2
+  echo "  --sandbox は維持していますが、agy の隔離は独立検証されていません。" >&2
 fi
 
 # bash 3.2 + set -u では空配列の "${arr[@]}" 展開が unbound variable でクラッシュするため、

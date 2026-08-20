@@ -1,7 +1,11 @@
 ﻿param(
     [string]$Workspace = (Get-Location).Path,
     [string]$Prompt = "",
-    [switch]$Auto   # "--auto" / "-Auto" で Safe Auto Mode を有効化する。
+    [switch]$Auto,  # "--auto" / "-Auto" で Safe Auto Mode を有効化する。
+    # 長時間おまかせモード。承認を一切出さずに走らせる (--ask-for-approval never)。
+    # 承認を省ける根拠は Codex 純正サンドボックス (--sandbox workspace-write /
+    # windows.sandbox=unelevated) が作業フォルダ外への書き込みを止めているから。壁は外さない。
+    [switch]$LongRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -170,6 +174,12 @@ if ($Auto) {
     } else {
         [Console]::Error.WriteLine("⚠ ネット遮断はOSで未実証です(自走は継続)。危険なコマンドは安全フックがブロックします。")
     }
+}
+
+if ($LongRun) {
+    # 目を離す前提のモード。確認は出さない (出しても答える人がいない)。
+    # 壁 (--sandbox workspace-write) と決定的 deny 床 (guard-bash hook) はそのまま。
+    $approval = 'never'
 }
 
 # A-2: hooks 有効化フラグを launcher 側でも明示渡し。

@@ -22,6 +22,9 @@ $ErrorActionPreference = "SilentlyContinue"
 
 try {
     . (Join-Path $PSScriptRoot "lib\SafetyPolicy.ps1")
+    # 日本語のメッセージを出す前に、hook の出力を UTF-8 に固定する。
+    # （PowerShell 5.1 の既定は CP932 で、Claude Code / Codex は UTF-8 として読むため）
+    Set-AiSafeConsoleUtf8
     . (Join-Path $PSScriptRoot "lib\Explainer.ps1")
     # Explainer/SafetyPolicy は StrictMode 2.0 を設定するが、observe では緩める。
     Set-StrictMode -Off

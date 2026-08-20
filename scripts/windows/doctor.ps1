@@ -439,6 +439,36 @@ if ($leftoverCount -eq 0) {
     Add-Result "secrets: 平文の残骸" $true "平文のキーは残っていません"
 }
 
+# v1.17.1: 「金庫へ書けなかった」履歴を必ず見せる。v1.17.0 の実機では gemini だけ金庫に
+# 入らなかったのに理由がどこにも残っておらず、ファイル一覧を送ってもらうまで切り分けられなかった。
+# 出すのは終了コード・所要時間・stderr の先頭だけ（鍵の値は記録していないので出ようがない）。
+$migrateLog = Join-Path $HOME '.ai-safety\logs\secret-migrate-events.jsonl'
+if (Test-Path -LiteralPath $migrateLog) {
+    $failLines = @(Get-Content -LiteralPath $migrateLog -ErrorAction SilentlyContinue |
+        Where-Object { $_ -match '"event":"(vault-write-failed|verify-failed)"' })
+    if ($failLines.Count -gt 0) {
+        foreach ($raw in ($failLines | Select-Object -Last 5)) {
+            $detail = $raw
+            try {
+                $ev = $raw | ConvertFrom-Json
+                $parts = @()
+                foreach ($at in @($ev.attempts)) {
+                    if ($null -eq $at) { continue }
+                    $one = "試行" + $at.attempt + ": 制限" + $at.timeoutMs + "ms/実所要" + $at.elapsedMs + "ms/終了コード" + $at.status
+                    if ($at.errorCode) { $one += "/" + $at.errorCode }
+                    if ($at.stderr)    { $one += " " + ($at.stderr -replace '\s+', ' ') }
+                    $parts += $one
+                }
+                # ConvertFrom-Json は ISO8601 の ts を DateTime に変換する。そのまま文字列と
+                # 足すと TimeSpan の加算とみなされて失敗するので、必ず [string] で固定する。
+                $detail = [string]$ev.ts + " " + [string]$ev.name + " " + ($parts -join ' | ')
+            } catch { }
+            Add-Result "secrets: 金庫への書き込み失敗" $false $detail
+        }
+        Add-Info "secrets: 詳しい記録" $migrateLog
+    }
+}
+
 $results | Format-Table -AutoSize
 $failed = @($results | Where-Object { $_.Status -ne "PASS" -and $_.Status -ne "SKIP" -and $_.Status -ne "INFO" })
 if ($failed.Count -gt 0) {

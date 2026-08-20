@@ -108,11 +108,37 @@ else
 fi
 rm -f "$win_installer_txt"
 
-# 9) 期待される番号ファイルが揃う（v1.16.0 番号再編後: 基本 1..10 と 上級1..8）
-for base in "1_AIをまとめて起動" "2_セーフCodexを起動" "3_セーフClaudeを起動" "4_セーフAntiGravityを起動" "5_見守りモニターを起動" "6_AIコーチのキーを登録" "7_安全パッケージを最新版に更新" "8_AIツールを最新版に更新" "9_困ったとき診断" "10_野良d-claudeを退治" "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）3_モニターをコンソールで見る" "（上級）4_ステータスラインを入れる" "（上級）5_このPC全体に最低限の安全設定を入れる" "（上級）6_PC全体の安全設定を解除" "（上級）7_DeepSeekキーを削除" "（上級）8_Bufferのキーを登録" "（上級）9_プラグインの置き場を開く" "（上級）14_新しい作業フォルダを安全にする" "（上級）15_長時間おまかせモードで起動"; do
+# 9) 期待される番号ファイルが揃う（v1.17.1 番号再編後: 基本 1..11 と 上級1..15）
+#    v1.17.1: 「5_セーフOpenCodeを起動」を基本枠へ入れ、旧 5〜12 を 1 つずつ繰り下げた。
+#    これで AI 4 種（Codex / Claude / AntiGravity / OpenCode）が 2〜5 に並ぶ。
+for base in "1_AIをまとめて起動" "2_セーフCodexを起動" "3_セーフClaudeを起動" "4_セーフAntiGravityを起動" "5_セーフOpenCodeを起動" "6_見守りモニターを起動" "7_AIコーチのキーを登録" "8_安全パッケージを最新版に更新" "9_AIツールを最新版に更新" "10_困ったとき診断" "11_野良d-claudeを退治" "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）3_モニターをコンソールで見る" "（上級）4_ステータスラインを入れる" "（上級）5_このPC全体に最低限の安全設定を入れる" "（上級）6_PC全体の安全設定を解除" "（上級）7_DeepSeekキーを削除" "（上級）8_Bufferのキーを登録" "（上級）9_プラグインの置き場を開く" "（上級）14_新しい作業フォルダを安全にする" "（上級）15_長時間おまかせモードで起動"; do
   [ -f "$START_DIR/$base.command" ] || { note "FAIL: $base.command がない"; fail=1; }
   [ -f "$START_DIR/$base.bat" ] || { note "FAIL: $base.bat がない"; fail=1; }
 done
+# Windows だけの追加ボタン（.command は無い）。番号の繰り下げに追従しているか。
+for base in "12_PowerShellを開く" "13_作業フォルダを開く"; do
+  [ -f "$START_DIR/$base.bat" ] || { note "FAIL: $base.bat がない"; fail=1; }
+done
+# 旧番号が残っていないこと（旧新併存で番号が重複すると受講者が迷う）。
+for old in "5_見守りモニターを起動" "6_AIコーチのキーを登録" "7_安全パッケージを最新版に更新" \
+           "8_AIツールを最新版に更新" "9_困ったとき診断" "10_野良d-claudeを退治" \
+           "11_PowerShellを開く" "12_作業フォルダを開く"; do
+  for ext in command bat; do
+    [ -f "$START_DIR/$old.$ext" ] && { note "FAIL: 旧番号のボタンが残っている: $old.$ext"; fail=1; }
+  done
+done
+# install の旧名掃除リストに旧番号が入っているか（更新した受講者の手元で二重に残らないため）。
+for old in "5_見守りモニターを起動.command" "6_AIコーチのキーを登録.command" "7_安全パッケージを最新版に更新.command" \
+           "8_AIツールを最新版に更新.command" "9_困ったとき診断.command" "10_野良d-claudeを退治.command" \
+           "11_PowerShellを開く.bat" "12_作業フォルダを開く.bat"; do
+  grep -Fq "$old" "$ROOT/scripts/macos/install.sh" || { note "FAIL: install.sh の旧名掃除リストに $old がない"; fail=1; }
+  grep -Fq "$old" "$ROOT/scripts/windows/install.ps1" || { note "FAIL: install.ps1 の旧名掃除リストに $old がない"; fail=1; }
+done
+
+# 9a) セーフ OpenCode 単独ボタン（v1.17.1 新設）は既存の安全起動口 oc-safe を呼ぶ。
+grep -q 'oc-safe' "$START_DIR/5_セーフOpenCodeを起動.command" || { note "FAIL: 5_セーフOpenCode .command が oc-safe を呼ばない"; fail=1; }
+grep -q 'oc-safe.ps1' "$START_DIR/5_セーフOpenCodeを起動.bat" || { note "FAIL: 5_セーフOpenCode .bat が oc-safe.ps1 を呼ばない"; fail=1; }
+grep -Fq '5_セーフOpenCodeを起動' "$HTML" || { note "FAIL: スタート.html に 5_セーフOpenCodeを起動 の案内がない"; fail=1; }
 
 # 9b) PC 全体の安全設定（上級5）と その解除（上級6）が正しい wrapper を呼ぶ（4 エンジン対応）
 grep -q 'apply-global-guard.sh' "$START_DIR/（上級）5_このPC全体に最低限の安全設定を入れる.command" || { note "FAIL: 上級5 .command が apply-global-guard.sh を呼ばない"; fail=1; }
@@ -127,16 +153,23 @@ grep -q 'protect-folder.sh' "$START_DIR/（上級）14_新しい作業フォル�
 grep -q 'protect-folder.ps1' "$START_DIR/（上級）14_新しい作業フォルダを安全にする.bat" || { note "FAIL: 上級14 .bat が protect-folder.ps1 を呼ばない"; fail=1; }
 grep -Fq '（上級）14' "$HTML" || { note "FAIL: スタート.html に 上級14 の案内がない"; fail=1; }
 
-# 9c-2) 長時間おまかせモード（上級15）。壁（サンドボックス）がある環境でしか起動しない設計。
-#       Windows 版は「起動しない」ことが仕様なので、拒否する ps1 を呼んでいることまで見る。
-grep -q 'launch-claude-longrun.sh' "$START_DIR/（上級）15_長時間おまかせモードで起動.command" || { note "FAIL: 上級15 .command が launch-claude-longrun.sh を呼ばない"; fail=1; }
-grep -q 'launch-claude-longrun.ps1' "$START_DIR/（上級）15_長時間おまかせモードで起動.bat" || { note "FAIL: 上級15 .bat が launch-claude-longrun.ps1 を呼ばない"; fail=1; }
+# 9c-2) 長時間おまかせモード（上級15）。v1.17.1 で 4 エンジン × 2 OS に対応した。
+#       壁（OS サンドボックス）がある環境では従来どおり、壁が無い環境では一度だけ確認を取る。
+#       「Windows では起動しない」旧仕様に戻っていないこともここで見る。
+grep -q 'launch-longrun.sh' "$START_DIR/（上級）15_長時間おまかせモードで起動.command" || { note "FAIL: 上級15 .command が launch-longrun.sh を呼ばない"; fail=1; }
+grep -q 'launch-longrun.ps1' "$START_DIR/（上級）15_長時間おまかせモードで起動.bat" || { note "FAIL: 上級15 .bat が launch-longrun.ps1 を呼ばない"; fail=1; }
 grep -Fq '（上級）15' "$HTML" || { note "FAIL: スタート.html に 上級15 の案内がない"; fail=1; }
 for _need in 'sandbox-exec' 'sandbox.enabled' 'disableBypassPermissionsMode' 'p.ask = \[\]' 'mktemp -d'; do
-  grep -q "$_need" "$ROOT/scripts/macos/launch-claude-longrun.sh" || { note "FAIL: 長時間おまかせモードに $_need の守りがない"; fail=1; }
+  grep -q "$_need" "$ROOT/scripts/macos/launch-longrun.sh" || { note "FAIL: 長時間おまかせモードに $_need の守りがない"; fail=1; }
 done
-grep -q 'bypassPermissions' "$ROOT/scripts/macos/launch-claude-longrun.sh" || { note "FAIL: 長時間おまかせモードが bypassPermissions を封じる記述を失っている"; fail=1; }
-grep -q 'exit 2' "$ROOT/scripts/windows/launch-claude-longrun.ps1" || { note "FAIL: Windows の長時間おまかせモードが起動を拒否しない"; fail=1; }
+grep -q 'bypassPermissions' "$ROOT/scripts/macos/launch-longrun.sh" || { note "FAIL: 長時間おまかせモードが bypassPermissions を封じる記述を失っている"; fail=1; }
+# 4 エンジン分の経路が mac / Windows の両方にあること。
+for _engine in 'launch-codex-safe' 'launch-agy-safe' 'launch-integrated'; do
+  grep -q "$_engine" "$ROOT/scripts/macos/launch-longrun.sh" || { note "FAIL: 長時間おまかせモード(mac)に $_engine 経路がない"; fail=1; }
+  grep -q "$_engine" "$ROOT/scripts/windows/launch-longrun.ps1" || { note "FAIL: 長時間おまかせモード(win)に $_engine 経路がない"; fail=1; }
+done
+grep -q 'disableBypassPermissionsMode' "$ROOT/scripts/windows/launch-longrun.ps1" || { note "FAIL: Windows の長時間おまかせモードが bypassPermissions を封じていない"; fail=1; }
+grep -q 'いまは Mac でだけ使えます' "$ROOT/scripts/windows/launch-longrun.ps1" && { note "FAIL: Windows の長時間おまかせモードが起動拒否の旧仕様に戻っている"; fail=1; }
 
 # 9d) 全体設定の反映／解除ラッパーが 4 エンジン分の実体を呼ぶ
 for _js in apply-global-guard.js apply-global-codex.js apply-global-agy.js apply-global-opencode.js; do

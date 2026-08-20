@@ -608,6 +608,7 @@
 	            <li><span class="fname">2_セーフCodexを起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … Codex を安全モードで動かす（統合版の標準モード＋見守り画面）</li>
             <li><span class="fname">3_セーフClaudeを起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … Claude Code を安全モードで動かす（統合版の標準モード＋見守り画面）</li>
             <li><span class="fname">4_セーフAntiGravityを起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … AntiGravity を安全モードで動かす（無課金の人の標準）</li>
+            <li><span class="fname">5_セーフOpenCodeを起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … OpenCode + DeepSeek を安全モードで動かす（統合版の標準モード＋見守り画面＋送信検査）</li>
           </ol>
 
           <p class="muted">AGI Cockpit（1 つのアプリで AI を使い分けるアプリ）で Claude を使いたい人は、docs フォルダの <b>11_AGI-Cockpitで使う</b> を読んでください（作業フォルダを my-ai-workspace にすれば保護が効きます。Codex だけは上の 2_ ボタンから）。</p>
@@ -616,9 +617,8 @@
 
           <p class="muted"><span class="fname">my-ai-workspace</span> 以外のフォルダで作業したくなったら：<span class="fname">（上級）14_新しい作業フォルダを安全にする<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … フォルダを選ぶと、そこに安全ルール・見張り・スタートフォルダをまとめて入れます（案件ごとに 1 つフォルダを作るのがおすすめです）。</p>
 
-          <p class="muted os-mac">目を離して AI に長く作業させたいとき：<span class="fname">（上級）15_長時間おまかせモードで起動<span class="os-mac">.command</span></span> … 確認ダイアログをほとんど出さずに進めます。<b>承認を省けるのは「OS の壁（サンドボックス）が作業フォルダの外への書き込みと許可外の通信を止めているから」</b>で、全部素通しにするわけではありません。再帰削除・秘密ファイルの読み取り・<span class="fname">sudo</span>・<span class="fname">git push</span> などは<b>止まったまま</b>です。壁が使える <b>Mac の Claude 専用</b>で、安全パッケージが入った作業フォルダでしか起動しません。<b>この作業フォルダに大事なファイルを置かないでください。</b>くわしくは docs フォルダの <a class="ext" href="docs/20_卒業後ガイド.md">20_卒業後ガイド</a> へ。</p>
+          <p class="muted">目を離して AI に長く作業させたいとき：<span class="fname">（上級）15_長時間おまかせモードで起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … 確認ダイアログをほとんど出さずに進めます。押すとメニューが出るので、<b>Claude／Codex／OpenCode／AntiGravity</b> から選んでください（<b>Mac でも Windows でも使えます</b>）。このモードは「全部素通し」ではありません。<b>再帰削除・秘密ファイルの読み取り・<span class="fname">sudo</span>・<span class="fname">git push</span> などは止まったまま</b>で、記録もそのまま残ります。<b>「壁」（OS が作業フォルダの外への書き込みを止める仕組み）がある組み合わせ</b>（Mac の Claude／Mac と Windows の Codex）では、壁を立てられなかったときは起動しません。<b>壁が無い組み合わせ</b>（Windows の Claude／OpenCode／AntiGravity）では、起動前に「この環境には壁がありません」という確認が<b>一度だけ</b>出ます。「はい」と入力しないかぎり起動しません。<b>この作業フォルダに大事なファイルを置かないでください。</b>くわしくは docs フォルダの <a class="ext" href="docs/20_卒業後ガイド.md">20_卒業後ガイド</a> へ。</p>
 
-          <p class="muted os-win">（上級）15_長時間おまかせモードで起動 は <b>Windows では使えません</b>。このモードは「OS の壁があるから確認を省ける」という作りで、Claude Code の壁は Windows では使えないためです。ボタンを押すと理由が表示されて起動しません。Windows の方は <span class="fname">3_セーフClaudeを起動</span> を使ってください。</p>
 
           <div class="info">
             <span class="ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z" stroke="currentColor" stroke-width="1.6"/><path d="M12 10v4M12 8h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
@@ -652,7 +652,7 @@
 
           <div class="do">
             <span class="ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M9 20h6M12 16v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7 10l2.5 2.5L13 8l2 2 2-2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-	            <div><span class="fname">1_AIをまとめて起動</span>を使った場合は、見守り画面も自動で開きます。個別に開く時だけ<b>別ウィンドウ</b>で <span class="fname">5_見守りモニターを起動</span> を<b>ダブルクリック</b>します。</div>
+	            <div><span class="fname">1_AIをまとめて起動</span>を使った場合は、見守り画面も自動で開きます。個別に開く時だけ<b>別ウィンドウ</b>で <span class="fname">6_見守りモニターを起動</span> を<b>ダブルクリック</b>します。</div>
           </div>
 
           <div class="meta">
@@ -662,7 +662,7 @@
 
           <div class="do" style="background:#fff6e6; border-color:#f0d69a;">
             <span class="ic" aria-hidden="true">🔑</span>
-            <div><b>AIコーチ（相談機能）を使うには、無料キーを一度だけ登録します。</b>モニター画面に出る <b>「🔑 キーを登録／変更する」</b>ボタン、または <span class="fname">6_AIコーチのキーを登録</span> をダブルクリックし、<b>Google AI Studio</b>（無料）で作ったキーを貼り付けるだけです。約1分・キーはこのパソコンの中だけに保存されます。<b>登録しないと、コーチに聞いても答えません。</b></div>
+            <div><b>AIコーチ（相談機能）を使うには、無料キーを一度だけ登録します。</b>モニター画面に出る <b>「🔑 キーを登録／変更する」</b>ボタン、または <span class="fname">7_AIコーチのキーを登録</span> をダブルクリックし、<b>Google AI Studio</b>（無料）で作ったキーを貼り付けるだけです。約1分・キーはこのパソコンの中だけに保存されます。<b>登録しないと、コーチに聞いても答えません。</b></div>
           </div>
 
           <p class="muted" style="font-size:13px;">※ 見守りモニターは <b>Codex / Claude / OpenCode</b> の統合起動に対応します。<b>AntiGravity</b> は別のしくみ（OS隔離）で守るため、モニターには表示されません。</p>
@@ -732,13 +732,13 @@
           <p class="muted">講座が終わっても、安全装置とボタンはそのまま使えます。覚えることは「<b>7 → 8 の順に押す</b>」だけです。</p>
 
           <ol class="steplist">
-            <li><b><span class="fname">7_安全パッケージを最新版に更新</span></b> … 安全装置とドキュメントを最新にします（先に押す）</li>
-            <li><b><span class="fname">8_AIツールを最新版に更新</span></b> … Codex／Claude Code／OpenCode の本体を、動作確認済みの版に更新します（後に押す。入れていないツールは自動でスキップ）</li>
+            <li><b><span class="fname">8_安全パッケージを最新版に更新</span></b> … 安全装置とドキュメントを最新にします（先に押す）</li>
+            <li><b><span class="fname">9_AIツールを最新版に更新</span></b> … Codex／Claude Code／OpenCode の本体を、動作確認済みの版に更新します（後に押す。入れていないツールは自動でスキップ）</li>
           </ol>
 
           <div class="meta">
             <div class="row why"><span class="k">なぜ</span><span>AIツールは更新が速く、古いままだと安全装置と噛み合わなくなることがあるからです。月に1回くらい押すのがおすすめです。</span></div>
-            <div class="row"><span class="k">何が起きる</span><span>黒い画面が開いて、いまの版 → 新しい版が表示されます。困ったら <span class="fname">9_困ったとき診断</span> を押してください。</span></div>
+            <div class="row"><span class="k">何が起きる</span><span>黒い画面が開いて、いまの版 → 新しい版が表示されます。困ったら <span class="fname">10_困ったとき診断</span> を押してください。</span></div>
           </div>
 
           <div class="info">

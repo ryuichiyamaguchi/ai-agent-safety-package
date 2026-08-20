@@ -1,7 +1,11 @@
 ﻿param(
     [string]$Workspace = (Get-Location).Path,
     [string]$Prompt = "",
-    [switch]$Auto   # "--auto" / "-Auto" で Safe Auto Mode を有効化する。
+    [switch]$Auto,  # "--auto" / "-Auto" で Safe Auto Mode を有効化する。
+    # 長時間おまかせモード。呼び出し元 (launch-longrun.ps1) が「壁が無い環境である」ことを
+    # 受講者へ示して同意を取ったうえで来るので、doctor の隔離チェック結果に関わらず
+    # 承認を省いて走らせる。--sandbox は維持し、決定的 deny 床も外さない。
+    [switch]$LongRun
 )
 
 # launch-agy-safe.ps1
@@ -141,6 +145,12 @@ if ($Auto) {
         [Console]::Error.WriteLine("ℹ オートを有効化しました(agy)。注意: agy の隔離は --sandbox を信頼するもので、")
         [Console]::Error.WriteLine("  Codex のように独立検証(実証・verified)されていません。重要作業では手動承認の利用も検討してください。")
     }
+}
+
+if ($LongRun) {
+    $autoArgs = @('--dangerously-skip-permissions')
+    [Console]::Error.WriteLine("ℹ 長時間おまかせモードで起動します(agy)。確認は出ません。")
+    [Console]::Error.WriteLine("  --sandbox は維持していますが、agy の隔離は独立検証されていません。")
 }
 
 $argsList = @("--sandbox", "--add-dir", $Workspace) + $autoArgs

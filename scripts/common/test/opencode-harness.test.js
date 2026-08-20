@@ -112,6 +112,7 @@ async function buildLauncherFixture(t) {
     'ds-gateway.js', 'gateway-token.js', 'secret-patterns.js', 'token-map.js', 'denylist.js', 'secret-store.js',
     'opencode-config.js', 'opencode-bouncer-monitor.mjs',
     'gemini-search-mcp.js', 'gemini-vision-mcp.js', 'pollinations-image-mcp.js', 'agy-image-mcp.js',
+    'codex-image-mcp.js',
     'gemini-client.js',
   ]) {
     fs.copyFileSync(path.join(root, 'scripts', 'common', file), path.join(hooks, 'common', file));

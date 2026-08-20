@@ -9,7 +9,12 @@ unset AI_SAFE_POLICY AI_SAFE_ROOT
 workspace="${1:-$(pwd)}"
 prompt="${2:-}"
 auto=0
+# --longrun = 長時間おまかせモード。承認を一切出さずに走らせる（`--ask-for-approval never`）。
+# 承認を省ける根拠は Codex 純正サンドボックス（--sandbox workspace-write）が
+# 作業フォルダ外への書き込みを OS の力で止めているから。壁は外さない。
+longrun=0
 [ "${3:-}" = "--auto" ] && auto=1
+[ "${3:-}" = "--longrun" ] && longrun=1
 workspace="$(cd "$workspace" && pwd)"
 export AI_SAFE_ROOT="$workspace/.ai-safety"
 export AI_SAFE_POLICY="$AI_SAFE_ROOT/policy/safety-policy.json"
@@ -134,6 +139,12 @@ if [ "$auto" -eq 1 ]; then
   else
     echo "⚠ ネット遮断はOSで未実証です(自走は継続)。危険なコマンドは安全フックがブロックします。" >&2
   fi
+fi
+
+if [ "$longrun" -eq 1 ]; then
+  # 目を離す前提のモード。確認は出さない（出しても答える人がいない）。
+  # 壁（--sandbox workspace-write）と決定的 deny 床（guard-bash hook）はそのまま。
+  approval="never"
 fi
 
 # A-2: -c features.hooks=true を明示渡し。config.mac.toml の hooks=true と合わせて二重保証。

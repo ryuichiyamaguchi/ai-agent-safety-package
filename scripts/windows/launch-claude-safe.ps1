@@ -143,6 +143,9 @@ if ($env:DS_CLAUDE_MODE -eq '1') {
     $searchMcp = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\gemini-search-mcp.js"))
     $imageMcp  = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\pollinations-image-mcp.js"))
     $agyMcp    = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\agy-image-mcp.js"))
+    # generate_image_gpt=GPT-Image-2 (Codex 経由・API キー不要・3 本で一番きれい・1 枚 1 分前後)。
+    # 切替: $env:AI_SAFE_DCLAUDE_CODEX_IMAGE=0。プロンプトはそのまま OpenAI へ送られる (Gateway は通らない)。
+    $codexImgMcp = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\codex-image-mcp.js"))
     # vision MCP=画像→テキスト（DeepSeek は画像を見られないので Gemini に見せて文字/説明を得る）。
     # 検索と同じ無料 Gemini キーを使う。無効化は $env:AI_SAFE_DCLAUDE_VISION='0'。
     # Playwright MCP=ブラウザ自動操作・UIテスト・スクレイピング。無効化は $env:AI_SAFE_DCLAUDE_PLAYWRIGHT='0'。
@@ -151,9 +154,10 @@ if ($env:DS_CLAUDE_MODE -eq '1') {
     $useSearch     = ($env:AI_SAFE_DCLAUDE_SEARCH     -ne '0') -and (Test-Path -LiteralPath $searchMcp)
     $useImage      = ($env:AI_SAFE_DCLAUDE_IMAGE      -ne '0') -and (Test-Path -LiteralPath $imageMcp)
     $useAgy        = ($env:AI_SAFE_DCLAUDE_AGY_IMAGE  -ne '0') -and (Test-Path -LiteralPath $agyMcp)
+    $useCodexImg   = ($env:AI_SAFE_DCLAUDE_CODEX_IMAGE -ne '0') -and (Test-Path -LiteralPath $codexImgMcp)
     $useVision     = ($env:AI_SAFE_DCLAUDE_VISION     -ne '0') -and (Test-Path -LiteralPath $visionMcp)
     $usePlaywright = ($env:AI_SAFE_DCLAUDE_PLAYWRIGHT -ne '0') -and (Test-Path -LiteralPath $playwrightMcp)
-    if (($useSearch -or $useImage -or $useAgy -or $useVision -or $usePlaywright) -and ($helpText -match "--mcp-config")) {
+    if (($useSearch -or $useImage -or $useAgy -or $useCodexImg -or $useVision -or $usePlaywright) -and ($helpText -match "--mcp-config")) {
         $logDir = $env:AI_SAFE_LOG_DIR
         if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
         try {
@@ -163,6 +167,7 @@ if ($env:DS_CLAUDE_MODE -eq '1') {
             if ($useSearch)     { $servers["gemini-search"]      = @{ command = "node"; args = @($searchMcp) } }
             if ($useImage)      { $servers["pollinations-image"] = @{ command = "node"; args = @($imageMcp) } }
             if ($useAgy)        { $servers["agy-image"]          = @{ command = "node"; args = @($agyMcp) } }
+            if ($useCodexImg)   { $servers["codex-image"]        = @{ command = "node"; args = @($codexImgMcp) } }
             if ($useVision)     { $servers["gemini-vision"]      = @{ command = "node"; args = @($visionMcp) } }
             if ($usePlaywright) { $servers["playwright"]         = @{ command = "node"; args = @($playwrightMcp) } }
             $mcpObj = @{ mcpServers = $servers }

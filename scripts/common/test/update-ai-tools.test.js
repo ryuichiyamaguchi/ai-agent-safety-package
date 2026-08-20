@@ -1,5 +1,5 @@
 'use strict';
-// v1.16.0（卒業版）の番号再編と「8_AIツールを最新版に更新」に対する回帰テスト。
+// v1.16.0（卒業版）の番号再編と「9_AIツールを最新版に更新」に対する回帰テスト。
 //
 // 守りたいこと:
 //   1. スタートフォルダが新番号体系（基本 1..12・上級 1..8+9、重複なし）で揃っている
@@ -27,12 +27,16 @@ const EXPECTED_BOTH = [
   '2_セーフCodexを起動',
   '3_セーフClaudeを起動',
   '4_セーフAntiGravityを起動',
-  '5_見守りモニターを起動',
-  '6_AIコーチのキーを登録',
-  '7_安全パッケージを最新版に更新',
-  '8_AIツールを最新版に更新',
-  '9_困ったとき診断',
-  '10_野良d-claudeを退治',
+  // v1.17.1 新設: OpenCode だけ単独ボタンが無く「1_AIをまとめて起動」のメニュー経由でしか
+  // 起動できなかった。無課金の受講生にとって OpenCode + DeepSeek は主経路なので、基本枠へ
+  // 入れて AI 4 種を 2〜5 に並べた（旧 5〜12 は 1 つずつ繰り下げ）。
+  '5_セーフOpenCodeを起動',
+  '6_見守りモニターを起動',
+  '7_AIコーチのキーを登録',
+  '8_安全パッケージを最新版に更新',
+  '9_AIツールを最新版に更新',
+  '10_困ったとき診断',
+  '11_野良d-claudeを退治',
   '（上級）1_DeepSeekキーを登録',
   '（上級）2_DeepSeek-Claudeを起動', // 山口さん判断 (2026-08-18): d-claude は廃止しない
   '（上級）3_モニターをコンソールで見る',
@@ -51,12 +55,12 @@ const EXPECTED_BOTH = [
   '（上級）13_Bufferのキーを削除',
   // 14 は卒業後用。任意のフォルダに保護一式を入れて「安全な作業フォルダ」にする。
   '（上級）14_新しい作業フォルダを安全にする',
-  // 15 は長時間おまかせモード。壁（Claude の純正サンドボックス）がある環境でしか
-  // 起動しない設計のため実質 Mac 専用だが、Windows でも「なぜ使えないか」を出す必要が
-  // あるので .bat も置く（押しても起動しないのが仕様）。
+  // 15 は長時間おまかせモード。v1.17.1 で Claude / Codex / OpenCode / agy の 4 エンジン ×
+  // mac / Windows に対応した。壁（OS サンドボックス）が無い環境では一度だけ確認を取ってから
+  // 進む（旧仕様の「Windows では起動しない」は撤廃）。
   '（上級）15_長時間おまかせモードで起動',
 ];
-const EXPECTED_WIN_ONLY = ['11_PowerShellを開く', '12_作業フォルダを開く'];
+const EXPECTED_WIN_ONLY = ['12_PowerShellを開く', '13_作業フォルダを開く'];
 
 test('スタートフォルダは新番号体系どおりで、重複・欠番・旧名がない', () => {
   const files = fs.readdirSync(startDir).filter((f) => !f.startsWith('.')).sort();
@@ -134,7 +138,7 @@ test('update-ai-tools.sh: Codex/Claude/OpenCode は latest・agy は対象外', 
   assert.ok(!/npm install -g\s+(agy|antigravity)/i.test(sh), 'agy をボタンから入れ直さないこと');
   assert.match(sh, /agy \(AntiGravity\) はこのボタンでは更新しません/);
   assert.match(sh, /結果まとめ/, '最後にまとめを表示すること');
-  assert.match(sh, /9_困ったとき診断/, '失敗時の案内が診断ボタンへ誘導すること');
+  assert.match(sh, /10_困ったとき診断/, '失敗時の案内が診断ボタンへ誘導すること');
   assert.match(sh, /スタート\.html の Step 0/, 'npm 不在時は Step 0 へ案内すること');
   assert.ok(!/sudo\s+npm/.test(sh), 'sudo で npm を実行しないこと（案内文で言及するのは可）');
 });
@@ -153,20 +157,20 @@ test('update-ai-tools.ps1: 内容が mac 版と対称で、PowerShell 5.1 の作
   assert.ok(!/npm install -g\s+(agy|antigravity)/i.test(ps), 'agy をボタンから入れ直さないこと');
   assert.match(ps, /agy \(AntiGravity\) はこのボタンでは更新しません/);
   assert.match(ps, /結果まとめ/, '最後にまとめを表示すること');
-  assert.match(ps, /9_困ったとき診断/);
+  assert.match(ps, /10_困ったとき診断/);
   assert.match(ps, /スタート\.html の Step 0/);
 });
 
 // ── 4. ボタン（薄いラッパー）────────────────────────────────────────────
-test('8_AIツールを最新版に更新 ボタンが両 OS にあり、実体スクリプトを呼ぶ', () => {
-  const cmd = read('workspace-template/スタート/8_AIツールを最新版に更新.command');
+test('9_AIツールを最新版に更新 ボタンが両 OS にあり、実体スクリプトを呼ぶ', () => {
+  const cmd = read('workspace-template/スタート/9_AIツールを最新版に更新.command');
   assert.match(cmd, /\.ai-safety\/hooks\/macos\/update-ai-tools\.sh/);
   assert.match(cmd, /HERE\/\.\./, '自分の場所からワークスペースを解決すること');
   assert.match(cmd, /キーを押すと閉じます/, '終了時にキー入力待ちで閉じること');
 
-  const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/8_AIツールを最新版に更新.bat'));
+  const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/9_AIツールを最新版に更新.bat'));
   assert.ok(batBytes[0] !== 0xef, '.bat に BOM を付けない');
-  const bat = readSjis('workspace-template/スタート/8_AIツールを最新版に更新.bat');
+  const bat = readSjis('workspace-template/スタート/9_AIツールを最新版に更新.bat');
   assert.match(bat, /chcp 932/, '教室 PC 向けに CP932 で動かすこと');
   assert.match(bat, /\.ai-safety\\hooks\\windows\\update-ai-tools\.ps1/);
   assert.match(bat, /pause/);
@@ -174,7 +178,7 @@ test('8_AIツールを最新版に更新 ボタンが両 OS にあり、実体�
 });
 
 test('mac にも診断ボタンがあり、doctor.sh を呼んで結果を平易に伝える', () => {
-  const cmd = read('workspace-template/スタート/9_困ったとき診断.command');
+  const cmd = read('workspace-template/スタート/10_困ったとき診断.command');
   assert.match(cmd, /\.ai-safety\/hooks\/macos\/doctor\.sh/);
   assert.match(cmd, /読み取り専用/, '何も変更しないことを伝えること');
   assert.match(cmd, /PASS = 正常/, 'PASS/FAIL の見かたを日本語で示すこと');
@@ -200,7 +204,7 @@ test('install は既知の旧名ボタンだけを掃除リストに持つ（両
     assert.ok(ps.includes(legacy.replace('.command', '.command')), `install.ps1 の掃除リストに無い: ${legacy}`);
   }
   // 現行の名前を誤って掃除対象にしていないこと。
-  for (const current of ['1_AIをまとめて起動', '8_AIツールを最新版に更新', '9_困ったとき診断.command']) {
+  for (const current of ['1_AIをまとめて起動', '9_AIツールを最新版に更新', '10_困ったとき診断.command']) {
     assert.ok(!sh.match(new RegExp(`^${current}`, 'm')), `install.sh が現行ボタンを掃除しようとしている: ${current}`);
   }
 });
@@ -228,8 +232,8 @@ test('install 再実行で旧名ボタンは消え、受講者の自作ファイ
   assert.ok(!fs.existsSync(path.join(ws, '0_Bouncer統合版を起動.command')), '旧名ボタンが残っている');
   assert.ok(!fs.existsSync(path.join(ws, '（上級）10_ccmuxを入れる.command')), '廃止ボタンが残っている');
   assert.ok(fs.existsSync(path.join(ws, '1_AIをまとめて起動.command')), '新名ボタンが配置されていない');
-  assert.ok(fs.existsSync(path.join(ws, '8_AIツールを最新版に更新.command')), '新ボタンが配置されていない');
-  assert.ok(fs.existsSync(path.join(ws, '9_困ったとき診断.command')), 'mac 診断ボタンが配置されていない');
+  assert.ok(fs.existsSync(path.join(ws, '9_AIツールを最新版に更新.command')), '新ボタンが配置されていない');
+  assert.ok(fs.existsSync(path.join(ws, '10_困ったとき診断.command')), 'mac 診断ボタンが配置されていない');
   assert.ok(fs.existsSync(path.join(ws, '自分のメモ.txt')), '受講者の自作ファイルを消してはいけない');
   assert.ok(fs.existsSync(path.join(workspace, '.ai-safety', 'tested-tool-versions.json')),
     '動作確認済みバージョン表が workspace に配置されること');

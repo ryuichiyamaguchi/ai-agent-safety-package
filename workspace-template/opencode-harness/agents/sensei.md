@@ -16,6 +16,7 @@ tools:
   webfetch: false
   pollinations-image_generate_image: false
   agy-image_generate_image_agy: false
+  codex-image_generate_image_gpt: false
   question: true
   glob: true
   skill: true

@@ -2,7 +2,7 @@
 chcp 932 >nul
 setlocal
 REM 見守りモニター（コンソール版）。ブラウザを使わずターミナル内で見る上級向け。
-REM 通常は「5_見守りモニターを起動」を使ってください（ブラウザで見やすく表示）。
+REM 通常は「6_見守りモニターを起動」を使ってください（ブラウザで見やすく表示）。
 set "HERE=%~dp0"
 for %%I in ("%HERE%..") do set "WORKSPACE=%%~fI"
 set "TARGET=%WORKSPACE%\.ai-safety\hooks\windows\monitor.ps1"

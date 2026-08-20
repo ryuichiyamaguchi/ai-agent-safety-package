@@ -1,6 +1,43 @@
 ﻿Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
+# --- hook 出力のエンコーディング（Windows 実機の文字化け対策） ----------------------
+# 症状: 日本語 Windows で「AI Safety Guard BLOCKED: …」などの日本語メッセージが化ける。
+#       受講者が一番読むべき「なぜ止まったのか」が読めなくなる（実機で確認された不具合）。
+#
+# 原因: Claude Code / Codex は hook の stdout / stderr を **UTF-8 として読む**。一方
+#       PowerShell 5.1 の [Console]::OutputEncoding は日本語 Windows では既定が CP932 なので、
+#       日本語がそのまま CP932 のバイト列で出て、受け取り側で UTF-8 として解釈され化ける。
+#
+# 直し方: 日本語を書く前に [Console]::OutputEncoding を UTF-8（**BOM なし**）にする。
+#   ・$OutputEncoding とは別物。あちらは「ネイティブコマンドの stdin へパイプするときの符号化」で、
+#     guard-post-output.ps1 が node へ本文を渡すときに使っているのはそちら（用途が違うので統一しない）。
+#   ・[Console]::OutputEncoding は stdout と stderr の両方に効く。Ask-Action が stdout へ出す
+#     permissionDecisionReason（日本語）も同じ穴なので、両方まとめてこれで直る。
+#   ・BOM 付き（[System.Text.Encoding]::UTF8）にしてはいけない。stdout の JSON の先頭に BOM が
+#     載ると Claude Code 側の JSON 解釈が壊れる。必ず UTF8Encoding($false) を使う。
+#   ・.NET は設定時に stdout / stderr のライタを作り直すので、途中で呼んでも効く。ただし
+#     取りこぼしを避けるため、各 hook の冒頭でも呼ぶ。
+#   ・コンソールハンドルが無い環境では例外になりうるので必ず try/catch（失敗しても判定は続ける）。
+#
+# **これは hook 専用**。install.ps1 / doctor.ps1 / launch-*.ps1 / open-monitor.ps1 /
+# secret-scan.ps1 のように、.bat が `chcp 932` した実コンソールやパイプへ出すスクリプトで
+# 同じことをすると、逆に化ける。だからライブラリの dot-source 時には実行せず、
+# hook 側から明示的に呼ぶ形にしてある。
+$script:AiSafeConsoleUtf8Done = $false
+function Set-AiSafeConsoleUtf8 {
+    if ($script:AiSafeConsoleUtf8Done) { return }
+    $script:AiSafeConsoleUtf8Done = $true
+    try {
+        $utf8 = New-Object System.Text.UTF8Encoding($false)
+        if ([Console]::OutputEncoding.CodePage -ne $utf8.CodePage) {
+            [Console]::OutputEncoding = $utf8
+        }
+    } catch {
+        # コンソールを持たない / 設定できない環境。安全判定そのものには影響させない。
+    }
+}
+
 function Get-SafetyPolicyPath {
     # 同梱ポリシー: このスクリプト自身の置き場所から決まる唯一の基準点。
     # 環境変数では動かせないため、deny 床をまるごと差し替える攻撃の足場にならない。
@@ -25,6 +62,7 @@ function Get-SafetyPolicyPath {
         if ($candidate -and (Test-Path -LiteralPath $candidate)) {
             $resolved = (Resolve-Path -LiteralPath $candidate).Path
             if ($trusted -contains $resolved) { return $resolved }
+            Set-AiSafeConsoleUtf8
             [Console]::Error.WriteLine("AI Safety Guard: 環境変数で指定された安全ルール (" + $candidate + ") は同梱のものと違うため無視しました。")
         }
     }
@@ -430,6 +468,7 @@ function Test-IsAllowedDomain([string]$HostName, [object]$Policy) {
 
 function Block-Action([object]$HookInput, [string]$Mode, [string]$Reason, [string]$ObservedText, [object]$Policy) {
     Write-AuditLog $HookInput $Mode "block" $Reason $ObservedText $Policy
+    Set-AiSafeConsoleUtf8
     [Console]::Error.WriteLine("AI Safety Guard BLOCKED: " + $Reason)
     exit 2
 }
@@ -451,11 +490,13 @@ function Ask-Action([object]$HookInput, [string]$Mode, [string]$Reason, [string]
             permissionDecisionReason = $Reason
         }
     }
+    Set-AiSafeConsoleUtf8
     [Console]::Out.WriteLine(($obj | ConvertTo-Json -Depth 6 -Compress))
     exit 0
 }
 
 function Fail-Closed([string]$Mode, [string]$Message) {
+    Set-AiSafeConsoleUtf8
     [Console]::Error.WriteLine("AI Safety Guard FAILED CLOSED (" + $Mode + "): " + $Message)
     exit 2
 }

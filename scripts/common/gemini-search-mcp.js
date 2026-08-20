@@ -48,7 +48,7 @@ function groundedSearch(query) {
   return new Promise((resolve) => {
     const key = resolveApiKey();
     if (!key) {
-      return resolve({ ok: false, message: 'Gemini API キーが未設定です（「6_AIコーチのキーを登録」で登録してください）。' });
+      return resolve({ ok: false, message: 'Gemini API キーが未設定です（「7_AIコーチのキーを登録」で登録してください）。' });
     }
     const body = JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: String(query).slice(0, MAX_QUERY_CHARS) }] }],

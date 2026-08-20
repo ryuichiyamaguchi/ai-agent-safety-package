@@ -263,11 +263,11 @@ for _sec in \
   "scripts/macos/apply-global-guard.sh" \
   "scripts/macos/uninstall-global-guard.sh" \
   "scripts/macos/protect-folder.sh" \
-  "scripts/macos/launch-claude-longrun.sh" \
+  "scripts/macos/launch-longrun.sh" \
   "scripts/windows/apply-global-guard.ps1" \
   "scripts/windows/uninstall-global-guard.ps1" \
   "scripts/windows/protect-folder.ps1" \
-  "scripts/windows/launch-claude-longrun.ps1"; do
+  "scripts/windows/launch-longrun.ps1"; do
   verify_hash "$_sec"
 done
 
@@ -421,7 +421,8 @@ fi
 # ファイルシステム構造とは別に「ここを見てポチポチやれば使える」入口を用意する。
 if [ -d "$package_root/workspace-template/スタート" ]; then
   mkdir -p "$workspace/スタート"
-  # v1.16.0 の番号再編で名前が変わった旧ボタンを掃除する（旧新併存による番号重複の防止）。
+  # v1.16.0 / v1.17.1 の番号再編で名前が変わった旧ボタンを掃除する（旧新併存による番号重複の防止）。
+  # v1.17.1: 「5_セーフOpenCodeを起動」を基本枠に入れたぶん、旧 5〜12 が 1 つずつ繰り下がった。
   # 消すのは「パッケージが過去に配布した既知の旧名」だけに限定し、受講者の自作ファイルには触らない。
   # Finder / Archive Utility 経由の展開はファイル名が NFD (UTF-8-MAC) になることがあるため、
   # 名前を NFC に正規化してから照合する（install のハッシュ照合と同じ手法）。
@@ -453,7 +454,21 @@ if [ -d "$package_root/workspace-template/スタート" ]; then
 （上級）5_危険コマンドをClaude全体で禁止.command
 （上級）5_危険コマンドをClaude全体で禁止.bat
 （上級）6_グローバル禁止を解除.command
-（上級）6_グローバル禁止を解除.bat'
+（上級）6_グローバル禁止を解除.bat
+5_見守りモニターを起動.command
+5_見守りモニターを起動.bat
+6_AIコーチのキーを登録.command
+6_AIコーチのキーを登録.bat
+7_安全パッケージを最新版に更新.command
+7_安全パッケージを最新版に更新.bat
+8_AIツールを最新版に更新.command
+8_AIツールを最新版に更新.bat
+9_困ったとき診断.command
+9_困ったとき診断.bat
+10_野良d-claudeを退治.command
+10_野良d-claudeを退治.bat
+11_PowerShellを開く.bat
+12_作業フォルダを開く.bat'
   for _old in "$workspace/スタート"/*; do
     [ -f "$_old" ] || continue
     _old_name="$(normalize_hash_rel_path "$(basename "$_old")")"
@@ -526,7 +541,7 @@ EOF_DOCS_COPY
   echo "説明書を配置しました: $docs_dest"
 fi
 
-# 動作確認済みツール版の表 (SSOT)。「8_AIツールを最新版に更新」が参照する。
+# 動作確認済みツール版の表 (SSOT)。「9_AIツールを最新版に更新」が参照する。
 if [ -f "$package_root/configs/tested-tool-versions.json" ]; then
   cp "$package_root/configs/tested-tool-versions.json" "$workspace/.ai-safety/tested-tool-versions.json"
 fi

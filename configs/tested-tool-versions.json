@@ -1,5 +1,5 @@
 {
-  "comment": "AI ツールを入れるとき／更新するときに使う版指定の SSOT。「8_AIツールを最新版に更新」と「0_AIツールをまとめて入れる」が参照する。2026-08-20 に意味が変わった: 以前は claudeCode に固定版 (2.1.201) を書き、policy/safety-policy.json の testedClaudeCodeVersion と一致させる運用だったが、Claude Code 純正サンドボックスを使う方針に切り替えたのに伴い固定をやめ、全ツール最新版追従にした。policy 側の testedClaudeCodeVersion キーも同時に撤去してある（launch-claude-safe.{sh,ps1} と 診断.ps1 はキーが無ければ版照合を静かにスキップする実装なので、コード変更なしで警告が止まる）。opencodeMin だけは『これ未満だと権限まわりの実装が違って安全設定が効かない』下限で、固定版ではない。",
+  "comment": "AI ツールを入れるとき／更新するときに使う版指定の SSOT。「9_AIツールを最新版に更新」と「0_AIツールをまとめて入れる」が参照する。2026-08-20 に意味が変わった: 以前は claudeCode に固定版 (2.1.201) を書き、policy/safety-policy.json の testedClaudeCodeVersion と一致させる運用だったが、Claude Code 純正サンドボックスを使う方針に切り替えたのに伴い固定をやめ、全ツール最新版追従にした。policy 側の testedClaudeCodeVersion キーも同時に撤去してある（launch-claude-safe.{sh,ps1} と 診断.ps1 はキーが無ければ版照合を静かにスキップする実装なので、コード変更なしで警告が止まる）。opencodeMin だけは『これ未満だと権限まわりの実装が違って安全設定が効かない』下限で、固定版ではない。",
   "claudeCode": "latest",
   "claudeCodeLastVerified": "2.1.236",
   "codex": "latest",

@@ -4,7 +4,7 @@ setlocal
 set "HERE=%~dp0"
 for %%I in ("%HERE%..") do set "WORKSPACE=%%~fI"
 :: ============================================================
-:: 6_AIコーチのキーを登録.bat
+:: 7_AIコーチのキーを登録.bat
 :: 見守りモニターで安全イベントやAI回答を相談するときに使う、無料の Gemini API キーを登録します。
 :: v1.17.0 から、キーは Windows の金庫(DPAPI)で暗号化して保存します。
 ::   保存先: %USERPROFILE%\.ai-safety\gemini.dpapi

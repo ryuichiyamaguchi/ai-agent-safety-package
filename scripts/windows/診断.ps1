@@ -129,16 +129,45 @@ if (Test-Path -LiteralPath $auth) {
 if (Test-Path -LiteralPath $auth) {
     WARN ("平文のキーファイルがまだ残っています: " + $auth + " → 「キー削除」を実行するか、登録し直すと金庫へ移ります")
 }
-# 平文の残骸は、環境変数（1Password の op run など）の有無に関係なく必ず見る。
-foreach ($leftover in @((Join-Path $up ".ai-safety\gemini-api-key.txt"), (Join-Path $up ".ai-safety\gemini-api-key-paid.txt"), (Join-Path $up ".ai-safety\buffer-api-key.txt"))) {
-    if (Test-Path -LiteralPath $leftover) {
-        WARN ("平文のキーファイルが残っています: " + $leftover)
+Line ""
+
+# 5) DeepSeek 以外の API キーの保管状態
+#    v1.17.1: ここは以前「4. DeepSeek キーの状態」の中に混ざっていた。AIコーチ（Gemini）の
+#    平文が残っているだけで「DeepSeek の問題」と誤解される実機報告があったため、
+#    キーごとに正しい節へ分けた（doctor.ps1 / doctor.sh は元からキー単位で報告している）。
+#    平文の残骸は、環境変数（1Password の op run など）の有無に関係なく必ず見る。
+Line "■ 5. DeepSeek 以外の API キーの状態（AIコーチ／Buffer）"
+$secretDir = Join-Path $up ".ai-safety"
+$otherKeys = @(
+    @{ Name = "AIコーチ（Gemini）のキー"; Dpapi = "gemini.dpapi";      Legacy = (Join-Path $secretDir "gemini-api-key.txt") },
+    @{ Name = "Gemini（有料）のキー";      Dpapi = "gemini-paid.dpapi"; Legacy = (Join-Path $secretDir "gemini-api-key-paid.txt") },
+    @{ Name = "Buffer のキー";             Dpapi = "buffer.dpapi";      Legacy = (Join-Path $secretDir "buffer-api-key.txt") }
+)
+foreach ($k in $otherKeys) {
+    $kDpapi = Join-Path $secretDir $k.Dpapi
+    $kInVault = Test-Path -LiteralPath $kDpapi
+    $kInPlain = Test-Path -LiteralPath $k.Legacy
+    if ($kInVault) { OK ($k.Name + ": 金庫に登録済み（" + $kDpapi + "）") }
+    if ($kInPlain) { WARN ($k.Name + ": 平文のキーファイルが残っています: " + $k.Legacy + " → 登録し直すと金庫へ移ります") }
+    if (-not $kInVault -and -not $kInPlain) { Line ("  " + $k.Name + ": 未登録") }
+}
+# 「金庫へ書けなかった」履歴。平文が残る原因のほとんどはここなので、必ず見せる。
+$migrateLog = Join-Path $up ".ai-safety\logs\secret-migrate-events.jsonl"
+if (Test-Path -LiteralPath $migrateLog) {
+    $fails = @(Get-Content -LiteralPath $migrateLog -ErrorAction SilentlyContinue |
+        Where-Object { $_ -match '"event":"(vault-write-failed|verify-failed)"' })
+    if ($fails.Count -gt 0) {
+        BAD ("金庫への書き込みに失敗した記録が " + $fails.Count + " 件あります（これが平文の残る原因です）")
+        foreach ($raw in ($fails | Select-Object -Last 3)) { Line ("       " + $raw) }
+        Line ("       記録の場所: " + $migrateLog)
+    } else {
+        OK "金庫への書き込みに失敗した記録はありません"
     }
 }
 Line ""
 
-# 5) d-claude コマンド登録（PATH）
-Line "■ 5. d-claude コマンド登録（PATH）"
+# 6) d-claude コマンド登録（PATH）
+Line "■ 6. d-claude コマンド登録（PATH）"
 $bin = Join-Path $up ".ai-safety\bin"
 $shim = Join-Path $bin "d-claude.cmd"
 if (Test-Path -LiteralPath $shim) { OK ("シムあり: " + $shim) } else { BAD "d-claude.cmd が無い → setup-commands 未実行/失敗" }
@@ -146,8 +175,8 @@ $userPath = [Environment]::GetEnvironmentVariable('Path','User'); if (-not $user
 if (($userPath.Split(';')) -contains $bin) { OK "ユーザーPATHに bin 登録済み（新しいターミナルで有効）" } else { BAD "bin が PATH に無い → どこからでも d-claude と打てない" }
 Line ""
 
-# 6) d-claude の実体解決（どの d-claude が実際に呼ばれるか＝野良シャドーイング検出）
-Line "■ 6. d-claude の実体（野良シャドーイング検出）"
+# 7) d-claude の実体解決（どの d-claude が実際に呼ばれるか＝野良シャドーイング検出）
+Line "■ 7. d-claude の実体（野良シャドーイング検出）"
 Line "    ※ PowerShell は 関数/エイリアス を PATH の .cmd より優先します。学校PC上に野良の"
 Line "       d-claude 関数（プロファイル定義）や別スクリプトがあると、正規ランチャーをバイパスして"
 Line "       『素の claude + DeepSeek 化（=バカ）』『人により違う英語エラー』の原因になります。"
@@ -200,7 +229,7 @@ if (-not $profileFound) {
         Line "    ● 現在の診断では正規シムが勝っていますが、通常の PowerShell では"
         Line "       プロファイル関数が優先される可能性があります。"
     }
-    Line "    ● 対処: 『10_野良d-claudeを退治』でバックアップ付きコメントアウトを実行するか、"
+    Line "    ● 対処: 『11_野良d-claudeを退治』でバックアップ付きコメントアウトを実行するか、"
     Line "       上の該当行を手でコメントアウトして、新しいターミナルを開き直してください。"
 }
 # 他シムの勝者も軽く確認（同種のシャドーイングが無いか）。

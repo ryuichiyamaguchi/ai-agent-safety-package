@@ -1,5 +1,5 @@
 #!/bin/bash
-# 9_困ったとき診断.command
+# 10_困ったとき診断.command
 # 安全装置が効いているかを自己診断します（読み取り専用・何も変更しません）。
 # 実体は .ai-safety/hooks/macos/doctor.sh。PASS=正常 / FAIL=問題あり。
 set -u

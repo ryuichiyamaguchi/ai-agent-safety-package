@@ -16,6 +16,11 @@ function Emit-AssistedDecision([string]$Decision, [string]$Reason) {
             permissionDecisionReason = $Reason
         }
     }
+    # permissionDecisionReason は日本語（「AI 判定に必要な node が見つかりません」等）。
+    # PowerShell 5.1 の既定（日本語 Windows では CP932）のまま出すと Claude 側で化けるので、
+    # 書き出す直前に UTF-8（BOM なし）へ揃える。この関数はライブラリを読み込む前に
+    # 定義されるため、まだ関数が無い場合に備えて存在確認してから呼ぶ。
+    if (Get-Command Set-AiSafeConsoleUtf8 -ErrorAction SilentlyContinue) { Set-AiSafeConsoleUtf8 }
     [Console]::Out.WriteLine(($obj | ConvertTo-Json -Depth 6 -Compress))
     exit 0
 }
@@ -173,6 +178,9 @@ function Test-IsScopedGeneratedCleanup([string]$Command) {
 
 try {
     . (Join-Path $PSScriptRoot "lib\SafetyPolicy.ps1")
+    # 日本語のメッセージを出す前に、hook の出力を UTF-8 に固定する。
+    # （PowerShell 5.1 の既定は CP932 で、Claude Code / Codex は UTF-8 として読むため）
+    Set-AiSafeConsoleUtf8
     . (Join-Path $PSScriptRoot "lib\Explainer.ps1")
     $policy = Get-SafetyPolicy
     $inputObj = Read-HookInput

@@ -10,7 +10,7 @@ unset AI_SAFE_POLICY AI_SAFE_ROOT
 usage() {
   cat <<'EOF'
 Usage:
-  launch-integrated.sh [workspace] [codex|claude|opencode|d-claude] [standard|assisted] [--websearch] [--resume] [--project=<フォルダ>]
+  launch-integrated.sh [workspace] [codex|claude|opencode|d-claude] [standard|assisted] [--websearch] [--longrun] [--resume] [--project=<フォルダ>]
 
 Profiles:
   standard  Safety hooks + approval monitor. No local LLM is required.
@@ -62,14 +62,14 @@ fi
 for _flag in "$extra" "$extra2"; do
   case "$_flag" in
     "") ;;
-    --websearch|--resume|--project=*)
+    --websearch|--longrun|--resume|--project=*)
       if [ "$agent" != "opencode" ]; then
-        echo "--websearch / --resume / --project は OpenCode だけで指定できます。" >&2
+        echo "--websearch / --longrun / --resume / --project は OpenCode だけで指定できます。" >&2
         exit 2
       fi
       ;;
     *)
-      echo "第4引数以降に指定できるのは --websearch / --resume / --project=<フォルダ> だけです。" >&2
+      echo "第4引数以降に指定できるのは --websearch / --longrun / --resume / --project=<フォルダ> だけです。" >&2
       exit 2
       ;;
   esac

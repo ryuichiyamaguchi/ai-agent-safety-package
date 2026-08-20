@@ -444,13 +444,25 @@ if [ -f "$secret_status_js" ] && command -v node >/dev/null 2>&1; then
         elif [ "$_keep" = "KEEP" ]; then
           printf '\033[31mWARN secrets: %s が平文のまま残っています（%s / 権限 %s。パッケージ外で使われている可能性があるため自動削除はしません）\033[0m\n' "$_label" "$_file" "$_mode"
         else
-          printf '\033[31mWARN secrets: %s がまだ平文のままです（%s / 権限 %s）。「6_AIコーチのキーを登録」等で登録し直すと金庫へ移ります\033[0m\n' "$_label" "$_file" "$_mode"
+          printf '\033[31mWARN secrets: %s がまだ平文のままです（%s / 権限 %s）。「7_AIコーチのキーを登録」等で登録し直すと金庫へ移ります\033[0m\n' "$_label" "$_file" "$_mode"
         fi
       done
       # world-readable が1件でもあれば FAIL 扱いにする（サブシェルを跨ぐので再判定）。
       if printf '%s\n' "$_leftovers" | grep -q 'WORLD'; then
         fail=$((fail + 1))
       fi
+    fi
+    # 「金庫へ書けなかった」履歴。v1.17.0 の Windows で、gemini だけ金庫に入らなかったのに
+    # 理由がどこにも残っておらず、実機のファイル一覧をもらうまで切り分けられなかった。
+    # 終了コード・所要時間・stderr の先頭を出す（鍵の値は記録していないので出ようがない）。
+    _wfails="$(printf '%s' "$_sec_json" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{const j=JSON.parse(d);for(const f of (j.writeFailures||[])){const a=(f.attempts||[]).map(x=>`試行${x.attempt}: 制限${x.timeoutMs}ms/実所要${x.elapsedMs}ms/終了コード${x.status}${x.errorCode?"/"+x.errorCode:""}${x.stderr?" "+x.stderr.replace(/\s+/g," ").slice(0,120):""}`).join(" | ");console.log([f.ts,f.name,a||f.error||""].join("\t"))}}catch{}})')"
+    if [ -n "$_wfails" ]; then
+      printf '%s\n' "$_wfails" | while IFS=$'\t' read -r _ts _name _detail; do
+        printf '\033[31mWARN secrets: %s を金庫へ書けませんでした（%s） %s\033[0m\n' "$_name" "$_ts" "$_detail"
+      done
+      # doctor は自分の診断ログのために AI_SAFE_LOG_DIR を差し替えているので、
+      # ここでその値を使うと存在しない場所を案内してしまう。移行ログの既定の置き場を指す。
+      echo "INFO secrets: 詳しい記録 → $HOME/.ai-safety/logs/secret-migrate-events.jsonl"
     fi
   fi
 fi

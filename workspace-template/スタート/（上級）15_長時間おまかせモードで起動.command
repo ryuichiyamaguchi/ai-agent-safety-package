@@ -1,11 +1,12 @@
 #!/bin/bash
-# 長時間おまかせモード（目を離して AI に長く作業させる）で Claude を起動する。
-# 承認を省ける理由は「OS の壁（サンドボックス）があるから」なので、壁が使える環境
-# （いまは Mac）と、壁が効く作業フォルダでしか起動しない。deny 床は外していない。
+# 長時間おまかせモード（目を離して AI に長く作業させる）で起動する。
+# Claude / Codex / OpenCode / AntiGravity から選べる。
+# 壁（OS のサンドボックス）がある環境では従来どおり、壁が無い環境では
+# 「壁がありません」と一度だけ確認してから進む。deny 床と記録はどの環境でも外していない。
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="$(cd "$HERE/.." && pwd)"
-TARGET="$WORKSPACE/.ai-safety/hooks/macos/launch-claude-longrun.sh"
+TARGET="$WORKSPACE/.ai-safety/hooks/macos/launch-longrun.sh"
 if [ ! -f "$TARGET" ]; then
   echo "スクリプトが見つかりません: $TARGET"
   echo "先に「1_安全パッケージを準備」を実行してください。"

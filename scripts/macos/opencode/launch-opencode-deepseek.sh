@@ -39,6 +39,7 @@ COACH_MARKER="$LOG_DIR/coach-engine"
 #                      分けて作業できるよう、起動するフォルダをここで指定する。
 WEBSEARCH=""
 RESUME=""
+LONGRUN=""
 PROJECT_DIR=""
 # 画面から雇うための「裏で1件だけ実行する」モード用（--task を渡すと TUI を開かず run で走る）
 TITLE=""
@@ -65,6 +66,9 @@ for _arg in "$@"; do
   case "$_arg" in
     "") ;;
     --websearch) WEBSEARCH="--websearch" ;;
+    # 長時間おまかせモード（目を離して走らせる）。確認を出さない代わりに ask だったものは
+    # deny 側へ倒す（opencode-config.js --longrun）。deny 床は 1 本も外さない。
+    --longrun) LONGRUN="--longrun" ;;
     --resume|--continue) RESUME="--continue" ;;
     --title) _expect_title=1 ;;
     --title=*) TITLE="${_arg#--title=}" ;;
@@ -74,7 +78,7 @@ for _arg in "$@"; do
     --session=*) SESSION="${_arg#--session=}" ;;
     --project) _expect_project=1 ;;
     --project=*) PROJECT_DIR="${_arg#--project=}" ;;
-    *) echo "使い方: $0 [workspace] [--websearch] [--resume] [--project <フォルダ>] [--title <名前>] [--task <指示>] [--session <ID>]" >&2; exit 2 ;;
+    *) echo "使い方: $0 [workspace] [--websearch] [--longrun] [--resume] [--project <フォルダ>] [--title <名前>] [--task <指示>] [--session <ID>]" >&2; exit 2 ;;
   esac
 done
 [ "$_expect_project" = "0" ] || { echo "--project の後にフォルダを指定してください。" >&2; exit 2; }
@@ -341,13 +345,13 @@ fi
 # 実キーは Gateway 子プロセスだけが読み、OpenCode の環境には渡さない。
 # 一覧は opencode-config.js が持つ（Windows 版と 1 か所で共有するため）。ここで先に消すのは、
 # 消す前に設定を作ると「鍵があるので MCP を登録したのに、その鍵が MCP へ届かない」状態に
-# なるため。検索・画像読取は ~/.ai-safety/gemini-api-key.txt（「6_AIコーチのキーを登録」が
+# なるため。検索・画像読取は ~/.ai-safety/gemini-api-key.txt（「7_AIコーチのキーを登録」が
 # 書く場所）だけを見るので、環境変数しか持っていない人にはここで案内を出す。
 SECRET_ENV_VARS="$(node "$CONFIG_JS" --print-secret-env)"
 [ -n "$SECRET_ENV_VARS" ] || { echo "OpenCode 安全設定を生成できませんでした。" >&2; exit 1; }
 if [ -n "${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-}" ] && ! read_secret ai-safety.gemini '' "$HOME/.ai-safety/gemini-api-key.txt" >/dev/null 2>&1; then
   echo "注意: 環境変数の Gemini キーは OpenCode へ渡しません（AI から見えてしまうため）。" >&2
-  echo "      検索と画像読み取りを使うときは「6_AIコーチのキーを登録」で登録してください。" >&2
+  echo "      検索と画像読み取りを使うときは「7_AIコーチのキーを登録」で登録してください。" >&2
 fi
 # shellcheck disable=SC2086
 unset $SECRET_ENV_VARS 2>/dev/null || true
@@ -585,6 +589,7 @@ fi
 # opencode-config.js へは環境変数で渡す（引数にすると ps に出る）。この行限定の
 # 環境変数なのでランチャー自身の環境には残らない。
 CONFIG_ARGS=(--port "$PORT" --monitor-plugin "$MONITOR_PLUGIN")
+if [ -n "$LONGRUN" ]; then CONFIG_ARGS+=("$LONGRUN"); fi
 if [ "$WEBSEARCH" = "--websearch" ]; then
   export OPENCODE_ENABLE_EXA=1
   export OPENCODE_CONFIG_CONTENT
@@ -599,7 +604,7 @@ fi
 
 # 消すだけでなく「安全な値で上書き」して二重化する。環境変数側が最後にマージされるので、
 # 将来マージ順が変わっても最小限の deny 床（削除・昇格・公開・外部通信・外部フォルダ）は残る。
-OPENCODE_PERMISSION="$(node "$CONFIG_JS" --print-permission-env)"
+OPENCODE_PERMISSION="$(node "$CONFIG_JS" --print-permission-env ${LONGRUN:+$LONGRUN})"
 [ -n "$OPENCODE_PERMISSION" ] || { echo "OpenCode 安全設定を生成できませんでした。" >&2; exit 1; }
 export OPENCODE_PERMISSION
 
@@ -629,7 +634,7 @@ if [ -z "$resolved" ]; then
   echo "OpenCode が古い可能性があります。最新版に更新してから、もう一度お試しください。" >&2
   exit 1
 fi
-if ! printf '%s' "$resolved" | node "$CONFIG_JS" --verify-resolved; then
+if ! printf '%s' "$resolved" | node "$CONFIG_JS" --verify-resolved ${LONGRUN:+$LONGRUN}; then
   resolved_safe="${resolved//$GATEWAY_TOKEN/REDACTED}"
   # 解決済み設定には、リモート MCP（Buffer 等）の鍵も Authorization ヘッダとして入る。
   # 診断ファイルは講師へ共有してもらう前提なので、鍵は残さず伏せる。

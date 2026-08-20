@@ -177,11 +177,11 @@ foreach ($sec in @(
     'scripts/macos/apply-global-guard.sh',
     'scripts/macos/uninstall-global-guard.sh',
     'scripts/macos/protect-folder.sh',
-    'scripts/macos/launch-claude-longrun.sh',
+    'scripts/macos/launch-longrun.sh',
     'scripts/windows/apply-global-guard.ps1',
     'scripts/windows/uninstall-global-guard.ps1',
     'scripts/windows/protect-folder.ps1',
-    'scripts/windows/launch-claude-longrun.ps1'
+    'scripts/windows/launch-longrun.ps1'
 )) {
     Test-DistributionHash $sec
 }
@@ -448,7 +448,7 @@ $startSrc = Join-Path $packageRoot "workspace-template\スタート"
 if (Test-Path -LiteralPath $startSrc) {
     $startDest = Join-Path $Workspace "スタート"
     New-Item -ItemType Directory -Force -Path $startDest | Out-Null
-    # v1.16.0 の番号再編で名前が変わった旧ボタンを掃除する（旧新併存による番号重複の防止）。
+    # v1.16.0 / v1.17.1 の番号再編で名前が変わった旧ボタンを掃除する（旧新併存による番号重複の防止）。
     # 消すのは「パッケージが過去に配布した既知の旧名」だけに限定し、受講者の自作ファイルには触らない。
     $legacyStartNames = @(
         "0_Bouncer統合版を起動.command", "0_Bouncer統合版を起動.bat",
@@ -466,7 +466,16 @@ if (Test-Path -LiteralPath $startSrc) {
         "（上級）11_Bufferのキーを登録.command", "（上級）11_Bufferのキーを登録.bat",
         "（上級）12_プラグインの置き場を開く.command", "（上級）12_プラグインの置き場を開く.bat",
         "（上級）5_危険コマンドをClaude全体で禁止.command", "（上級）5_危険コマンドをClaude全体で禁止.bat",
-        "（上級）6_グローバル禁止を解除.command", "（上級）6_グローバル禁止を解除.bat"
+        "（上級）6_グローバル禁止を解除.command", "（上級）6_グローバル禁止を解除.bat",
+        # v1.17.1: 「5_セーフOpenCodeを起動」を基本枠に入れたぶん、旧 5〜12 が 1 つずつ繰り下がった。
+        "5_見守りモニターを起動.command", "5_見守りモニターを起動.bat",
+        "6_AIコーチのキーを登録.command", "6_AIコーチのキーを登録.bat",
+        "7_安全パッケージを最新版に更新.command", "7_安全パッケージを最新版に更新.bat",
+        "8_AIツールを最新版に更新.command", "8_AIツールを最新版に更新.bat",
+        "9_困ったとき診断.command", "9_困ったとき診断.bat",
+        "10_野良d-claudeを退治.command", "10_野良d-claudeを退治.bat",
+        "11_PowerShellを開く.bat",
+        "12_作業フォルダを開く.bat"
     )
     foreach ($legacyName in $legacyStartNames) {
         $legacyPath = Join-Path $startDest $legacyName
@@ -543,7 +552,7 @@ if (Test-Path -LiteralPath $docsSrc) {
     Write-Host "説明書を配置しました: $docsDest"
 }
 
-# 動作確認済みツール版の表 (SSOT)。「8_AIツールを最新版に更新」が参照する。
+# 動作確認済みツール版の表 (SSOT)。「9_AIツールを最新版に更新」が参照する。
 $toolVersionsSrc = Join-Path $packageRoot "configs\tested-tool-versions.json"
 if (Test-Path -LiteralPath $toolVersionsSrc) {
     Copy-Item -LiteralPath $toolVersionsSrc -Destination (Join-Path $Workspace ".ai-safety\tested-tool-versions.json") -Force
@@ -589,7 +598,7 @@ if ($Platform -eq 'win') {
                 & $cleanupDClaude -Workspace $Workspace -Yes
             } catch {
                 Write-Warning ("野良 d-claude の自動退避に失敗しました(スキップ): " + $_.Exception.Message)
-                Write-Host "  必要なら後で スタート\10_野良d-claudeを退治.bat を実行してください。"
+                Write-Host "  必要なら後で スタート\11_野良d-claudeを退治.bat を実行してください。"
             }
         }
     } else {

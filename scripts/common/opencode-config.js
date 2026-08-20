@@ -22,6 +22,9 @@ const MCP_SERVERS = [
   { key: 'gemini-vision', file: 'gemini-vision-mcp.js', flag: 'AI_SAFE_DCLAUDE_VISION', tool: 'describe_image', timeout: 45000, needsGeminiKey: true },
   { key: 'pollinations-image', file: 'pollinations-image-mcp.js', flag: 'AI_SAFE_DCLAUDE_IMAGE', tool: 'generate_image', timeout: 120000, needsGeminiKey: false },
   { key: 'agy-image', file: 'agy-image-mcp.js', flag: 'AI_SAFE_DCLAUDE_AGY_IMAGE', tool: 'generate_image_agy', timeout: 210000, needsGeminiKey: false },
+  // GPT-Image-2（Codex 経由。API キー不要＝ChatGPT のサブスクリプションを使う）。3 本のうち一番きれい。
+  // 1 枚 1 分前後かかる（実測 50 秒前後）ので、agy（210 秒）よりさらに余裕を持たせる。
+  { key: 'codex-image', file: 'codex-image-mcp.js', flag: 'AI_SAFE_DCLAUDE_CODEX_IMAGE', tool: 'generate_image_gpt', timeout: 300000, needsGeminiKey: false },
   { key: 'playwright', file: 'playwright-mcp.js', flag: 'AI_SAFE_DCLAUDE_PLAYWRIGHT', tool: '*', timeout: 90000, needsGeminiKey: false },
 ];
 
@@ -52,7 +55,7 @@ const REMOTE_MCP_SERVERS = [
 // `printenv` を一度通せば AI に鍵の実物が見えてしまう（送信検査 Gateway のマスキングは
 // 「外へ送るとき」の話で、画面に出るのは止められない）。
 // Gemini / Google の鍵をここに入れた結果、検索・画像読取の MCP は
-// ~/.ai-safety/gemini-api-key.txt（「6_AIコーチのキーを登録」が書く場所）だけを見る。
+// ~/.ai-safety/gemini-api-key.txt（「7_AIコーチのキーを登録」が書く場所）だけを見る。
 const SECRET_ENV_VARS = [
   'DEEPSEEK_API_KEY',
   'DEEPSEEK_API_TOKEN',
@@ -181,14 +184,27 @@ function buildMcpConfig({ mcpDir = '', env = process.env, homeDir = os.homedir()
 //       安全フックを通らない裸起動を閉じる。安全ランチャー（codex-safe / claude-safe）は
 //       下の enforcedBashAsk() で ask として明示的に開けてある（壁 A の解消）。
 //       oc-safe は自分自身の再帰起動なので閉じる。
-function enforcedBashDeny() {
-  return {
+//
+// longrun（長時間おまかせモード）の扱い:
+//   目を離している間に ask が出ると答える人がいないので、そこでセッションが止まる。
+//   かといって自動許可にすると「取り消しにくい公開」や「対話前提のランチャー起動」が
+//   無人で通る。したがって **ask だったものは deny 側へ倒す**（緩める向きへは動かさない）。
+function enforcedBashDeny(longrun = false) {
+  const base = {
     [['r', 'm *'].join('')]: 'deny',
     'sudo *': 'deny',
     'git reset --hard*': 'deny',
     'codex*': 'deny',
     'claude*': 'deny',
     'oc-safe*': 'deny',
+  };
+  if (!longrun) return base;
+  return {
+    ...base,
+    'codex-safe*': 'deny',
+    'claude-safe*': 'deny',
+    'git push*': 'deny',
+    'npm publish*': 'deny',
   };
 }
 
@@ -201,7 +217,9 @@ function enforcedBashDeny() {
 // codex-safe / claude-safe は PATH 上のシム（install が ~/.ai-safety/bin/ に置く）で、
 // 中で安全ランチャーへ橋渡しする。呼ばれた側は --sandbox workspace-write / 安全 settings /
 // guard フック / 見守りモニターが全部かかった状態で動くので、**裸起動より安全**になる。
-function enforcedBashAsk() {
+function enforcedBashAsk(longrun = false) {
+  // 長時間おまかせモードでは「確認して通す」枠そのものを置かない（全部 deny 側へ移した）。
+  if (longrun) return {};
   return {
     'codex-safe*': 'ask',
     'claude-safe*': 'ask',
@@ -211,9 +229,9 @@ function enforcedBashAsk() {
 }
 
 // ランチャーが OPENCODE_PERMISSION に入れる最小の強制集合（deny → ask の順を保つ）。
-function buildEnforcedPermissionEnv() {
+function buildEnforcedPermissionEnv(longrun = false) {
   return {
-    bash: { ...enforcedBashDeny(), ...enforcedBashAsk() },
+    bash: { ...enforcedBashDeny(longrun), ...enforcedBashAsk(longrun) },
     external_directory: 'deny',
   };
 }
@@ -252,9 +270,11 @@ function enforcedReadRules() {
 // hooks/ を書き換えられる＝安全ルールと決定的 deny 床そのものを無効化できる。しかも
 // 床を殺した状態は次回以降の起動でも「正常に見える」ので、パターン単位で禁止する
 // （1.18.4 実測: edit もパターン表を受け付ける）。
-function enforcedEditRules() {
+// longrun では '*' を allow にする（無人なので確認に答える人がいない）。ただし
+// .ai-safety（安全ルールとガードの実体）の書き換え禁止は longrun でも 1 本も外さない。
+function enforcedEditRules(longrun = false) {
   return {
-    '*': 'ask',
+    '*': longrun ? 'allow' : 'ask',
     [`*${DOT}ai-safety`]: 'deny',
     [`**/${DOT}ai-safety`]: 'deny',
     [`*${DOT}ai-safety/**`]: 'deny',
@@ -283,15 +303,15 @@ const MONITOR_PLUGIN_FILE = 'opencode-bouncer-monitor.mjs';
 
 // `opencode debug config` が出す「解決済み設定」を検証し、壊れている点を日本語で列挙する。
 // 環境変数や管理者設定で deny 床が外されていないかを、起動直前に実物で確かめるために使う。
-function verifyResolvedConfig(resolved) {
+function verifyResolvedConfig(resolved, { longrun = false } = {}) {
   const problems = [];
   if (!resolved || typeof resolved !== 'object') return ['解決済み設定を読み取れませんでした。'];
   const permission = resolved.permission && typeof resolved.permission === 'object' ? resolved.permission : {};
   const bash = permission.bash && typeof permission.bash === 'object' ? permission.bash : {};
-  for (const [pattern, action] of Object.entries(enforcedBashDeny())) {
+  for (const [pattern, action] of Object.entries(enforcedBashDeny(longrun))) {
     if (bash[pattern] !== action) problems.push(`bash の「${pattern}」が禁止になっていません。`);
   }
-  for (const [pattern, action] of Object.entries(enforcedBashAsk())) {
+  for (const [pattern, action] of Object.entries(enforcedBashAsk(longrun))) {
     if (bash[pattern] !== action) problems.push(`bash の「${pattern}」が確認制になっていません。`);
   }
   // 並び順の検査。OpenCode は「最後に一致したルールが勝つ」ので、`codex-safe*`(ask) が
@@ -300,14 +320,17 @@ function verifyResolvedConfig(resolved) {
   {
     const keys = Object.keys(bash);
     const lastDeny = keys.reduce((acc, key, i) => (bash[key] === 'deny' ? i : acc), -1);
-    for (const pattern of Object.keys(enforcedBashAsk())) {
+    for (const pattern of Object.keys(enforcedBashAsk(longrun))) {
       const at = keys.indexOf(pattern);
       if (at >= 0 && at < lastDeny) {
         problems.push(`bash の「${pattern}」が禁止規則より前にあり、最後の一致で打ち消されます。`);
       }
     }
   }
-  if (bash['*'] === 'allow') problems.push('bash がすべて自動許可になっています。');
+  // 長時間おまかせモードは「無人で走らせる」ことが目的なので bash の '*' は allow になる。
+  // そのぶん、上の deny 床（再帰削除・sudo・裸起動・公開系）は 1 本も外していないこと、
+  // および webfetch / websearch が deny 側へ倒れていることを下で確かめる。
+  if (!longrun && bash['*'] === 'allow') problems.push('bash がすべて自動許可になっています。');
   if (permission.external_directory !== 'deny') problems.push('作業フォルダの外へのアクセスが禁止になっていません。');
   if (resolved.share !== 'disabled') problems.push('会話の共有リンク作成が無効になっていません。');
   // read / edit は「並び順まで含めて」配布物どおりであることを求める。ここは最後に一致した
@@ -316,7 +339,7 @@ function verifyResolvedConfig(resolved) {
   if (JSON.stringify(permission.read) !== JSON.stringify(enforcedReadRules())) {
     problems.push('パスワードや鍵が入ったファイル（.env など）と安全ルール置き場の読み取り禁止が書き換えられています。');
   }
-  if (JSON.stringify(permission.edit) !== JSON.stringify(enforcedEditRules())) {
+  if (JSON.stringify(permission.edit) !== JSON.stringify(enforcedEditRules(longrun))) {
     problems.push('安全ルール置き場（.ai-safety）の書き換え禁止が外れています。');
   }
   // 外部通信系はパターン表にされると穴を開けられるので「文字列で allow 以外」だけを通す。
@@ -324,6 +347,12 @@ function verifyResolvedConfig(resolved) {
     const value = permission[key];
     if (typeof value !== 'string' || value === 'allow') {
       problems.push(`${label}が無確認で使える設定になっています。`);
+    }
+    // 長時間おまかせモードは無人なので「確認して通す」が成立しない。外部送信は
+    // 止まる側（deny）へ倒す。ask のままだとセッションがそこで固まるうえ、
+    // 万一 allow へ倒すと取り消せない送信が無人で通ってしまう。
+    if (longrun && value !== 'deny') {
+      problems.push(`長時間おまかせモードでは${label}を禁止にしてください。`);
     }
   }
   if (resolved.autoupdate !== false) {
@@ -395,6 +424,9 @@ function buildOpenCodeConfig({
   mcpDir = '',
   env = process.env,
   homeDir = os.homedir(),
+  // 長時間おまかせモード（目を離して走らせる）。確認を出さない代わりに、
+  // ask だったものは deny 側へ倒す。deny 床は 1 本も外さない。
+  longrun = false,
 } = {}) {
   const safePort = Number(port);
   if (!Number.isInteger(safePort) || safePort < 1 || safePort > 65535) {
@@ -471,9 +503,9 @@ function buildOpenCodeConfig({
       },
     },
     permission: {
-      '*': 'ask',
+      '*': longrun ? 'allow' : 'ask',
       read: enforcedReadRules(),
-      edit: enforcedEditRules(),
+      edit: enforcedEditRules(longrun),
       // 前方一致 allow は「読むだけ」で副作用の出しようがないものに絞る。
       // find* は -delete / -exec rm、git log* は -p でのリダイレクト書き込みに使えるため
       // allow から外して ask に落とす。連結・リダイレクトによる悪用は
@@ -505,7 +537,7 @@ function buildOpenCodeConfig({
       //   床側で完全に塞ぐのはコマンド文字列から検索先が分からない以上は構造的に無理なので、
       //   ここでは「確認を挟む」までにとどめ、残る性質は docs/90_守れる-守れない.md に書く。
       bash: {
-        '*': 'ask',
+        '*': longrun ? 'allow' : 'ask',
         'pwd': 'allow',
         'ls*': 'allow',
         'wc *': 'allow',
@@ -525,14 +557,16 @@ function buildOpenCodeConfig({
         'node --test*': 'allow',
         'pytest*': 'allow',
         'python* -m unittest*': 'allow',
-        ...enforcedBashDeny(),
+        ...enforcedBashDeny(longrun),
         // ask は deny の後ろ（最後に一致したルールが勝つ）。codex-safe* を codex*(deny) の
         // 後ろに置くことで「安全ランチャーは確認つきで通り、裸起動は止まる」に反転させる。
-        ...enforcedBashAsk(),
+        // longrun ではこの表は空（全部 deny 側へ移した）。
+        ...enforcedBashAsk(longrun),
       },
       external_directory: 'deny',
-      webfetch: 'ask',
-      websearch: enableWebSearch ? 'ask' : 'deny',
+      // 外部送信は無人で確認できないので、longrun では ask ではなく deny へ倒す。
+      webfetch: longrun ? 'deny' : 'ask',
+      websearch: longrun ? 'deny' : (enableWebSearch ? 'ask' : 'deny'),
       task: 'allow',
       // 配布スキル（hearing-ladder 等）は $XDG_CONFIG_HOME/opencode/skills/ から読まれる。
       // 「どのスキルを無確認で使ってよいか」をパターンで明示する（読むだけの指示書なので全許可）。
@@ -541,8 +575,11 @@ function buildOpenCodeConfig({
       question: 'allow',
       todoread: 'allow',
       todowrite: 'allow',
-      doom_loop: 'ask',
-      ...mcpConfig.permission,
+      doom_loop: longrun ? 'deny' : 'ask',
+      // MCP はどれも外部サービスへ送信する。無人では確認に答えられないので longrun では禁止。
+      ...(longrun
+        ? Object.fromEntries(Object.keys(mcpConfig.permission).map((key) => [key, 'deny']))
+        : mcpConfig.permission),
     },
   };
   if (Object.keys(mcpConfig.mcp).length) config.mcp = mcpConfig.mcp;
@@ -558,6 +595,7 @@ function parseArgs(argv) {
   let printSecretEnv = false;
   let verifyResolved = false;
   let verifyResolvedFile = '';
+  let longrun = false;
   // MCP 実体（*-mcp.js）は、このスクリプトと同じ hooks/common に配置される。
   // 既定を __dirname にしておけばランチャーがパスを組み立て直す必要がない。
   let mcpDir = __dirname;
@@ -580,6 +618,8 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === '--websearch') {
       enableWebSearch = true;
+    } else if (arg === '--longrun') {
+      longrun = true;
     } else if (arg === '--monitor-plugin') {
       monitorPlugin = String(argv[index + 1] || '');
       index += 1;
@@ -598,6 +638,7 @@ function parseArgs(argv) {
     printSecretEnv,
     verifyResolved,
     verifyResolvedFile,
+    longrun,
     mcpDir,
   };
 }
@@ -786,7 +827,7 @@ module.exports = {
 // 入力はファイル（--verify-resolved <path>）か標準入力。Windows PowerShell 5.1 は
 // ネイティブコマンドの標準入力を既定 ASCII で流すため（日本語ユーザー名等が壊れる）、
 // .ps1 側はファイル渡しを使う。
-function verifyFromInput(file) {
+function verifyFromInput(file, longrun = false) {
   const fs = require('node:fs');
   let raw = '';
   try {
@@ -804,7 +845,7 @@ function verifyFromInput(file) {
     process.exitCode = 1;
     return;
   }
-  const problems = verifyResolvedConfig(parsed);
+  const problems = verifyResolvedConfig(parsed, { longrun });
   if (problems.length) {
     for (const problem of problems) process.stderr.write(`  - ${problem}\n`);
     process.exitCode = 1;
@@ -815,9 +856,9 @@ if (require.main === module) {
   try {
     const options = parseArgs(process.argv.slice(2));
     if (options.verifyResolved) {
-      verifyFromInput(options.verifyResolvedFile);
+      verifyFromInput(options.verifyResolvedFile, options.longrun);
     } else if (options.printPermissionEnv) {
-      process.stdout.write(`${JSON.stringify(buildEnforcedPermissionEnv())}\n`);
+      process.stdout.write(`${JSON.stringify(buildEnforcedPermissionEnv(options.longrun))}\n`);
     } else if (options.printSecretEnv) {
       process.stdout.write(`${SECRET_ENV_VARS.join(' ')}\n`);
     } else {

@@ -46,8 +46,8 @@ test('both updaters report the package version actually installed into the works
 });
 
 test('the learner-facing update buttons invoke the updater installed in that workspace', () => {
-  const mac = read('workspace-template/スタート/7_安全パッケージを最新版に更新.command');
-  const win = read('workspace-template/スタート/7_安全パッケージを最新版に更新.bat');
+  const mac = read('workspace-template/スタート/8_安全パッケージを最新版に更新.command');
+  const win = read('workspace-template/スタート/8_安全パッケージを最新版に更新.bat');
 
   assert.match(mac, /\.ai-safety\/hooks\/macos\/fetch-update\.command/);
   assert.match(win, /\.ai-safety\\hooks\\windows\\fetch-update\.ps1/);

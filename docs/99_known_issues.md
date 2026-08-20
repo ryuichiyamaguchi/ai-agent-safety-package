@@ -2,6 +2,33 @@
 
 本パッケージで把握している既知の問題と回避策。
 
+## Windows で「なぜ止まったのか」の日本語が化けていた（修正済み・実機での最終確認待ち）
+
+**症状**: 日本語 Windows で、安全ガード（hook）が出す日本語のメッセージが読めない文字列になる。とくに
+**「AI Safety Guard BLOCKED: …」＝ なぜ止まったのかを伝える一番大事なメッセージ**が読めなくなっていました。
+
+**原因**: Claude Code / Codex は hook の出力を **UTF-8** として読みます。一方 PowerShell 5.1 の
+`[Console]::OutputEncoding` は日本語 Windows では既定が **CP932** なので、日本語が CP932 のバイト列のまま出て、
+受け取り側が UTF-8 として解釈するため化けていました。
+
+**修正**: 日本語を書き出す前に `[Console]::OutputEncoding` を **UTF-8（BOM なし）** へ切り替えるようにしました
+（`scripts/windows/lib/SafetyPolicy.ps1` の `Set-AiSafeConsoleUtf8` と、6 本の `guard-*.ps1`）。
+承認ダイアログの理由（`permissionDecisionReason`）は標準出力に出る JSON なので、そちらも同じ切り替えで直ります。
+
+- BOM 付きにすると JSON の先頭が壊れるため、必ず BOM なしにしています。
+- **`install.ps1` / `doctor.ps1` / `launch-*.ps1` / `open-monitor.ps1` / `secret-scan.ps1` は、
+  わざと変えていません。** これらは `.bat` が `chcp 932` した本物のコンソールへ出すので、
+  UTF-8 を強制すると逆に化けます。
+
+**確認できていること**（mac 上で CP932 を再現して実測）:
+
+- 修正前の状態（CP932 のまま）だと「危」が `8a eb` として出て、UTF-8 として不正になる ＝ 文字化けを再現
+- 修正後は `65001` に切り替わり、「危」が `e5 8d b1` ＝ 妥当な UTF-8 で出る。標準出力に BOM も付かない
+- 回帰テスト: `scripts/common/test/windows-hook-encoding.test.js`
+
+**まだ確認できていないこと**: 上の実測は macOS の PowerShell 7 で CP932 を模したものです。
+**日本語 Windows の PowerShell 5.1 実機**で、実際に Claude Code の画面に日本語が正しく出ることは未確認です。
+
 ## Gemini CLI → Antigravity CLI 並立対応（v1.3.0 時点）
 
 Google から **Gemini CLI を 2026-06-18 で廃止し、後継の Antigravity CLI（`agy`）へ移行する**と発表されました（Pro / Ultra / 無料ティアが対象。Enterprise / Workspace は対象外）。

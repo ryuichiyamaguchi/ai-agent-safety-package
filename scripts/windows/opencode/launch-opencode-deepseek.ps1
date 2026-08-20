@@ -1,6 +1,9 @@
 ﻿param(
     [string]$Workspace = "$env:USERPROFILE\Documents\my-ai-workspace",
     [switch]$WebSearch,
+    # 長時間おまかせモード（目を離して走らせる）。確認を出さない代わりに ask だったものは
+    # deny 側へ倒す（opencode-config.js --longrun）。deny 床は 1 本も外さない。
+    [switch]$LongRun,
     # 前回のセッションを開き直す（OpenCode の --continue）。
     [switch]$Resume,
     # 作業フォルダ。OpenCode は「起動したフォルダ」が作業対象になり、動き出したあとで
@@ -270,7 +273,7 @@ try {
     # 一覧は opencode-config.js が持つ (Mac 版と 1 か所で共有するため)。ここで先に消すのは、
     # 消す前に設定を作ると「鍵があるので MCP を登録したのに、その鍵が MCP へ届かない」状態に
     # なるため。検索・画像読取は %USERPROFILE%\.ai-safety\gemini-api-key.txt
-    # (「6_AIコーチのキーを登録」が書く場所) だけを見る。
+    # (「7_AIコーチのキーを登録」が書く場所) だけを見る。
     $secretEnvRaw = (& $node.Source $configJs '--print-secret-env')
     if ($LASTEXITCODE -ne 0 -or -not $secretEnvRaw) { throw 'OpenCode 安全設定を生成できませんでした。' }
     $secretEnvNames = @(([string]$secretEnvRaw).Trim() -split '\s+' | Where-Object { $_ })
@@ -279,7 +282,7 @@ try {
     # (OpenCode の環境からは秘密の環境変数を消すので、環境変数だけでは MCP に届かないため)。
     $coachRegistered = [bool](Read-AiSafeSecret -DpapiName 'gemini.dpapi' -EnvName '' -LegacyFile $coachKeyFile)
     if (($env:GEMINI_API_KEY -or $env:GOOGLE_API_KEY) -and -not $coachRegistered) {
-        Write-Warning '環境変数の Gemini キーは OpenCode へ渡しません (AI から見えてしまうため)。検索と画像読み取りを使うときは「6_AIコーチのキーを登録」で登録してください。'
+        Write-Warning '環境変数の Gemini キーは OpenCode へ渡しません (AI から見えてしまうため)。検索と画像読み取りを使うときは「7_AIコーチのキーを登録」で登録してください。'
     }
     foreach ($secretName in $secretEnvNames) {
         Remove-Item -LiteralPath "Env:\$secretName" -ErrorAction SilentlyContinue
@@ -524,6 +527,7 @@ try {
     }
 
     $configArgs = @($configJs, '--port', $port, '--monitor-plugin', $monitorPlugin)
+    if ($LongRun) { $configArgs += '--longrun' }
     if ($WebSearch) {
         $env:OPENCODE_ENABLE_EXA = '1'
         $configArgs += '--websearch'
@@ -543,7 +547,9 @@ try {
 
     # 消すだけでなく「安全な値で上書き」して二重化する。環境変数側が最後にマージされるので、
     # 将来マージ順が変わっても最小限の deny 床（削除・昇格・公開・外部通信・外部フォルダ）は残る。
-    $enforced = (& $node.Source $configJs '--print-permission-env')
+    $permissionArgs = @($configJs, '--print-permission-env')
+    if ($LongRun) { $permissionArgs += '--longrun' }
+    $enforced = (& $node.Source @permissionArgs)
     if ($LASTEXITCODE -ne 0 -or -not $enforced) { throw 'OpenCode 安全設定を生成できませんでした。' }
     $env:OPENCODE_PERMISSION = $enforced
 
@@ -581,7 +587,9 @@ try {
         $remoteKey = Read-AiSafeSecret -DpapiName 'buffer.dpapi' -EnvName '' -LegacyFile $remoteKeyFile
         if ($remoteKey) { $resolvedSafe = $resolvedSafe.Replace($remoteKey, 'REDACTED') }
         [System.IO.File]::WriteAllText($resolvedFile, $resolvedSafe, (New-Object System.Text.UTF8Encoding($false)))
-        & $node.Source $configJs '--verify-resolved' $resolvedFile
+        $verifyArgs = @($configJs, '--verify-resolved', $resolvedFile)
+        if ($LongRun) { $verifyArgs += '--longrun' }
+        & $node.Source @verifyArgs
         $verified = ($LASTEXITCODE -eq 0)
         if (-not $verified) {
             Move-Item -LiteralPath $resolvedFile -Destination $failedResolvedFile -Force -ErrorAction SilentlyContinue

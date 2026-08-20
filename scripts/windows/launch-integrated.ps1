@@ -8,6 +8,8 @@
     [Alias('Profile')]
     [string]$SafetyProfile = 'standard',
     [switch]$WebSearch,
+    # OpenCode のみ。長時間おまかせモード（確認を出さない代わりに ask を deny 側へ倒す）。
+    [switch]$LongRun,
     # OpenCode のみ。前回のセッションを開き直す。
     [switch]$Resume,
     # OpenCode のみ。作業フォルダ (ワークスペース内のプロジェクトフォルダ)。
@@ -24,6 +26,7 @@ if ($Agent -eq 'codex' -and $SafetyProfile -ne 'standard') { throw 'Codex は st
 if ($Agent -eq 'opencode' -and $SafetyProfile -ne 'standard') { throw 'OpenCode は standard モードで起動してください。' }
 if ($Agent -eq 'd-claude' -and $SafetyProfile -ne 'standard') { throw 'd-claude は standard モードで起動してください。' }
 if ($WebSearch -and $Agent -ne 'opencode') { throw '-WebSearch は OpenCode だけで指定できます。' }
+if ($LongRun -and $Agent -ne 'opencode') { throw '-LongRun は OpenCode だけで指定できます。' }
 if ($Resume -and $Agent -ne 'opencode') { throw '-Resume は OpenCode だけで指定できます。' }
 if ($Project -and $Agent -ne 'opencode') { throw '-Project は OpenCode だけで指定できます。' }
 if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { throw "作業フォルダが見つかりません: $Workspace" }
@@ -88,7 +91,7 @@ try {
             $exitCode = $LASTEXITCODE
         }
         'opencode:standard' {
-            & (Join-Path $hooks 'opencode\launch-opencode-deepseek.ps1') -Workspace $Workspace -WebSearch:$WebSearch -Resume:$Resume -Project $Project
+            & (Join-Path $hooks 'opencode\launch-opencode-deepseek.ps1') -Workspace $Workspace -WebSearch:$WebSearch -LongRun:$LongRun -Resume:$Resume -Project $Project
             $exitCode = $LASTEXITCODE
         }
         'd-claude:standard' {
