@@ -91,11 +91,50 @@ if ($env:AI_SAFE_DRY_RUN -eq '1') {
     exit 0
 }
 
+# --- ネイティブコマンドを「標準エラーで落ちない」形で呼ぶ ---------------------------------
+# Windows PowerShell 5.1 は、ネイティブコマンド (node / opencode / codex 等) が標準エラーへ
+# 1 行でも出すと、その出力をリダイレクト (2>$null / 2>&1) やパイプで受けた時点で
+# NativeCommandError というエラーレコードに変換する。$ErrorActionPreference = 'Stop' の下では
+# それが終了時エラーになるので、「情報メッセージが 1 行出ただけ」でスクリプト全体が止まる。
+# 2>$null では抑止できない (リダイレクトそのものが変換の引き金なので、捨て先を変えても同じ)。
+# v1.17.2 で「gateway-token: not reusable (fingerprint-mismatch)」が出ただけで OpenCode /
+# d-claude が起動しなくなったのはこれが原因。
+#
+# ここでは呼び出しの間だけ設定を戻し、2>&1 で標準エラーを出力ストリームへ寄せてから
+# エラーレコードだけ取り除く。合否の判定は必ず終了コード ($LASTEXITCODE) で行う。
+# 注意: これは「正常系の情報メッセージで落ちない」ための道具であって、失敗を握り潰す道具ではない。
+# 呼び出し側は必ず .ExitCode を見て、異常なら従来どおり throw すること (fail-closed)。
+function Invoke-NativeQuiet {
+    param(
+        [Parameter(Mandatory = $true)][string]$File,
+        [string[]]$Arguments = @()
+    )
+    $prevEap = $ErrorActionPreference
+    $prevErrCount = $global:Error.Count
+    $ErrorActionPreference = 'Continue'
+    try {
+        $global:LASTEXITCODE = 0
+        $raw = @(& $File @Arguments 2>&1)
+        $code = $LASTEXITCODE
+        $stdout = @($raw | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+        $stderr = @($raw | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
+        return [pscustomobject]@{
+            ExitCode = $code
+            Output   = ($stdout | Out-String)
+            Error    = (($stderr | ForEach-Object { [string]$_ }) -join "`n")
+        }
+    } finally {
+        $ErrorActionPreference = $prevEap
+        # NativeCommandError を $Error に残すと、あとの診断ログが「エラーだらけ」に見える。
+        while ($global:Error.Count -gt $prevErrCount) { $global:Error.RemoveAt(0) }
+    }
+}
+
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) { throw 'Node.js が見つかりません。' }
 # 安全プラグインが壊れていると「黙って無防備」になるので、起動前に構文まで確かめる。
-& $node.Source --check $monitorPlugin 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
+$pluginCheck = Invoke-NativeQuiet -File $node.Source -Arguments @('--check', $monitorPlugin)
+if ($pluginCheck.ExitCode -ne 0) {
     throw "OpenCode承認モニターが壊れているため、OpenCode は起動しません（fail-closed）。「導入(インストール)」をやり直してください: $monitorPlugin"
 }
 $openCode = if ($env:OPENCODE_BIN) { $env:OPENCODE_BIN } else {
@@ -111,7 +150,8 @@ if (-not $dsKey) {
     throw 'DeepSeek APIキーが未登録です。先に「DeepSeekキーを登録」を実行してください。'
 }
 
-$versionRaw = (& $openCode --version 2>$null | Select-Object -First 1)
+$openCodeVersion = Invoke-NativeQuiet -File $openCode -Arguments @('--version')
+$versionRaw = ($openCodeVersion.Output -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1)
 if ($null -eq $versionRaw) { throw 'OpenCode のバージョンを取得できませんでした。OpenCode を入れ直してから、もう一度お試しください。' }
 $version = ([string]$versionRaw).Trim()
 if (-not $version) { throw 'OpenCode のバージョンを取得できませんでした。OpenCode を入れ直してから、もう一度お試しください。' }
@@ -155,8 +195,10 @@ function Stop-StaleGateway {
 function Test-GatewayReusable {
     param([string]$Port, [string]$GatewayJs, [string]$GatewayTokenJs, [string]$NodePath)
     if ((Get-OurGatewayPid -Port $Port -GatewayJs $GatewayJs) -le 0) { return $false }
-    & $NodePath $GatewayTokenJs '--probe' '--gateway' $GatewayJs '--port' $Port 2>$null | Out-Null
-    return ($LASTEXITCODE -eq 0)
+    # 「再利用できない」(指紋違い等) は異常ではなく正常系の判断結果。ここで落ちてはいけないので
+    # Invoke-NativeQuiet 経由で呼び、終了コードだけを見る。詳細は同関数のコメントを参照。
+    $probe = Invoke-NativeQuiet -File $NodePath -Arguments @($GatewayTokenJs, '--probe', '--gateway', $GatewayJs, '--port', $Port)
+    return ($probe.ExitCode -eq 0)
 }
 
 # 呼び出し元認証の合言葉は、この PC の共有ファイル (実キーと同じ置き場) から取る。
@@ -191,6 +233,12 @@ if ($recordedPort -and (Test-GatewayReusable -Port $recordedPort -GatewayJs $gat
 # 再利用できないときは、候補ポートを順に試して自分で立てる。
 # ポートを他に取られていれば gateway は即座に終了するので、次の候補へ進む。
 if (-not $gatewayReused) {
+    # 更新直後は「記録されたポートで、中身が古い自分たちの gateway」が動いている。候補ポートの
+    # 範囲外 (DS_GATEWAY_PORT の明示指定など) だと下のループでは止まらず、そのポートを掴んだまま
+    # 残ってしまうので、記録されたポートは先に必ず止める。
+    if ($recordedPort -and ($portCandidates -notcontains $recordedPort)) {
+        Stop-StaleGateway -Port $recordedPort -GatewayJs $gatewayJs
+    }
     foreach ($candidate in $portCandidates) {
         # 自分たちの gateway が中身違い (更新後に古いものが居座っている) で居るなら止める。
         Stop-StaleGateway -Port $candidate -GatewayJs $gatewayJs
@@ -575,7 +623,7 @@ try {
         $epoch = New-Object System.DateTime(1970, 1, 1, 0, 0, 0, [System.DateTimeKind]::Utc)
         $probeSince = [string][long]([System.DateTime]::UtcNow - $epoch).TotalMilliseconds
 
-        $resolved = (& $openCode debug config 2>$null | Out-String)
+        $resolved = (Invoke-NativeQuiet -File $openCode -Arguments @('debug', 'config')).Output
         if (-not $resolved -or -not $resolved.Trim()) {
             throw '安全設定を確認できないため、OpenCode は起動しません（fail-closed）。OpenCode が古い可能性があります。最新版に更新してから、もう一度お試しください。'
         }

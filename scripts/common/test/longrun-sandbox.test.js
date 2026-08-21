@@ -210,7 +210,7 @@ test('OpenCode: --longrun でも deny 床は 1 本も減らず、ask は deny �
     assert.strictEqual(longDeny[pattern], 'deny', `ask だった ${pattern} が deny へ倒れていない`);
   }
   assert.ok(Object.values(longDeny).every((v) => v === 'deny'), 'longrun に ask が残っている');
-  assert.strictEqual(mod.buildEnforcedPermissionEnv(true).external_directory, 'deny');
+  assert.strictEqual(mod.buildEnforcedPermissionEnv(true).external_directory['*'], 'deny');
 });
 
 test('OpenCode: --longrun でも秘密の読み取り禁止と .ai-safety の書き換え禁止は外さない', () => {
@@ -232,7 +232,7 @@ test('OpenCode: --longrun でも秘密の読み取り禁止と .ai-safety の書
   // 外部送信は無人で確認できないので deny へ倒す（allow へは絶対に倒さない）。
   assert.strictEqual(cfg.permission.webfetch, 'deny');
   assert.strictEqual(cfg.permission.websearch, 'deny');
-  assert.strictEqual(cfg.permission.external_directory, 'deny');
+  assert.deepStrictEqual(cfg.permission.external_directory, normal.permission.external_directory);
   assert.strictEqual(cfg.share, 'disabled');
 });
 

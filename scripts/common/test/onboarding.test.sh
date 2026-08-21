@@ -111,7 +111,7 @@ rm -f "$win_installer_txt"
 # 9) 期待される番号ファイルが揃う（v1.17.1 番号再編後: 基本 1..11 と 上級1..15）
 #    v1.17.1: 「5_セーフOpenCodeを起動」を基本枠へ入れ、旧 5〜12 を 1 つずつ繰り下げた。
 #    これで AI 4 種（Codex / Claude / AntiGravity / OpenCode）が 2〜5 に並ぶ。
-for base in "1_AIをまとめて起動" "2_セーフCodexを起動" "3_セーフClaudeを起動" "4_セーフAntiGravityを起動" "5_セーフOpenCodeを起動" "6_見守りモニターを起動" "7_AIコーチのキーを登録" "8_安全パッケージを最新版に更新" "9_AIツールを最新版に更新" "10_困ったとき診断" "11_野良d-claudeを退治" "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）3_モニターをコンソールで見る" "（上級）4_ステータスラインを入れる" "（上級）5_このPC全体に最低限の安全設定を入れる" "（上級）6_PC全体の安全設定を解除" "（上級）7_DeepSeekキーを削除" "（上級）8_Bufferのキーを登録" "（上級）9_プラグインの置き場を開く" "（上級）14_新しい作業フォルダを安全にする" "（上級）15_長時間おまかせモードで起動"; do
+for base in "1_AIをまとめて起動" "2_セーフCodexを起動" "3_セーフClaudeを起動" "4_セーフAntiGravityを起動" "5_セーフOpenCodeを起動" "6_見守りモニターを起動" "7_AIコーチのキーを登録" "8_安全パッケージを最新版に更新" "9_AIツールを最新版に更新" "10_困ったとき診断" "11_野良d-claudeを退治" "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）3_モニターをコンソールで見る" "（上級）4_ステータスラインを入れる" "（上級）5_このPC全体に最低限の安全設定を入れる" "（上級）6_PC全体の安全設定を解除" "（上級）7_DeepSeekキーを削除" "（上級）8_Bufferのキーを登録" "（上級）9_プラグインの置き場を開く" "（上級）14_新しい作業フォルダを安全にする" "（上級）15_長時間おまかせモードで起動" "（上級）16_金庫に秘密をしまう" "（上級）17_金庫から秘密を取り出す" "（上級）18_金庫の秘密を消す"; do
   [ -f "$START_DIR/$base.command" ] || { note "FAIL: $base.command がない"; fail=1; }
   [ -f "$START_DIR/$base.bat" ] || { note "FAIL: $base.bat がない"; fail=1; }
 done
@@ -164,6 +164,36 @@ grep -Fq '（上級）14' "$HTML" || { note "FAIL: スタート.html に 上級1
 grep -q 'launch-longrun.sh' "$START_DIR/（上級）15_長時間おまかせモードで起動.command" || { note "FAIL: 上級15 .command が launch-longrun.sh を呼ばない"; fail=1; }
 grep -q 'launch-longrun.ps1' "$START_DIR/（上級）15_長時間おまかせモードで起動.bat" || { note "FAIL: 上級15 .bat が launch-longrun.ps1 を呼ばない"; fail=1; }
 grep -Fq '（上級）15' "$HTML" || { note "FAIL: スタート.html に 上級15 の案内がない"; fail=1; }
+
+# 9c-3) 汎用の金庫ボタン（上級16 しまう / 17 取り出す / 18 消す。v1.17.2 新設）。
+#       固定枠（AIコーチ・Buffer 等）とは別の「自由枠」で、受講者が名前を付けて
+#       任意の文字列をしまう。3 本とも secret-store.js の自由枠 CLI を呼ぶこと。
+grep -q 'secret-store.js' "$START_DIR/（上級）16_金庫に秘密をしまう.command" || { note "FAIL: 上級16 .command が secret-store.js を呼ばない"; fail=1; }
+grep -q -- '--user-set' "$START_DIR/（上級）16_金庫に秘密をしまう.command" || { note "FAIL: 上級16 .command が --user-set を呼ばない"; fail=1; }
+grep -q -- '--user-list' "$START_DIR/（上級）17_金庫から秘密を取り出す.command" || { note "FAIL: 上級17 .command が --user-list を呼ばない"; fail=1; }
+grep -q -- '--user-copy' "$START_DIR/（上級）17_金庫から秘密を取り出す.command" || { note "FAIL: 上級17 .command が --user-copy を呼ばない"; fail=1; }
+grep -q -- '--user-remove' "$START_DIR/（上級）18_金庫の秘密を消す.command" || { note "FAIL: 上級18 .command が --user-remove を呼ばない"; fail=1; }
+# 値を画面に出さない（16 は read -s、17 はクリップボード経由）ことを固定する。
+grep -q 'read -r -s' "$START_DIR/（上級）16_金庫に秘密をしまう.command" || { note "FAIL: 上級16 .command が中身をエコーしない入力になっていない"; fail=1; }
+grep -q 'AsSecureString' "$START_DIR/（上級）16_金庫に秘密をしまう.bat" || { note "FAIL: 上級16 .bat が中身をエコーしない入力になっていない"; fail=1; }
+# .bat 側も同じ CLI を呼ぶ（CP932 なので grep は復号してから）。
+for _n in 16 17 18; do
+  case "$_n" in
+    16) _bat="（上級）16_金庫に秘密をしまう.bat"; _need='--user-set' ;;
+    17) _bat="（上級）17_金庫から秘密を取り出す.bat"; _need='--user-copy' ;;
+    18) _bat="（上級）18_金庫の秘密を消す.bat"; _need='--user-remove' ;;
+  esac
+  _tmp="$(mktemp)"
+  if iconv -f CP932 -t UTF-8 "$START_DIR/$_bat" > "$_tmp" 2>/dev/null; then
+    grep -q -- "$_need" "$_tmp" || { note "FAIL: 上級$_n .bat が $_need を呼ばない"; fail=1; }
+  else
+    note "FAIL: 上級$_n .bat を CP932 として読めない"; fail=1
+  fi
+  rm -f "$_tmp"
+done
+grep -Fq '（上級）16' "$HTML" || { note "FAIL: スタート.html に 上級16 の案内がない"; fail=1; }
+grep -Fq '（上級）17' "$HTML" || { note "FAIL: スタート.html に 上級17 の案内がない"; fail=1; }
+grep -Fq '（上級）18' "$HTML" || { note "FAIL: スタート.html に 上級18 の案内がない"; fail=1; }
 for _need in 'sandbox-exec' 'sandbox.enabled' 'disableBypassPermissionsMode' 'p.ask = \[\]' 'mktemp -d'; do
   grep -q "$_need" "$ROOT/scripts/macos/launch-longrun.sh" || { note "FAIL: 長時間おまかせモードに $_need の守りがない"; fail=1; }
 done

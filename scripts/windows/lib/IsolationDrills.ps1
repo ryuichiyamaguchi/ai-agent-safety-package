@@ -43,6 +43,39 @@
 
 Set-StrictMode -Off  # dot-source されるため呼び出し元スコープで未定義変数等による意図しないエラーが出ないよう StrictMode を Off にする
 
+# --- ネイティブコマンドを「標準エラーで落ちない」形で呼ぶ ---------------------------------
+# Windows PowerShell 5.1 は、ネイティブコマンド (codex / git 等) が標準エラーへ 1 行でも出すと、
+# その出力をリダイレクト (2>$null / 2>&1) やパイプで受けた時点で NativeCommandError という
+# エラーレコードに変換する。$ErrorActionPreference = 'Stop' の下ではそれが終了時エラーになる。
+# ドリルは「拒否されること」を実証するものなので、codex が拒否メッセージを標準エラーへ出すのは
+# 想定どおりの正常系。それで例外になると、遮断できているのに HOLD (実証できず) に化ける。
+# doctor.ps1 の -IsolationCheck 経路は EAP=Stop で dot-source するので、ここで吸収しておく。
+# 合否の判定は必ず終了コードと実際のファイル/接続結果で行う (握り潰しではない)。
+function Invoke-NativeQuiet {
+    param(
+        [Parameter(Mandatory = $true)][string]$File,
+        [string[]]$Arguments = @()
+    )
+    $prevEap = $ErrorActionPreference
+    $prevErrCount = $global:Error.Count
+    $ErrorActionPreference = 'Continue'
+    try {
+        $global:LASTEXITCODE = 0
+        $raw = @(& $File @Arguments 2>&1)
+        $code = $LASTEXITCODE
+        $stdout = @($raw | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+        $stderr = @($raw | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
+        return [pscustomobject]@{
+            ExitCode = $code
+            Output   = ($stdout | Out-String)
+            Error    = (($stderr | ForEach-Object { [string]$_ }) -join "`n")
+        }
+    } finally {
+        $ErrorActionPreference = $prevEap
+        while ($global:Error.Count -gt $prevErrCount) { $global:Error.RemoveAt(0) }
+    }
+}
+
 # 共通のドリル一時ファイル置き場の親(prune 用)。mac の $_AI_SAFE_PROBE_PARENT に対応。
 $script:AiSafeProbeParent = Join-Path $env:USERPROFILE ".ai-safety"
 
@@ -116,7 +149,7 @@ function Test-WriteOutside([string]$Engine) {
                 $inside = Join-Path ([System.IO.Path]::GetTempPath()) ("aisafe-in-" + [guid]::NewGuid().ToString("N"))
                 New-Item -ItemType Directory -Force -Path $inside | Out-Null
                 # git init: 失敗しても HOLD にしない(git 未インストール環境も許容)
-                try { & git init -q $inside 2>$null | Out-Null } catch {}
+                try { Invoke-NativeQuiet -File 'git' -Arguments @('init', '-q', $inside) | Out-Null } catch {}
 
                 # outside = %TEMP% でも workspace でもない実パス(%USERPROFILE% 配下の専用 dir)。
                 # workspace-write では %TEMP% が常に書込可能になる可能性があるため outside には使えない。
@@ -134,11 +167,11 @@ function Test-WriteOutside([string]$Engine) {
                 # (a) inside-write: cmd /c "type nul > <path>" で inside に空ファイルを作る。
                 # mac の /usr/bin/touch に相当する Windows の書込コマンド。
                 $env:CODEX_HOME = $probeHome
-                & codex sandbox --permissions-profile safeprobe -C $inside cmd.exe /c "type nul > `"$insideFile`"" 2>$null | Out-Null
-                $inRc = $LASTEXITCODE
+                $inProbe = Invoke-NativeQuiet -File 'codex' -Arguments @('sandbox', '--permissions-profile', 'safeprobe', '-C', $inside, 'cmd.exe', '/c', "type nul > `"$insideFile`"")
+                $inRc = $inProbe.ExitCode
                 # (b) outside-write
-                & codex sandbox --permissions-profile safeprobe -C $inside cmd.exe /c "type nul > `"$outsideFile`"" 2>$null | Out-Null
-                $outRc = $LASTEXITCODE
+                $outProbe = Invoke-NativeQuiet -File 'codex' -Arguments @('sandbox', '--permissions-profile', 'safeprobe', '-C', $inside, 'cmd.exe', '/c', "type nul > `"$outsideFile`"")
+                $outRc = $outProbe.ExitCode
 
                 $insideCreated = Test-Path -LiteralPath $insideFile
                 $outsideCreated = Test-Path -LiteralPath $outsideFile
@@ -241,7 +274,7 @@ function Get-EgressProbe([string]$Engine, [string]$ProfileName, [string]$TargetH
 
                 $inside = Join-Path ([System.IO.Path]::GetTempPath()) ("aisafe-eg-" + [guid]::NewGuid().ToString("N"))
                 New-Item -ItemType Directory -Force -Path $inside | Out-Null
-                try { & git init -q $inside 2>$null | Out-Null } catch {}
+                try { Invoke-NativeQuiet -File 'git' -Arguments @('init', '-q', $inside) | Out-Null } catch {}
 
                 # PowerShell の TcpClient で TCP connect(5 秒タイムアウト)。
                 # 結果は stdout の文字列で判定する(exit code ではなく)。
@@ -278,9 +311,9 @@ try {
 }
 "@
                 $env:CODEX_HOME = $probeHome
-                $out = & codex sandbox --permissions-profile $ProfileName -C $inside powershell.exe -NoProfile -Command $probeCmd 2>&1
-
-                $joined = ($out -join ' ')
+                $probeRun = Invoke-NativeQuiet -File 'codex' -Arguments @('sandbox', '--permissions-profile', $ProfileName, '-C', $inside, 'powershell.exe', '-NoProfile', '-Command', $probeCmd)
+                # 判定材料は標準出力・標準エラーの両方。codex 側の拒否メッセージは標準エラーに出る。
+                $joined = (($probeRun.Output + ' ' + $probeRun.Error) -replace '\s+', ' ')
                 if ($joined -match 'connected')       { Write-Output 'connected';       return }
                 if ($joined -match 'sandbox-blocked') { Write-Output 'sandbox-blocked'; return }
                 if ($joined -match 'general-refused') { Write-Output 'general-refused'; return }

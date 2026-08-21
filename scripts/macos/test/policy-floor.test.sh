@@ -321,6 +321,45 @@ if [ -n "$cache_file" ]; then
   if [ "$rc" -eq 2 ]; then ok "緩いパーミッションのキャッシュを無視する"; else ng "緩いキャッシュを使ってしまった (rc=$rc)"; fi
 fi
 
+# ---------------------------------------------------------------------------
+# WebFetch の宛先判定（2026-08-21 に許可リスト方式 → 拒否リスト方式へ変更）
+#
+#   ① blockedDomains（45 件）に載っている宛先は止まる
+#   ② それ以外の普通の宛先は通る（以前の allowedDomains 15 件に無いものも通ること）
+#
+# 「原則すべて通し、拒否リストだけ止める」を固定する回帰テスト。ここが逆転したら
+# （= 普通のサイトが止まる / 匿名アップロード先が通る）出荷を止める。
+# ---------------------------------------------------------------------------
+GUARD_WEBFETCH="$REPO/scripts/macos/guard-webfetch.sh"
+webfetch_input() {
+  printf '{"hook_event_name":"PreToolUse","tool_name":"WebFetch","cwd":"%s","tool_input":{"url":"%s","prompt":"read"}}' "$TD" "$1"
+}
+
+# ① 拒否リストの宛先は止まる（完全一致・ワイルドカード・v1.17.x の追加分の各代表）
+expect_block "WebFetch 拒否: pastebin.com" "$GUARD_WEBFETCH" "$(webfetch_input 'https://pastebin.com/raw/abc')"
+expect_block "WebFetch 拒否: gist.github.com" "$GUARD_WEBFETCH" "$(webfetch_input 'https://gist.github.com/x/y')"
+expect_block "WebFetch 拒否: 0x0.st" "$GUARD_WEBFETCH" "$(webfetch_input 'https://0x0.st/abc')"
+expect_block "WebFetch 拒否: gofile.io (匿名アップロード)" "$GUARD_WEBFETCH" "$(webfetch_input 'https://gofile.io/d/abc')"
+expect_block "WebFetch 拒否: catbox.moe (匿名アップロード)" "$GUARD_WEBFETCH" "$(webfetch_input 'https://catbox.moe/')"
+expect_block "WebFetch 拒否: files.catbox.moe (ワイルドカード)" "$GUARD_WEBFETCH" "$(webfetch_input 'https://files.catbox.moe/abc.txt')"
+expect_block "WebFetch 拒否: webhook.site (受信箱)" "$GUARD_WEBFETCH" "$(webfetch_input 'https://webhook.site/abc')"
+expect_block "WebFetch 拒否: *.ngrok-free.app (使い捨てトンネル)" "$GUARD_WEBFETCH" "$(webfetch_input 'https://abc.ngrok-free.app/x')"
+expect_block "WebFetch 拒否: *.trycloudflare.com" "$GUARD_WEBFETCH" "$(webfetch_input 'https://abc.trycloudflare.com/x')"
+expect_block "WebFetch 拒否: *.workers.dev" "$GUARD_WEBFETCH" "$(webfetch_input 'https://abc.workers.dev/x')"
+
+# ② 普通の宛先は通る（旧 allowedDomains 15 件に無いものが通ることが今回の変更点）
+expect_allow "WebFetch 許可: example.com" "$GUARD_WEBFETCH" "$(webfetch_input 'https://example.com/')"
+expect_allow "WebFetch 許可: docs.python.org（旧許可リスト外）" "$GUARD_WEBFETCH" "$(webfetch_input 'https://docs.python.org/3/library/os.html')"
+expect_allow "WebFetch 許可: qiita.com（旧許可リスト外）" "$GUARD_WEBFETCH" "$(webfetch_input 'https://qiita.com/items/abc')"
+expect_allow "WebFetch 許可: developer.mozilla.org（旧許可リスト外）" "$GUARD_WEBFETCH" "$(webfetch_input 'https://developer.mozilla.org/ja/docs/Web')"
+expect_allow "WebFetch 許可: github.com（従来どおり）" "$GUARD_WEBFETCH" "$(webfetch_input 'https://github.com/anthropics/claude-code')"
+
+# ③ 拒否リスト方式にしても、宛先以外の床は 1 本も外れていないこと
+expect_block "WebFetch: 内部ネットワーク宛は止まる" "$GUARD_WEBFETCH" "$(webfetch_input 'http://127.0.0.1:8080/')"
+expect_block "WebFetch: 192.168.x 宛は止まる" "$GUARD_WEBFETCH" "$(webfetch_input 'http://192.168.1.1/')"
+expect_block "WebFetch: http/https 以外のスキームは止まる" "$GUARD_WEBFETCH" "$(webfetch_input 'file:///Users/x/.ssh/id_rsa')"
+expect_block "WebFetch: 入力に秘密が混ざっていたら止まる" "$GUARD_WEBFETCH" "$(webfetch_input 'https://example.com/?k=sk-ant-abcdefghijklmnopqrstuvwxyz0123')"
+
 printf '\n--- policy floor: %d passed, %d failed ---\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1
 exit 0

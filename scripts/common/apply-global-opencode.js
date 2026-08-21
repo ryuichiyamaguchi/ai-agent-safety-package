@@ -10,10 +10,12 @@
 //       持たないので、グローバルで効かせられるのは permission 表だけ。
 //
 //   入れる内容（SSOT は opencode-config.js の buildEnforcedPermissionEnv().bash）:
-//     deny: rm * / sudo * / git reset --hard* / codex* / claude* / oc-safe*
-//     ask : codex-safe* / claude-safe* / git push* / npm publish*
+//     deny: rm * / sudo * / git reset --hard* / oc-safe*
+//     ask : codex* / claude* / codex-safe* / claude-safe* / git push* / npm publish*
+//   （2026-08-21: 裸の codex* / claude* は deny → ask に戻した。素の起動は「おすすめしないが
+//     確認すれば使える」。詳細は opencode-config.js の enforcedBashDeny() 上のコメント）
 //   ⚠️ 並び順そのものが意味を持つ。OpenCode の permission は「最後に一致したルールが勝つ」ので、
-//      codex-safe*(ask) が codex*(deny) より後ろに無いと安全ランチャーが起動できなくなる。
+//      ask の表が deny の表より後ろに無いと確認制にしたいものが deny に飲まれる。
 //      だから既存キー → 本パッケージの deny → ask の順に並べ直す（本パッケージ側を必ず後ろへ）。
 //
 //   入れないもの: external_directory / read / edit の表。素の opencode を「作業フォルダの

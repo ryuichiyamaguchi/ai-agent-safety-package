@@ -23,6 +23,13 @@ try {
         if (-not (Test-IsPathInside $resolved $cwd)) {
             $outsideWorkspace = $true
         }
+        # 「自分の道具（スキル・コマンド）の置き場」はワークスペース外でも確認なしで通す。
+        # v1.17 で「PC 全体に最低限の安全設定を入れる」設計へ変わり、作業フォルダの中だけで
+        # 使う前提が外れたため。設定そのもの（~\.claude\settings.json 等）は免除表に当たらない
+        # ので、下の Test-RedirectProtectedPath で従来どおり deny される。
+        if ((Test-ToolboxWritablePath $resolved $policy) -or (Test-ToolboxWritablePath $target $policy)) {
+            $outsideWorkspace = $false
+        }
         $protectedTarget = Test-ProtectedPathText $resolved $policy
         if ($protectedTarget) {
             Block-Action $inputObj "write" ("protected path write target: " + $target) $observed $policy

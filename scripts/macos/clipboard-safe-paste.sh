@@ -32,6 +32,9 @@ else
 fi
 
 # 引数をそのまま secret-scan に渡す（--check / --quiet 等）
+# 引数なしで呼ぶのが既定の使い方（safe-paste）なので ARGS は空になりうる。
+# macOS 標準の bash 3.2 + set -u では空配列の "${ARGS[@]}" 展開が
+# unbound variable でクラッシュするため、以降 ${ARGS[@]+"${ARGS[@]}"} を使う。
 ARGS=("$@")
 
 # クリップボード内容を取得
@@ -43,7 +46,7 @@ fi
 
 # --check モードか判定
 CHECK_MODE=0
-for arg in "${ARGS[@]}"; do
+for arg in ${ARGS[@]+"${ARGS[@]}"}; do
   if [ "$arg" = "--check" ]; then
     CHECK_MODE=1
     break
@@ -52,12 +55,12 @@ done
 
 if [ "$CHECK_MODE" -eq 1 ]; then
   # check モード: 結果を stderr に出すだけ、クリップボードは触らない
-  printf '%s' "$RAW" | "$SECRET_SCAN" "${ARGS[@]}"
+  printf '%s' "$RAW" | "$SECRET_SCAN" ${ARGS[@]+"${ARGS[@]}"}
   exit $?
 fi
 
 # mask モード: スキャン結果をクリップボードに書き戻し
-MASKED="$(printf '%s' "$RAW" | "$SECRET_SCAN" "${ARGS[@]}")"
+MASKED="$(printf '%s' "$RAW" | "$SECRET_SCAN" ${ARGS[@]+"${ARGS[@]}"})"
 SCAN_EXIT=$?
 
 if [ $SCAN_EXIT -ne 0 ]; then

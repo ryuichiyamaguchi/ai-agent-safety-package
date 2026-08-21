@@ -2,7 +2,82 @@
 
 本パッケージで把握している既知の問題と回避策。
 
-## ★重大: Windows で自分の `.ai-safety` フォルダに入れなくなる（v1.17.2 以前・v1.17.2 で修正）
+## d-claude で「選択したモデルに問題があります（deepseek-v4-flash）」と出る（原因は**モデル名ではない**）
+
+**症状**:
+
+```
+There's an issue with the selected model (deepseek-v4-flash).
+It may not exist or you may not have access to it. Run /model to pick a different model.
+```
+
+**このメッセージの本当の意味**（2026-08-21・mac 実機で Claude Code 2.1.236 を実走して確定）:
+
+- Claude Code は **`POST /v1/messages` が HTTP 404 を返したときだけ** この文言を出します。本文の形は問いません（Anthropic 形式のエラーでも `{"error":"Not Found"}` でも同じ）。
+- **401 では出ません。** `/v1/models` を 404 にしても、モデル一覧に別の ID しか無くても出ません。まっさらな設定で起動した Claude Code は `/v1/models` を**そもそも叩きません**（実測: 起動時に飛ぶのは `HEAD /api/hello` と `POST /v1/messages?beta=true` だけ）。
+- つまりこれは「モデル名が間違っている」ではなく「**送り先が 404 を返した**」の意味です。`deepseek-v4-flash` は正しい ID で、DeepSeek の Anthropic 互換エンドポイントは 200 を返します（実キーで実測。`deepseek-v4-pro` も 200）。
+
+**確かめ方（切り分けの順番）**:
+
+1. 送信検査 Gateway のイベントログを見る: `~/.ai-safety/logs/ds-gateway-events.jsonl`（Windows は `%USERPROFILE%\.ai-safety\logs\`）。
+   上流が 4xx/5xx を返していれば `{"event":"upstream_error","status":404,...}` の行が残ります（v1.17.3〜）。
+   - **`upstream_error` の行がある** → 送り先（DeepSeek）が 404 を返しています。行の `path` と `body` が実際の理由です。
+   - **`upstream_error` の行が 1 本も無い** → その 404 は Gateway を通っていません。Claude Code が **Gateway ではない別の宛先**（本家 `api.anthropic.com` など）へ送っています。`ANTHROPIC_BASE_URL` が `http://127.0.0.1:<ポート>` になっているか、古い Gateway がポートを掴んでいないかを確認してください。
+2. 古い Gateway が残っている疑いがあるときは、上の「更新後、Windows で〜」の回復方法（再起動、または 8788 番の taskkill）と同じ手順で止めてから起動し直します。
+
+**v1.17.3 で入れたもの**: ds-gateway が上流の 4xx/5xx を必ず `upstream_error` としてログに残し、404 のときは「Claude Code はこれをモデルの問題として表示しますが、実際は送り先が 404 を返しています」と画面にも出すようにしました。**現象そのものを直す修正ではありません**（パッケージ側のコードは mac 実機・実キーで端から端まで 200 で通ることを確認済み）。受講者の環境で再発したときに、原因が 1 分で切り分けられるようにするための変更です。
+
+## ★重大: 更新後、Windows で OpenCode / d-claude が起動しなくなる（v1.17.3・v1.17.3 で修正）
+
+**症状**（受講者の Windows 実機で確認）:
+
+「OpenCode を安全に起動」または「d-claude を安全に起動」を押すと、黒い画面に次が出て止まる。
+
+```
+node.exe : gateway-token: not reusable (fingerprint-mismatch)
+発生場所 C:\Users\<名前>\Documents\my-ai-workspace\.ai-safety\hooks\windows\opencode\launch-opencode-deepseek.ps1:158 文字:5
++     & $NodePath $GatewayTokenJs '--probe' '--gateway' $GatewayJs '--p ...
+    + CategoryInfo          : NotSpecified: (gateway-token: ...print-mismatch):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+問題が起きました。
+```
+
+**誰が当たるか**: **v1.17.3 に更新する前から送信検査 Gateway が動いていた Windows の人全員**。
+更新前に一度も起動していない、またはパソコンを再起動した直後なら症状は出ません。
+
+**原因**: 更新で送信検査 Gateway（`ds-gateway.js`）の中身が変わったため、動いたままの古い Gateway が
+「中身が古いので使い回さない」と判定されました。**ここまでは正常な動き**で、本来は古いほうを止めて
+新しく立て直すだけです。ところがその判定理由が「エラー扱いの出力」になっており、Windows に標準で入っている
+PowerShell 5.1 はそれを本物のエラーに変換してしまうため、起動そのものが止まっていました。
+
+**あなたのデータ・APIキー・設定は何も壊れていません。**
+
+### 回復方法（受講者向け・どちらか 1 つ）
+
+1. **パソコンを再起動する**（いちばん簡単・確実）
+2. 古い Gateway だけを止める。**コマンドプロンプト（cmd）** を開いて、次の 1 行をそのまま貼り付けて実行する:
+
+```
+for /f "tokens=5" %a in ('netstat -ano ^| findstr :8788 ^| findstr LISTENING') do taskkill /F /PID %a
+```
+
+> ※ PowerShell ではなく **コマンドプロンプト（cmd）** で実行してください。書き方が違うため、
+> PowerShell に貼ると動きません。「該当のプロセスが見つかりません」と出た場合は、
+> すでに止まっているので、そのまま起動し直して大丈夫です。
+
+そのあと、いつもどおり「OpenCode を安全に起動」または「d-claude を安全に起動」を押してください。
+
+### v1.17.3 での修正
+
+- ランチャー側: 外部コマンド（node / opencode / codex など）の呼び出しを `Invoke-NativeQuiet` に統一し、
+  **成否は必ず終了コードで判定する**ようにした。情報メッセージが 1 行出ただけで止まることはなくなる。
+  同じ書き方が残っていた他のランチャー・診断・隔離ドリルも横断で直した
+- `gateway-token.js` 側: 「使い回せない」は正常系なので**何も出力せず終了コードだけで表す**ようにした
+  （理由を見たいときは `--probe --verbose`）。本当の異常はこれまでどおりエラー出力に出し、起動を止める
+- 更新直後に古い Gateway が 8788 番を掴んだまま残らないよう、記録されたポートは立て直しの前に必ず止める
+- 回帰テスト（`scripts/common/test/windows-native-stderr.test.js`）で、危険な書き方が再び入らないよう機械的に固定した
+
+## ★重大: Windows で自分の `.ai-safety` フォルダに入れなくなる（v1.17.3 以前・v1.17.3 で修正）
 
 **症状**（受講者の Windows 実機で確認）:
 
@@ -12,7 +87,7 @@
 - AIコーチ（Gemini）のキーが金庫に入らず、平文のキーファイルだけが残る
 - 「金庫への書き込みに失敗した記録はありません」と出るのに、金庫が作られていない
 
-**原因**: v1.17.2 までの `scripts/windows/install.ps1` は、導入の最後に次を実行していました。
+**原因**: v1.17.3 までの `scripts/windows/install.ps1` は、導入の最後に次を実行していました。
 
 ```
 icacls "%USERPROFILE%\.ai-safety" /inheritance:r /grant:r "%USERDOMAIN%\%USERNAME%:(OI)(CI)F" /T
@@ -112,7 +187,7 @@ PowerShell は C# の拡張メソッドをインスタンス呼び出しに解�
 | `install.ps1` の mac フック読み取り専用化 | `Get-Acl`/`Set-Acl` ＋ 名前ベースの付与。しかも `try/catch` が無く `$ErrorActionPreference = "Stop"` なので、失敗すると**導入全体が途中で止まる**（`-Platform mac`/`both` のときのみ実行される経路） |
 | `lib/SafetyPolicy.ps1` の `Set-AuditLogAcl` | 監査ログを本人だけに絞る処理。`Get-Acl`/`Set-Acl` ＋ 名前ベース ＋ 継承ルールの全削除。実機では毎回 `PrivilegeNotHeldException` で失敗しており、**この絞り込みは一度も効いていなかった**うえ、フックが動くたびに警告を出していた |
 
-### v1.17.2 での修正
+### v1.17.3 での修正
 
 - **修復の第一の手段を `icacls "<フォルダ>" /reset /T /C /Q` にしました**（実機で成功が確認された唯一の方法）。
   親フォルダから継承される既定の権限へ戻すだけなので、名前解決も SID の書式も

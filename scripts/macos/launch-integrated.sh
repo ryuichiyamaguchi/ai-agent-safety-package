@@ -181,6 +181,12 @@ case "$agent:$profile" in
     export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"
     export CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash"
     export CLAUDE_CODE_EFFORT_LEVEL="max"
+    # 既定は Flash のまま。かしこい deepseek-v4-pro を /model の一覧にも出しておき、
+    # 受講者が `/model deepseek-v4-pro` でその場かぎり切り替えられるようにする
+    # （実測: `/model <名前>` は "for this session only"。設定ファイルは書き換わらない）。
+    export ANTHROPIC_CUSTOM_MODEL_OPTION="deepseek-v4-pro"
+    export ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="DeepSeek V4 Pro"
+    export ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="むずかしい作業向け。V4 Flash より料金が高くなります"
     bash "$gateway" "$workspace"
     ;;
 esac

@@ -161,6 +161,56 @@ test('CLI: --probe は再利用できないとき非ゼロで終わる（＝ラ�
   assert.strictEqual(probe.stdout, '', '再利用できないときに合言葉を出力してはいけない');
 });
 
+// v1.17.3 回帰: 「再利用できない」は正常系（立て直せばよいだけ）。これを標準エラーへ書くと、
+// Windows PowerShell 5.1 の呼び出し側で NativeCommandError になり、$ErrorActionPreference='Stop'
+// の下でランチャーが丸ごと止まる（v1.17.2 で OpenCode / d-claude が起動できなくなった原因）。
+test('CLI: --probe は「再利用できない」を標準エラーに出さない（PS 5.1 で起動が止まるため）', () => {
+  const file = tmpTokenFile('cli-probe-silent');
+  // 指紋不一致を作る: 記録は本物の gateway、probe 先は中身の違うファイル。
+  recordGatewayStart({ file, gatewayPath: GATEWAY_JS, port: 1, pid: 1 });
+
+  for (const reasonCase of [
+    // no-token-file / not-listening / fingerprint-mismatch のいずれも正常系。
+    ['--file', tmpTokenFile('cli-probe-none'), '--port', '1'],
+    ['--file', file, '--port', '1'],
+  ]) {
+    const probe = spawnSync(
+      process.execPath,
+      [TOKEN_TOOL, '--probe', '--gateway', GATEWAY_JS, ...reasonCase],
+      { encoding: 'utf8' },
+    );
+    assert.notStrictEqual(probe.status, 0, '再利用できないときは非ゼロで終わる');
+    assert.strictEqual(probe.stderr, '', `正常系の判断結果を標準エラーへ出してはいけない: ${probe.stderr}`);
+    assert.strictEqual(probe.stdout, '', '再利用できないときに合言葉を出力してはいけない');
+  }
+});
+
+test('CLI: --probe --verbose のときだけ理由を標準出力に出す（標準エラーは使わない）', () => {
+  const file = tmpTokenFile('cli-probe-verbose');
+  const probe = spawnSync(
+    process.execPath,
+    [TOKEN_TOOL, '--probe', '--verbose', '--gateway', GATEWAY_JS, '--file', file, '--port', '1'],
+    { encoding: 'utf8' },
+  );
+  assert.notStrictEqual(probe.status, 0);
+  assert.strictEqual(probe.stderr, '', '診断メッセージでも標準エラーは使わない');
+  assert.match(probe.stdout, /not reusable \(no-token-file\)/);
+});
+
+test('CLI: 本当の異常は従来どおり標準エラーへ出して非ゼロで終わる（fail-closed）', () => {
+  // 書き込めない場所を合言葉ファイルに指定すると、ensureToken が例外を投げる。
+  const broken = path.join(os.tmpdir(), `gwtok-broken-${process.pid}`, 'no', 'such', 'dir');
+  fs.mkdirSync(path.dirname(path.dirname(broken)), { recursive: true });
+  fs.writeFileSync(path.dirname(broken), 'not a directory');
+  const run = spawnSync(
+    process.execPath,
+    [TOKEN_TOOL, '--ensure', '--gateway', GATEWAY_JS, '--file', broken],
+    { encoding: 'utf8' },
+  );
+  assert.notStrictEqual(run.status, 0, '異常時は非ゼロ');
+  assert.match(run.stderr, /gateway-token:/, '本当の異常は標準エラーに出す');
+});
+
 // gateway がどのポートで動いているかは、既定 8788 とは限らない（8788 が他のプログラムに
 // 取られていれば別のポートで立ち上がる）。ランチャーはこの記録を見て再利用先を知る。
 test('recordedPort: 記録が無ければ 0、起動記録があればそのポートを返す', () => {

@@ -838,6 +838,30 @@ function createResponseObserver(activity, id, contentType) {
   };
 }
 
+// upstream が 4xx/5xx を返したときだけ、その素性をログと画面に残す。
+// 目的は「Claude Code の画面に出るメッセージが原因を指していない」事故を無くすこと。
+// 実測（2026-08-21・mac 実機）: POST /v1/messages が 404 を返すと、Claude Code は本文の形に
+// 関係なく「There's an issue with the selected model (…). It may not exist or you may not have
+// access to it.」と表示する。401 では出ない。つまりこのメッセージは「モデル名が悪い」ではなく
+// 「送り先が 404 を返した」の意味なので、実際の status と本文をここに残さないと切り分けられない。
+// 本文は上流のエラー文なので、他の転送経路と同じ不可逆マスク（alloc なし）を通してから
+// 先頭 300 文字だけ残す。
+function logUpstreamError(session, { status, method, path: reqPath, bodySnippet }) {
+  let snippet = '';
+  try {
+    const ctx = { denylistTerms: session.denylistTerms }; // alloc なし → 不可逆マスク
+    snippet = maskText(String(bodySnippet || ''), ctx).masked.slice(0, 300);
+  } catch (_) { snippet = ''; }
+  logGatewayEvent('upstream_error', { status, method, path: reqPath, body: snippet });
+  if (status === 404) {
+    console.error(`ds-gateway: upstream returned 404 for ${method} ${reqPath}. `
+      + 'Claude Code はこれを「モデルが存在しない」と表示しますが、実際は送り先が 404 を返しています。'
+      + `上流応答: ${snippet}`);
+  } else {
+    console.error(`ds-gateway: upstream returned ${status} for ${method} ${reqPath}: ${snippet}`);
+  }
+}
+
 function forward(req, res, upstreamUrl, body, session, allocated, outUrl, requestMeta) {
   const isHttps = upstreamUrl.protocol === 'https:';
   const lib = isHttps ? https : http;
@@ -865,12 +889,28 @@ function forward(req, res, upstreamUrl, body, session, allocated, outUrl, reques
     (upRes) => {
       const ct = (upRes.headers['content-type'] || '').toLowerCase();
       const observer = createResponseObserver(session.activity, activityId, ct);
+      const isUpstreamError = upRes.statusCode >= 400;
+      let errSnippet = '';
+      const keepErr = (chunk) => {
+        if (!isUpstreamError || errSnippet.length >= 512) return;
+        try { errSnippet += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk); } catch (_) { /* 無視 */ }
+      };
+      const reportErr = () => {
+        if (!isUpstreamError) return;
+        logUpstreamError(session, {
+          status: upRes.statusCode,
+          method: String(req.method || ''),
+          path: String(reqPath || '').split('?')[0],
+          bodySnippet: errSnippet,
+        });
+      };
       const transform = (ct.includes('json') || ct.includes('event-stream')) && allocated && allocated.size > 0;
       if (!transform) {
         res.writeHead(upRes.statusCode, upRes.headers);
-        upRes.on('data', (chunk) => { observer.chunk(chunk); res.write(chunk); });
+        upRes.on('data', (chunk) => { observer.chunk(chunk); keepErr(chunk); res.write(chunk); });
         upRes.on('end', () => {
           observer.end();
+          reportErr();
           session.activity.finish(activityId, upRes.statusCode >= 400 ? 'error' : 'completed');
           res.end();
         });
@@ -888,10 +928,12 @@ function forward(req, res, upstreamUrl, body, session, allocated, outUrl, reques
       upRes.setEncoding('utf8');
       upRes.on('data', (chunk) => {
         observer.chunk(chunk);
+        keepErr(chunk);
         res.write(restorer.push(chunk));
       });
       upRes.on('end', () => {
         observer.end();
+        reportErr();
         session.activity.finish(activityId, upRes.statusCode >= 400 ? 'error' : 'completed');
         res.write(restorer.flush());
         res.end();

@@ -73,7 +73,9 @@ test('OpenCode runtime config preserves useful reads while gating mutations and 
   assert.strictEqual(config.permission.edit['*'], 'ask');
   assert.strictEqual(config.permission.edit['*.ai-safety/**'], 'deny');
   assert.strictEqual(config.permission.edit['**/.ai-safety/**'], 'deny');
-  assert.strictEqual(config.permission.external_directory, 'deny');
+  // 作業フォルダの外は既定 deny のまま。開けてあるのは『受講者が自分の道具を増やす置き場』だけ。
+  assert.strictEqual(config.permission.external_directory['*'], 'deny');
+  assert.strictEqual(config.permission.external_directory['~/.claude/skills/**'], 'allow');
   assert.strictEqual(config.permission.websearch, 'deny');
   assert.strictEqual(config.permission.webfetch, 'ask');
   assert.strictEqual(config.permission.read['*'], 'allow');
@@ -96,7 +98,7 @@ test('Exa web search is opt-in and only relaxes websearch to ask', () => {
   assert.deepStrictEqual(enabled.provider, disabled.provider);
   assert.strictEqual(enabled.permission.edit['*'], 'ask');
   assert.strictEqual(enabled.permission.edit['**/.ai-safety/**'], 'deny');
-  assert.strictEqual(enabled.permission.external_directory, 'deny');
+  assert.strictEqual(enabled.permission.external_directory['*'], 'deny');
 });
 
 test('OpenCode minimum supported version is 1.14.24', () => {
@@ -159,9 +161,33 @@ test('irreversible commands stay denied after the 2026-08-20 relaxation', () => 
   for (const pattern of ['rm *', 'sudo *', 'git reset --hard*']) {
     assert.strictEqual(bash[pattern], 'deny', `${pattern} が禁止になっていない`);
   }
-  // 安全フックを通らない裸起動は閉じる（安全ランチャーは下の回帰テストで ask を確認）。
-  for (const pattern of ['codex*', 'claude*', 'oc-safe*']) {
-    assert.strictEqual(bash[pattern], 'deny', `${pattern} が禁止になっていない`);
+  // oc-safe は自分自身の再帰起動なので閉じたまま。
+  assert.strictEqual(bash['oc-safe*'], 'deny', 'oc-safe* が禁止になっていない');
+});
+
+// --- 回帰: 2026-08-21 の再訂正（裸起動は禁止しない）-------------------------------
+// 前版で入れた「裸の codex / claude を deny」は行きすぎだったので撤回した（山口さん指示）。
+// 素の claude / codex を使いたい受講者がいるため、禁止ではなく「一度だけ確認」にする。
+// 安全な起動口（codex-safe / claude-safe）は従来どおり ask のままで、1 つも塞がない。
+test('bare codex / claude launches are confirmed once, not forbidden', () => {
+  const bash = buildOpenCodeConfig().permission.bash;
+
+  assert.strictEqual(bash['codex*'], 'ask', '裸の codex が禁止に戻っている');
+  assert.strictEqual(bash['claude*'], 'ask', '裸の claude が禁止に戻っている');
+  assert.strictEqual(bash['codex-safe*'], 'ask', '安全ランチャーが塞がれている');
+  assert.strictEqual(bash['claude-safe*'], 'ask', '安全ランチャーが塞がれている');
+  // opencode / agy の裸起動は表に載せない（'*': 'ask' に落ちるので同じ扱いになる）。
+  assert.strictEqual(bash['opencode*'], undefined);
+  assert.strictEqual(bash['agy*'], undefined);
+  assert.strictEqual(bash['*'], 'ask');
+});
+
+// 無人の長時間おまかせモードだけは、確認に答える人がいないので裸起動を deny 側へ倒す。
+test('longrun keeps bare launches denied because nobody can answer the card', () => {
+  const bash = buildOpenCodeConfig({ longrun: true }).permission.bash;
+
+  for (const pattern of ['codex*', 'claude*', 'codex-safe*', 'claude-safe*']) {
+    assert.strictEqual(bash[pattern], 'deny', `longrun で ${pattern} が禁止になっていない`);
   }
 });
 
@@ -224,7 +250,7 @@ test('enforced permission env mirrors the config floor, including order', () => 
   const enforced = buildEnforcedPermissionEnv();
   const bash = buildOpenCodeConfig().permission.bash;
 
-  assert.strictEqual(enforced.external_directory, 'deny');
+  assert.deepStrictEqual(enforced.external_directory, buildOpenCodeConfig().permission.external_directory);
   // 環境変数側と設定側で「同じパターンが同じ判定」であること（deny も ask も）。
   for (const [pattern, action] of Object.entries(enforced.bash)) {
     assert.ok(action === 'deny' || action === 'ask', `${pattern} は deny か ask のみ`);

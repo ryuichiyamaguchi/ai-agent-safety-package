@@ -55,7 +55,9 @@ if (-not $env:AI_SAFE_LOG_DIR) { $env:AI_SAFE_LOG_DIR = Join-Path $env:USERPROFI
 Remove-Item Env:\ANTHROPIC_AUTH_TOKEN, Env:\ANTHROPIC_BASE_URL, Env:\ANTHROPIC_MODEL, `
     Env:\ANTHROPIC_DEFAULT_OPUS_MODEL, Env:\ANTHROPIC_DEFAULT_SONNET_MODEL, `
     Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL, Env:\CLAUDE_CODE_SUBAGENT_MODEL, `
-    Env:\CLAUDE_CODE_EFFORT_LEVEL, Env:\DS_CLAUDE_MODE -ErrorAction SilentlyContinue
+    Env:\CLAUDE_CODE_EFFORT_LEVEL, Env:\ANTHROPIC_CUSTOM_MODEL_OPTION, `
+    Env:\ANTHROPIC_CUSTOM_MODEL_OPTION_NAME, Env:\ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION, `
+    Env:\DS_CLAUDE_MODE -ErrorAction SilentlyContinue
 
 $claudeSettings = Join-Path $Workspace '.claude\settings.json'
 
@@ -63,6 +65,10 @@ $claudeSettings = Join-Path $Workspace '.claude\settings.json'
 function Invoke-Limited {
     param([int]$TimeoutSec, [string]$File, [string[]]$Arguments)
     $job = Start-Job -ScriptBlock {
+        # PowerShell 5.1 はネイティブコマンドの標準エラーをリダイレクトすると NativeCommandError に
+        # 変換する。$ErrorActionPreference = 'Stop' 下では「警告が 1 行出ただけ」で失敗になるため、
+        # ここは明示的に Continue にして、結果はテキストとして受け取る（判定は呼び出し側で行う）。
+        $ErrorActionPreference = 'Continue'
         & $using:File @using:Arguments 2>&1 | Out-String
     }
     $done = Wait-Job -Job $job -Timeout $TimeoutSec

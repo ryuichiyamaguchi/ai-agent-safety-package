@@ -60,6 +60,44 @@ if (-not $dsKey) {
   exit 1
 }
 
+# --- ネイティブコマンドを「標準エラーで落ちない」形で呼ぶ ---------------------------------
+# Windows PowerShell 5.1 は、ネイティブコマンド (node 等) が標準エラーへ 1 行でも出すと、
+# その出力をリダイレクト (2>$null / 2>&1) やパイプで受けた時点で NativeCommandError という
+# エラーレコードに変換する。$ErrorActionPreference = 'Stop' の下ではそれが終了時エラーになるので、
+# 「情報メッセージが 1 行出ただけ」でスクリプト全体が止まる。2>$null では抑止できない
+# (リダイレクトそのものが変換の引き金なので、捨て先を変えても同じ)。
+# v1.17.2 で「gateway-token: not reusable (fingerprint-mismatch)」が出ただけで OpenCode /
+# d-claude が起動しなくなったのはこれが原因。
+#
+# ここでは呼び出しの間だけ設定を戻し、2>&1 で標準エラーを出力ストリームへ寄せてから
+# エラーレコードだけ取り除く。合否の判定は必ず終了コード ($LASTEXITCODE) で行う。
+# 注意: これは「正常系の情報メッセージで落ちない」ための道具であって、失敗を握り潰す道具ではない。
+# 呼び出し側は必ず .ExitCode を見て、異常なら従来どおり止めること (fail-closed)。
+function Invoke-NativeQuiet {
+  param(
+    [Parameter(Mandatory = $true)][string]$File,
+    [string[]]$Arguments = @()
+  )
+  $prevEap = $ErrorActionPreference
+  $prevErrCount = $global:Error.Count
+  $ErrorActionPreference = 'Continue'
+  try {
+    $global:LASTEXITCODE = 0
+    $raw = @(& $File @Arguments 2>&1)
+    $code = $LASTEXITCODE
+    $stdout = @($raw | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+    $stderr = @($raw | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
+    return [pscustomobject]@{
+      ExitCode = $code
+      Output   = ($stdout | Out-String)
+      Error    = (($stderr | ForEach-Object { [string]$_ }) -join "`n")
+    }
+  } finally {
+    $ErrorActionPreference = $prevEap
+    while ($global:Error.Count -gt $prevErrCount) { $global:Error.RemoveAt(0) }
+  }
+}
+
 # 呼び出し元認証の合言葉は、この PC の共有ファイル (実キーと同じ置き場) から取る。
 # 127.0.0.1 で待つだけでは同一 PC の任意プロセスや DNS リバインディングを踏んだブラウザから
 # 叩けてしまうため、合言葉自体は必須のまま。以前は起動ごとに採番していたが、それだと
@@ -104,8 +142,10 @@ function Get-OurGatewayPid {
 function Test-GatewayReusable {
   param([string]$Port, [string]$GatewayJs, [string]$GatewayTokenJs)
   if ((Get-OurGatewayPid -Port $Port -GatewayJs $GatewayJs) -le 0) { return $false }
-  & node $GatewayTokenJs '--probe' '--gateway' $GatewayJs '--port' $Port 2>$null | Out-Null
-  return ($LASTEXITCODE -eq 0)
+  # 「再利用できない」(指紋違い等) は異常ではなく正常系の判断結果。ここで落ちてはいけないので
+  # Invoke-NativeQuiet 経由で呼び、終了コードだけを見る。詳細は同関数のコメントを参照。
+  $probe = Invoke-NativeQuiet -File 'node' -Arguments @($GatewayTokenJs, '--probe', '--gateway', $GatewayJs, '--port', $Port)
+  return ($probe.ExitCode -eq 0)
 }
 
 function Stop-StaleGateway {
@@ -154,6 +194,12 @@ if ($recordedPort -and (Test-GatewayReusable -Port $recordedPort -GatewayJs $gat
 
 # 再利用できないときは、候補ポートを順に試して自分で立てる。
 if (-not $gatewayReused) {
+  # 更新直後は「記録されたポートで、中身が古い自分たちの gateway」が動いている。候補ポートの
+  # 範囲外 (DS_GATEWAY_PORT の明示指定など) だと下のループでは止まらず、そのポートを掴んだまま
+  # 残ってしまうので、記録されたポートは先に必ず止める。
+  if ($recordedPort -and ($portCandidates -notcontains $recordedPort)) {
+    Stop-StaleGateway -Port $recordedPort -GatewayJs $gatewayJs
+  }
   foreach ($candidate in $portCandidates) {
     # 自分たちの gateway が中身違い (更新後に古いものが居座っている) で居るなら止める。
     Stop-StaleGateway -Port $candidate -GatewayJs $gatewayJs

@@ -96,7 +96,10 @@ test('both launchers keep the syntax check on the safety plugin wired up', () =>
 
   assert.match(mac, /node --check "\$MONITOR_PLUGIN"/);
   assert.match(mac, /fail-closed/);
-  assert.match(win, /--check \$monitorPlugin/);
+  // v1.17.3: PowerShell 5.1 で node の標準エラーがスクリプトを止めないよう Invoke-NativeQuiet 経由に変更。
+  // 判定は終了コードで行う（fail-closed のまま）。
+  assert.match(win, /Invoke-NativeQuiet -File \$node\.Source -Arguments @\('--check', \$monitorPlugin\)/);
+  assert.match(win, /\$pluginCheck\.ExitCode -ne 0/);
   assert.match(win, /fail-closed/);
 });
 

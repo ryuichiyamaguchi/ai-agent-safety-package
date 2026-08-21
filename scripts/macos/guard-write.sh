@@ -31,6 +31,13 @@ _wc="$(_extract_json_field "cwd")"
 # cwd 末尾のスラッシュを正規化（ルート "/" は除く）。未正規化だと "$_wc"/* の "//" で
 # 内部パスがマッチ漏れし、内部書き込みが誤って ask になる。
 [ "$_wc" != "/" ] && _wc="${_wc%/}"
+# 「自分の道具（スキル・コマンド）の置き場」はワークスペース外でも確認なしで通す。
+# v1.17 で「PC 全体に最低限の安全設定を入れる」設計へ変わり、作業フォルダの中だけで使う
+# 前提が外れたため。設定そのもの（~/.claude/settings.json 等）は上の
+# is_redirect_protected_path で既に deny 済みで、ここには来ない。
+if [ -n "$_wt" ] && is_toolbox_writable_path "$_wt"; then
+  allow "toolbox path (skills/commands) — write allowed"
+fi
 if [ -n "$_wt" ]; then
   case "$_wt" in
     ../*|*/../*|*/..)

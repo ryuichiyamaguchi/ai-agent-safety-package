@@ -183,7 +183,8 @@ switch ($Platform) {
 $hashListingRequiredPrefixes = @(
     'workspace-template/opencode-harness/',
     'workspace-template/dist-opencode/',
-    'workspace-template/dist-skills/'
+    'workspace-template/dist-skills/',
+    'workspace-template/dist-claude-commands/'
 )
 
 function Test-DistributionHashListed([string]$RelPath) {
@@ -242,6 +243,15 @@ foreach ($sec in @(
 Test-DistributionHash "configs/gemini/policies/safety.toml"
 Test-DistributionHash "workspace-template/aiexclude.template"
 Test-DistributionHashListed "workspace-template/dist-skills/hearing-ladder/SKILL.md"
+# Claude Code (d-claude / claude-safe) 用の日本語スラッシュコマンド。
+# モデルに読ませる指示書 = 実質コード相当なので丸ごとハッシュ検証対象 (登録漏れは中止)。
+$claudeCommandsSrc = Join-Path $packageRoot "workspace-template\dist-claude-commands"
+if (Test-Path -LiteralPath $claudeCommandsSrc -PathType Container) {
+    foreach ($claudeCmdFile in @(Get-ChildItem -LiteralPath $claudeCommandsSrc -Recurse -File -Filter *.md -ErrorAction SilentlyContinue | Sort-Object FullName)) {
+        $rel = $claudeCmdFile.FullName.Substring($packageRoot.Length).TrimStart('\', '/').Replace('\', '/')
+        Test-DistributionHashListed $rel
+    }
+}
 # OpenCode 用の日本語ハーネス (AGENTS.md / スラッシュコマンド / 追加エージェント)。
 # モデルに読ませる指示書 = 実質コード相当なので、同梱ファイルは丸ごとハッシュ検証対象にする。
 # 配布元フォルダ名は制作途中で opencode-harness / dist-opencode の両方が使われたため、
@@ -481,6 +491,25 @@ if (Test-Path -LiteralPath $skillsSrc) {
         Remove-Item -LiteralPath $distSkillsDest -Recurse -Force
     }
     Copy-Item -LiteralPath $skillsSrc -Destination $distSkillsDest -Recurse -Force
+}
+
+# d-claude / claude-safe (= Claude Code) 用の日本語スラッシュコマンドを
+# ${workspace}\.claude\commands\ へ配置する。Claude Code は起動時にここを読む。
+# リポジトリ側は dist-claude-commands\ に置く (.gitignore が .claude/ を除外するため)。
+# OpenCode 用の 5 本 (opencode-harness\commands\) とは読み手が別なので置き場も別にする。
+if (Test-Path -LiteralPath $claudeCommandsSrc -PathType Container) {
+    $claudeCommandsDest = Join-Path $Workspace ".claude\commands"
+    New-Item -ItemType Directory -Force -Path $claudeCommandsDest | Out-Null
+    Get-ChildItem -LiteralPath $claudeCommandsSrc -File -Filter *.md -Force | ForEach-Object {
+        $cmdDest = Join-Path $claudeCommandsDest $_.Name
+        if (Test-Path -LiteralPath $cmdDest) {
+            $relativeName = ($cmdDest -replace "[:\\\/]+", "_")
+            New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+            Copy-Item -LiteralPath $cmdDest -Destination (Join-Path $backupDir $relativeName) -Force
+        }
+        Copy-Item -LiteralPath $_.FullName -Destination $cmdDest -Force
+    }
+    Write-Host "Claude Code 用の日本語スラッシュコマンドを配置しました: $claudeCommandsDest"
 }
 
 # OpenCode 用の日本語ハーネス一式 (AGENTS.md / command / agents) を .ai-safety 配下に配置する。

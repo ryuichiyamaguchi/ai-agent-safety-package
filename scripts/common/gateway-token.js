@@ -183,7 +183,15 @@ module.exports = {
 // CLI: ランチャー（bash / PowerShell）から同じ判断を 1 行で呼べるようにする。
 //   --ensure   … 合言葉を用意して標準出力に出す（無ければ作る）
 //   --probe    … 動いている gateway を再利用できるなら合言葉を出して終了コード 0、
-//                 できなければ終了コード 1（理由は標準エラーへ）
+//                 できなければ終了コード 1（理由は既定では出さない。--verbose で標準出力へ）
+//
+// --probe が「再利用できない」を黙って終了コードだけで返す理由（重要）:
+//   「使い回せない」は異常ではなく正常系の判断結果（立て直せばよいだけ）。これを標準エラーへ
+//   書くと、Windows PowerShell 5.1 の呼び出し側で事故になる。5.1 はネイティブコマンドの
+//   標準エラー出力をリダイレクト/パイプした時点で NativeCommandError というエラーレコードに
+//   変換するため、$ErrorActionPreference = 'Stop' の下では「更新後に指紋が変わっただけ」で
+//   ランチャー全体が停止してしまう（v1.17.2 で OpenCode / d-claude が起動できなくなった原因）。
+//   本当の異常（例外・引数不正）は従来どおり標準エラーへ出し、終了コードも非ゼロにする。
 // 合言葉はコマンドライン引数には載せない（ps / タスクマネージャーに出るため）。
 // 受け渡しは常に標準出力経由。
 // ------------------------------------------------------------------
@@ -201,7 +209,10 @@ if (require.main === module) {
     if (argv.includes('--probe')) {
       const result = await probeReusable({ file, gatewayPath, port });
       if (!result.reusable) {
-        process.stderr.write(`gateway-token: not reusable (${result.reason})\n`);
+        // 正常系の判断結果。診断したいときだけ --verbose で標準出力へ出す（標準エラーには出さない）。
+        if (argv.includes('--verbose')) {
+          process.stdout.write(`gateway-token: not reusable (${result.reason})\n`);
+        }
         process.exit(1);
       }
       process.stdout.write(result.token);

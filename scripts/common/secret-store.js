@@ -81,6 +81,50 @@ function itemOrThrow(name) {
   return item;
 }
 
+// ---- 自由枠（受講生が自分で名前を付けてしまう秘密）の名前づけ --------------
+// 固定枠（上の ITEMS）と自由枠は「接頭辞」で分ける。両者は同じ金庫に同居するが、
+//   固定枠 : キーチェーン service = "ai-safety.<固定名>" / DPAPI = "<固定名>.dpapi"
+//   自由枠 : キーチェーン service = "ai-safety.user.<名前>" / DPAPI = "user.<名前>.dpapi"
+// なので名前が衝突することは原理的に無い。名前に "." を許さないので、自由枠の名前が
+// "user." を含んで接頭辞を偽装することもできない。
+const USER_PREFIX = 'user.';
+const USER_NAME_MAX = 40;
+// 英数字・ひらがな・カタカナ・漢字・長音符（U+30FC はカタカナ範囲に含まれる）・
+// ハイフン・アンダースコアだけ。"/" "." ".." 空白 制御文字 はすべて弾く
+// （パス traversal と、キーチェーン service 名への割り込みの両方を防ぐ）。
+const USER_NAME_RE = /^[0-9A-Za-zぁ-ゖァ-ヺー一-鿿々_-]+$/;
+
+function isValidUserName(name) {
+  if (typeof name !== 'string') return false;
+  // 正規表現の前に長さを見る（40 文字は「文字数」であってバイト数ではない）。
+  const chars = Array.from(name);
+  if (chars.length < 1 || chars.length > USER_NAME_MAX) return false;
+  return USER_NAME_RE.test(name);
+}
+
+function assertValidUserName(name) {
+  if (!isValidUserName(name)) {
+    throw new Error('secret-store: invalid user secret name (英数字・かな・漢字・ハイフン・アンダースコアの 1〜40 文字だけが使えます)');
+  }
+  return name;
+}
+
+// 金庫の中の「置き場所」。service 名（mac）とファイル名（Windows）の組。
+// ここから先の macSet/winSet 等は固定表を一切引かず、この組だけを見る。
+function fixedTarget(name) {
+  const item = itemOrThrow(name);
+  return { service: servicePrefix() + name, file: path.join(secretDir(), item.winFile), label: name };
+}
+
+function userTarget(name) {
+  assertValidUserName(name);
+  return {
+    service: servicePrefix() + USER_PREFIX + name,
+    file: path.join(secretDir(), USER_PREFIX + name + '.dpapi'),
+    label: USER_PREFIX + name,
+  };
+}
+
 function wrap(value) {
   return ENVELOPE_PREFIX + Buffer.from(String(value), 'utf8').toString('base64');
 }
@@ -180,7 +224,7 @@ function warmUp() {
   return { ok, elapsedMs: Date.now() - startedAt };
 }
 
-function macSet(name, value, timeoutMs) {
+function macSet(target, value, timeoutMs) {
   const envelope = wrap(value);
   if (envelope.length > MAC_KEYCHAIN_MAX) {
     throw new Error(`secret-store: value too long for the macOS keychain prompt (${envelope.length} > ${MAC_KEYCHAIN_MAX})`);
@@ -188,7 +232,7 @@ function macSet(name, value, timeoutMs) {
   const startedAt = Date.now();
   const r = spawnSync('/usr/bin/security',
     ['add-generic-password', '-U', '-a', process.env.USER || os.userInfo().username,
-      '-s', servicePrefix() + name, '-w'],
+      '-s', target.service, '-w'],
     Object.assign({ input: `${envelope}\n${envelope}\n` }, runOpts(timeoutMs)));
   if (r.status !== 0) return { ok: false, detail: describeRun(r, timeoutMs, Date.now() - startedAt) };
   return { ok: true };
@@ -197,11 +241,11 @@ function macSet(name, value, timeoutMs) {
 // 返り値は { ran, value }。ran=false は「子プロセスが最後まで走らなかった」（時間切れ・起動失敗）で、
 // これは「登録されていない」とは別物。両者を混ぜると、時間切れを「未登録」と誤読して
 // 移行の検証が落ち、平文が残る。
-function macGet(name, timeoutMs) {
+function macGet(target, timeoutMs) {
   const startedAt = Date.now();
   const r = spawnSync('/usr/bin/security',
     ['find-generic-password', '-a', process.env.USER || os.userInfo().username,
-      '-s', servicePrefix() + name, '-w'],
+      '-s', target.service, '-w'],
     runOpts(timeoutMs));
   if (r.error) return { ran: false, value: null, detail: describeRun(r, timeoutMs, Date.now() - startedAt) };
   if (r.status !== 0) return { ran: true, value: null }; // 見つからない（正常な「未登録」）
@@ -209,10 +253,10 @@ function macGet(name, timeoutMs) {
   return { ran: true, value: v || null };
 }
 
-function macRemove(name) {
+function macRemove(target) {
   const r = spawnSync('/usr/bin/security',
     ['delete-generic-password', '-a', process.env.USER || os.userInfo().username,
-      '-s', servicePrefix() + name],
+      '-s', target.service],
     runOpts(VAULT_TIMEOUT_MS));
   return r.status === 0;
 }
@@ -221,10 +265,6 @@ function macRemove(name) {
 // ConvertFrom-SecureString はキー未指定なら DPAPI で暗号化する（暗号化した Windows
 // ユーザー + 同じマシンでしか復号できない）。復号は PowerShell 5.1 で動く Marshal 経由。
 // `ConvertFrom-SecureString -AsPlainText` は PowerShell 7.0 以降なので使わない。
-function winFile(name) {
-  return path.join(secretDir(), itemOrThrow(name).winFile);
-}
-
 // ファイルパスはコマンド文字列に埋めず環境変数で渡す（バックスラッシュのエスケープ事故と
 // 引用符インジェクションの両方を避ける）。
 function runPowerShell(script, { input, file, timeoutMs } = {}) {
@@ -236,8 +276,8 @@ function runPowerShell(script, { input, file, timeoutMs } = {}) {
       runOpts(timeoutMs === undefined ? VAULT_TIMEOUT_MS : timeoutMs)));
 }
 
-function winSet(name, value, timeoutMs) {
-  const file = winFile(name);
+function winSet(target, value, timeoutMs) {
+  const file = target.file;
   const startedAt = Date.now();
   // 置き場が作れない（ACL の締めすぎ・権限拒否など）のも「書き込み失敗」。
   // 例外にして黙らせず、理由を持って返す。
@@ -262,8 +302,8 @@ function winSet(name, value, timeoutMs) {
   return { ok: true };
 }
 
-function winGet(name, timeoutMs) {
-  const file = winFile(name);
+function winGet(target, timeoutMs) {
+  const file = target.file;
   const startedAt = Date.now();
   if (!fs.existsSync(file)) return { ran: true, value: null }; // 未登録（子プロセスを起こす必要すらない）
   const script =
@@ -279,9 +319,8 @@ function winGet(name, timeoutMs) {
   return { ran: true, value: v || null };
 }
 
-function winRemove(name) {
-  const file = winFile(name);
-  try { fs.rmSync(file, { force: true }); return true; } catch { return false; }
+function winRemove(target) {
+  try { fs.rmSync(target.file, { force: true }); return true; } catch { return false; }
 }
 
 // ---- 4 関数（process.platform の分岐はここだけ） -------------------------
@@ -318,8 +357,7 @@ function available() {
 // 手順: 1 回目（15 秒）→ 失敗したら子プロセスを 1 度から回しして温める → 2 回目（90 秒）。
 // 2 回とも駄目なら、理由（終了コード・シグナル・所要時間・stderr の先頭）を持った例外を投げる。
 // 呼び出し側（secret-migrate.js）はそれをログに残し、平文はそのまま残す。
-function set(name, value) {
-  itemOrThrow(name);
+function setTarget(target, value) {
   const v = String(value == null ? '' : value);
   if (!v) throw new Error('secret-store: refusing to store an empty value');
   const write = process.platform === 'darwin' ? macSet
@@ -333,44 +371,54 @@ function set(name, value) {
       // 2 回目の前に温める。ここで測った時間が「この PC の子プロセス起動コスト」の実測値。
       attempts[attempts.length - 1].warmUp = warmUp();
     }
-    const r = write(name, v, plan[i]);
+    const r = write(target, v, plan[i]);
     if (r.ok) { lastFailure = null; return true; }
     attempts.push(Object.assign({ attempt: i + 1 }, r.detail));
   }
-  lastFailure = { name, op: 'set', attempts };
-  const e = new Error(`secret-store: vault write failed for ${name}`);
+  lastFailure = { name: target.label, op: 'set', attempts };
+  const e = new Error(`secret-store: vault write failed for ${target.label}`);
   e.attempts = attempts;
   throw e;
+}
+
+function set(name, value) {
+  return setTarget(fixedTarget(name), value);
 }
 
 // 金庫から読む。書き込みと同じく一発勝負にしない。
 // ただし**「未登録」では再試行しない**。未登録は正常な結果で、そこで毎回ウォームアップと
 // 2 回目を走らせると、ただの存在確認が何倍も遅くなる。再試行するのは
 // 「子プロセスが最後まで走らなかった」（時間切れ・起動失敗）ときだけ。
-function get(name) {
-  itemOrThrow(name);
+function getTarget(target) {
   const read = process.platform === 'darwin' ? macGet
     : (process.platform === 'win32' ? winGet : null);
   if (!read) return null;
   try {
-    const first = read(name, VAULT_TIMEOUT_MS);
+    const first = read(target, VAULT_TIMEOUT_MS);
     if (first.ran) { lastFailure = null; return first.value; }
     const warm = warmUp();
-    const second = read(name, VAULT_TIMEOUT_RETRY_MS);
+    const second = read(target, VAULT_TIMEOUT_RETRY_MS);
     if (second.ran) { lastFailure = null; return second.value; }
-    lastFailure = { name, op: 'get', attempts: [Object.assign({ attempt: 1, warmUp: warm }, first.detail), Object.assign({ attempt: 2 }, second.detail)] };
+    lastFailure = { name: target.label, op: 'get', attempts: [Object.assign({ attempt: 1, warmUp: warm }, first.detail), Object.assign({ attempt: 2 }, second.detail)] };
     return null;
   } catch { /* 金庫が壊れている / 権限拒否 → null（呼び出し側が旧平文へ落ちる） */ }
   return null;
 }
 
-function remove(name) {
-  itemOrThrow(name);
+function get(name) {
+  return getTarget(fixedTarget(name));
+}
+
+function removeTarget(target) {
   try {
-    if (process.platform === 'darwin') return macRemove(name);
-    if (process.platform === 'win32') return winRemove(name);
+    if (process.platform === 'darwin') return macRemove(target);
+    if (process.platform === 'win32') return winRemove(target);
   } catch { /* ignore */ }
   return false;
+}
+
+function remove(name) {
+  return removeTarget(fixedTarget(name));
 }
 
 function exists(name) {
@@ -412,10 +460,136 @@ function resolvedExists(name, opts) {
   return resolve(name, opts).value !== null;
 }
 
+// ---- 自由枠: 受講生が名前を付けてしまう秘密 -------------------------------
+//
+// 固定枠（ITEMS）は「このパッケージが読む鍵」なので固定表のままにする。ここは別物で、
+// 受講生が自分の都合でしまう任意の文字列（他サービスのトークン・合言葉など）が入る。
+// 固定枠のコード経路には一切触れない（接頭辞が違うので金庫の中でも交わらない）。
+//
+// 一覧の作り方について:
+//   mac の `security dump-keychain` は「キーチェーンを丸ごと見せろ」という要求なので
+//   確認ダイアログが出るうえ、他アプリの秘密まで対象になる。使わない。
+//   代わりに「名前だけ」を書いた索引ファイルを自分で持つ。**値は絶対に書かない。**
+//   索引と金庫の中身がずれた（索引にあるが金庫に無い）ときは、一覧に出さない側へ倒す。
+const USER_INDEX_FILE = 'user-secrets.index';
+
+function userIndexPath() {
+  return path.join(secretDir(), USER_INDEX_FILE);
+}
+
+// 索引は「名前だけ」。壊れた行・不正な名前は黙って捨てる（読み込みで落ちない）。
+function userIndexRead() {
+  let raw = '';
+  try { raw = fs.readFileSync(userIndexPath(), 'utf8'); } catch { return []; }
+  const out = [];
+  for (const line of String(raw).replace(/^﻿/, '').split(/\r?\n/)) {
+    const name = line.trim();
+    if (!name || !isValidUserName(name)) continue;
+    if (out.indexOf(name) === -1) out.push(name);
+  }
+  return out;
+}
+
+function userIndexWrite(names) {
+  const dir = secretDir();
+  fs.mkdirSync(dir, { recursive: true });
+  try { fs.chmodSync(dir, 0o700); } catch { /* Windows では効かない */ }
+  const body = names.length ? names.join('\n') + '\n' : '';
+  fs.writeFileSync(userIndexPath(), body, { encoding: 'utf8', mode: 0o600 });
+  try { fs.chmodSync(userIndexPath(), 0o600); } catch { /* Windows では効かない */ }
+}
+
+function userIndexAdd(name) {
+  const names = userIndexRead();
+  if (names.indexOf(name) === -1) names.push(name);
+  userIndexWrite(names);
+  return names;
+}
+
+function userIndexRemove(name) {
+  const names = userIndexRead().filter((n) => n !== name);
+  userIndexWrite(names);
+  return names;
+}
+
+// mac のキーチェーンは対話プロンプト経由なので封筒込み 128 文字が上限（既存の実装と同じ）。
+// 日本語は UTF-8 で 1 文字 3 バイト、さらに base64 で 4/3 に膨らむので体感より早く上限に来る。
+// 黙って切ると「入れたのに違う値が返る」事故になるので、必ず手前で分かる言葉にして止める。
+function userAssertFits(value) {
+  if (process.platform !== 'darwin') return;
+  const len = wrap(value).length;
+  if (len <= MAC_KEYCHAIN_MAX) return;
+  throw new Error(
+    'secret-store: 長すぎて Mac の金庫に入りません' +
+    `（変換後 ${len} 文字 / 上限 ${MAC_KEYCHAIN_MAX} 文字）。` +
+    '目安は英数字だけなら約 93 文字、日本語まじりなら約 30 文字です。' +
+    '日本語は 1 文字が英数字の 4 文字ぶんに膨らむため、思ったより早く上限に届きます。' +
+    '短い合言葉やトークンだけを入れて、長い文章はファイルに保存してください。');
+}
+
+function userSet(name, value) {
+  const target = userTarget(name);
+  const v = String(value == null ? '' : value);
+  if (!v) throw new Error('secret-store: refusing to store an empty value');
+  userAssertFits(v);
+  setTarget(target, v);
+  userIndexAdd(name);
+  return true;
+}
+
+function userGet(name) {
+  return getTarget(userTarget(name));
+}
+
+function userExists(name) {
+  return userGet(name) !== null;
+}
+
+// 金庫から消し、索引からも消す。金庫側が空振り（既に無い）でも索引は必ず片付ける。
+function userRemove(name) {
+  const target = userTarget(name);
+  const removed = removeTarget(target);
+  userIndexRemove(name);
+  return removed;
+}
+
+// 自由枠だけの一覧。固定枠は絶対に出さない（索引に固定枠の名前は入らない）。
+// 返り値: [{ name, exists }]。exists=false は「索引に名前はあるが金庫に実体が無い」。
+function userList() {
+  return userIndexRead().map((name) => ({ name, exists: userGet(name) !== null }));
+}
+
+// クリップボードへ入れる。値は標準出力にも引数にも出さない（stdin 経由で渡す）。
+// 外部コマンドには必ず制限時間を付ける（金庫呼び出しと同じ方針）。
+function copyToClipboard(text) {
+  const t = String(text == null ? '' : text);
+  try {
+    if (process.platform === 'darwin') {
+      const r = spawnSync('/usr/bin/pbcopy', [], Object.assign({ input: t }, runOpts(VAULT_TIMEOUT_MS)));
+      return !r.error && r.status === 0;
+    }
+    if (process.platform === 'win32') {
+      const r = runPowerShell('$t=[Console]::In.ReadToEnd(); Set-Clipboard -Value $t',
+        { input: t, timeoutMs: VAULT_TIMEOUT_MS });
+      return !r.error && r.status === 0;
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+
+function userCopy(name) {
+  const v = userGet(name);
+  if (v === null) return false;
+  return copyToClipboard(v);
+}
+
 module.exports = {
   get, set, remove, exists,
   resolve, resolvedExists, available,
   legacyPaths, ITEMS, ENVELOPE_PREFIX,
+  // 自由枠（受講生が名前を付けてしまう秘密）
+  isValidUserName, userSet, userGet, userRemove, userList, userExists, userCopy,
+  userIndexPath, USER_PREFIX, USER_NAME_MAX, MAC_KEYCHAIN_MAX,
   // 失敗の記録・実測用（値は一切含まない）
   warmUp, takeLastFailure,
   VAULT_TIMEOUT_MS, VAULT_TIMEOUT_RETRY_MS, VAULT_PROBE_TIMEOUT_MS,
@@ -427,11 +601,71 @@ module.exports = {
 // 値そのものは絶対に出力しない（秘密を標準出力・プロセス一覧に載せない設計を守る）。
 // 判定は resolve()（環境変数 → 金庫 → 旧平文）そのものなので、起動条件が
 // 「旧平文ファイルの実在」に戻ることはない。
+// 自由枠のボタン（スタート 上級16 / 17 / 18）もここを呼ぶ。値は
+//   ・標準出力に出さない（--user-copy はクリップボードへ入れて成否だけ返す）
+//   ・コマンドライン引数に置かない（--user-set は標準入力から読む）
+// という 2 点を守る。
+function usage() {
+  return [
+    'usage:',
+    '  secret-store.js --has <name>',
+    '  secret-store.js --user-set <名前>      # 値は標準入力から',
+    '  secret-store.js --user-list            # 名前だけを1行1件',
+    '  secret-store.js --user-remove <名前>',
+    '  secret-store.js --user-copy <名前>     # 値はクリップボードへ',
+    '',
+  ].join('\n');
+}
+
+function readAllStdin() {
+  try { return fs.readFileSync(0, 'utf8'); } catch { return ''; }
+}
+
 if (require.main === module) {
   const argv = process.argv.slice(2);
+  const flag = argv[0] || '';
+  const arg = argv[1];
+
+  const die = (msg) => { process.stderr.write(String(msg) + '\n'); process.exit(2); };
+
+  if (flag === '--user-set') {
+    if (!arg) die(usage());
+    // 末尾の改行だけ落とす（貼り付けた値の前後の空白は利用者の意図かもしれないので触らない）。
+    const value = readAllStdin().replace(/\r?\n$/, '');
+    if (!value) die('値が空です。中止しました。');
+    try { userSet(arg, value); } catch (e) { die(String((e && e.message) || e)); }
+    process.stdout.write(`金庫にしまいました: ${arg}\n`);
+    process.exit(0);
+  }
+
+  if (flag === '--user-list') {
+    let items = [];
+    try { items = userList(); } catch (e) { die(String((e && e.message) || e)); }
+    for (const it of items) {
+      if (it.exists) process.stdout.write(it.name + '\n');
+    }
+    process.exit(0);
+  }
+
+  if (flag === '--user-remove') {
+    if (!arg) die(usage());
+    let ok = false;
+    try { ok = userRemove(arg); } catch (e) { die(String((e && e.message) || e)); }
+    process.stdout.write(ok ? `金庫から消しました: ${arg}\n` : `金庫に見つかりませんでした（索引は片付けました）: ${arg}\n`);
+    process.exit(ok ? 0 : 1);
+  }
+
+  if (flag === '--user-copy') {
+    if (!arg) die(usage());
+    let ok = false;
+    try { ok = userCopy(arg); } catch (e) { die(String((e && e.message) || e)); }
+    process.stdout.write(ok ? 'クリップボードに入れました。\n' : 'クリップボードに入れられませんでした。\n');
+    process.exit(ok ? 0 : 1);
+  }
+
   const i = argv.indexOf('--has');
   if (i === -1 || !argv[i + 1]) {
-    process.stderr.write('usage: secret-store.js --has <name>\n');
+    process.stderr.write(usage());
     process.exit(2);
   }
   let ok = false;

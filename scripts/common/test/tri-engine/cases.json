@@ -629,6 +629,139 @@
       "command": "grep -rn TODO src",
       "expect": "pass",
       "why": "素の検索"
+    },
+    {
+      "id": "ps-appx-inventory",
+      "group": "PowerShell の読み取り専用コマンド（誤検知が無いこと・2026-08-21 実機報告）",
+      "command": "powershell -NoProfile -Command \"Get-AppxPackage | Where-Object { $_.Name -notmatch 'Microsoft\\.' } | Select-Object Name, PackageFullName\"",
+      "expect": "pass",
+      "why": "OpenCode 起動直後にハーネスが実行する『インストール済みアプリの一覧』。読むだけで何も壊さない。実機で止まったと報告されたため 3 エンジンの判定をここで固定する"
+    },
+    {
+      "id": "ps-appx-inventory-bare",
+      "group": "PowerShell の読み取り専用コマンド（誤検知が無いこと・2026-08-21 実機報告）",
+      "command": "Get-AppxPackage | Where-Object { $_.Name -notmatch 'Microsoft\\.' } | Select-Object Name",
+      "expect": "pass",
+      "why": "powershell -Command で包まない直書き版。波括弧・パイプ・-notmatch が誤検知の材料にならないこと"
+    },
+    {
+      "id": "ps-gci-recurse-select",
+      "group": "PowerShell の読み取り専用コマンド（誤検知が無いこと・2026-08-21 実機報告）",
+      "command": "powershell -NoProfile -Command \"Get-ChildItem 'C:\\Users' -Recurse | Select-Object Name, Length\"",
+      "expect": "pass",
+      "why": "-Recurse が付いていても削除に繋がっていなければ通す（再帰削除の検出は Remove-Item 側で行う）"
+    },
+    {
+      "id": "ps-service-select",
+      "group": "PowerShell の読み取り専用コマンド（誤検知が無いこと・2026-08-21 実機報告）",
+      "command": "powershell -NoProfile -Command \"Get-Service | Where-Object { $_.Status -eq 'Running' } | Select-Object Name\"",
+      "expect": "pass",
+      "why": "同じ書き方（パイプ + 波括弧 + Where-Object）の別コマンド"
+    },
+    {
+      "id": "ps-remove-item-recurse-still-blocked",
+      "group": "PowerShell の読み取り専用コマンド（誤検知が無いこと・2026-08-21 実機報告）",
+      "command": "powershell -NoProfile -Command \"Remove-Item -Recurse -Force C:\\temp\\work\"",
+      "expect": "block",
+      "why": "対の確認。読み取り専用を通すようにしても、再帰削除は 3 エンジンとも止まったままであること"
+    },
+    {
+      "id": "ps-gci-recurse-pipe-remove-still-blocked",
+      "group": "PowerShell の読み取り専用コマンド（誤検知が無いこと・2026-08-21 実機報告）",
+      "command": "powershell -NoProfile -Command \"Get-ChildItem -Recurse | Remove-Item -Force\"",
+      "expect": "block",
+      "why": "対の確認。一覧を削除へ繋ぐ形は引き続き止まること"
+    },
+    {
+      "id": "toolbox-claude-skill-write",
+      "group": "道具の置き場は開ける／設定そのものは閉じたまま（2026-08-21 受講生クレーム）",
+      "command": "echo hi > /Users/example/.claude/skills/my-skill/SKILL.md",
+      "expect": "pass",
+      "why": "受講生の実機クレームの本体。グローバルのスキルを自分で足せないと卒業後に環境を育てられないので、道具の置き場への書き込みは 3 エンジンとも通すこと"
+    },
+    {
+      "id": "toolbox-claude-command-write",
+      "group": "道具の置き場は開ける／設定そのものは閉じたまま（2026-08-21 受講生クレーム）",
+      "command": "echo hi > /Users/example/.claude/commands/hello.md",
+      "expect": "pass",
+      "why": "コマンド置き場も同じ扱い"
+    },
+    {
+      "id": "toolbox-codex-prompt-write",
+      "group": "道具の置き場は開ける／設定そのものは閉じたまま（2026-08-21 受講生クレーム）",
+      "command": "echo hi > /Users/example/.codex/prompts/hello.md",
+      "expect": "pass",
+      "why": "Codex のプロンプト置き場"
+    },
+    {
+      "id": "toolbox-opencode-command-write",
+      "group": "道具の置き場は開ける／設定そのものは閉じたまま（2026-08-21 受講生クレーム）",
+      "command": "echo hi > /Users/example/.config/opencode/command/hello.md",
+      "expect": "pass",
+      "why": "OpenCode のコマンド置き場"
+    },
+    {
+      "id": "toolbox-gemini-command-write",
+      "group": "道具の置き場は開ける／設定そのものは閉じたまま（2026-08-21 受講生クレーム）",
+      "command": "echo hi > /Users/example/.gemini/commands/hello.toml",
+      "expect": "pass",
+      "why": "Gemini のコマンド置き場"
+    },
+    {
+      "id": "config-claude-settings-still-blocked",
+      "group": "道具の置き場は開ける／設定そのものは閉じたまま（2026-08-21 受講生クレーム）",
+      "command": "echo evil > /Users/example/.claude/settings.json",
+      "expect": "block",
+      "why": "対の確認。置き場を開けても『安全設定そのもの』は 3 エンジンとも止まったままであること（AI が自分への指示と守りを書き換えられてはいけない）"
+    },
+    {
+      "id": "config-codex-toml-still-blocked",
+      "group": "道具の置き場は開ける／設定そのものは閉じたまま（2026-08-21 受講生クレーム）",
+      "command": "echo evil > /Users/example/.codex/config.toml",
+      "expect": "block",
+      "why": "対の確認（Codex の設定本体）"
+    },
+    {
+      "id": "config-gemini-settings-still-blocked",
+      "group": "道具の置き場は開ける／設定そのものは閉じたまま（2026-08-21 受講生クレーム）",
+      "command": "echo evil > /Users/example/.gemini/settings.json",
+      "expect": "block",
+      "why": "対の確認（Gemini の設定本体）。2026-08-21 まで .gemini は redirectProtectedPathRegex に入っておらず素通しだった"
+    },
+    {
+      "id": "config-opencode-json-still-blocked",
+      "group": "道具の置き場は開ける／設定そのものは閉じたまま（2026-08-21 受講生クレーム）",
+      "command": "echo evil > /Users/example/.config/opencode/opencode.json",
+      "expect": "block",
+      "why": "対の確認（OpenCode の設定本体）"
+    },
+    {
+      "id": "config-opencode-plugin-still-blocked",
+      "group": "道具の置き場は開ける／設定そのものは閉じたまま（2026-08-21 受講生クレーム）",
+      "command": "echo evil > /Users/example/.config/opencode/plugin/evil.mjs",
+      "expect": "block",
+      "why": "対の確認。opencode のプラグインは opencode 本体のプロセス内で動く JS で決定的 deny 床そのものを無効化できるため、意図的に『置き場』ではなく『設定』側に分類している"
+    },
+    {
+      "id": "toolbox-traversal-to-settings-still-blocked",
+      "group": "道具の置き場は開ける／設定そのものは閉じたまま（2026-08-21 受講生クレーム）",
+      "command": "echo evil > /Users/example/.claude/skills/../settings.json",
+      "expect": "block",
+      "why": "免除の踏み台防止。置き場を経由した相対参照（..）で設定本体へ書き込めてはいけない"
+    },
+    {
+      "id": "ai-safety-still-blocked-after-toolbox",
+      "group": "道具の置き場は開ける／設定そのものは閉じたまま（2026-08-21 受講生クレーム）",
+      "command": "echo evil > /Users/example/.ai-safety/policy/safety-policy.json",
+      "expect": "block",
+      "why": "対の確認。安全パッケージ本体は免除表に一切関係なく止まったままであること"
+    },
+    {
+      "id": "deepseek-key-still-blocked-after-toolbox",
+      "group": "道具の置き場は開ける／設定そのものは閉じたまま（2026-08-21 受講生クレーム）",
+      "command": "echo evil > /Users/example/.deepseek-claude/auth",
+      "expect": "block",
+      "why": "対の確認。鍵の置き場は免除表に一切関係なく止まったままであること"
     }
   ]
 }

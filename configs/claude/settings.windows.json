@@ -10,6 +10,14 @@
     "allow": [
       "Read(./**)",
       "Edit(./**)",
+      "Edit(~/.claude/skills/**)",
+      "Edit(~/.claude/commands/**)",
+      "Edit(~/.codex/prompts/**)",
+      "Edit(~/.codex/skills/**)",
+      "Edit(~/.gemini/commands/**)",
+      "Edit(~/.gemini/skills/**)",
+      "Edit(~/.config/opencode/command/**)",
+      "Edit(~/.config/opencode/skills/**)",
       "Bash(ls*)",
       "Bash(pwd*)",
       "Bash(cat *)",
@@ -110,9 +118,17 @@
       "Read(**/.ai-safety/**)",
       "Edit(**/.ai-safety/**)",
       "Read(**/.deepseek-claude/**)",
-      "Edit(**/.deepseek-claude/**)"
+      "Edit(**/.deepseek-claude/**)",
+      "Edit(~/.claude/settings.json)",
+      "Edit(~/.claude/settings.local.json)",
+      "Edit(~/.claude.json)",
+      "Edit(~/.codex/config.toml)",
+      "Edit(~/.gemini/settings.json)",
+      "Edit(~/.config/opencode/opencode.json)",
+      "Edit(~/.config/opencode/opencode.jsonc)"
     ]
   },
+  "_comment_toolbox": "permissions.allow の Edit(~/.claude/skills/**) 以下 8 本は『受講者が自分の道具（スキル・コマンド）を増やすための置き場』。作業フォルダの外だが書き込みを許可する。v1.17 で『PC 全体に最低限の安全設定を入れる』『新しい作業フォルダを安全にする』を入れ、『作業フォルダの中だけで使う』前提が外れたため（卒業後に自分の環境を育てられないのは講座の目的に反する。2026-08-21 に受講生から『グローバルのスキルを入れてと頼んだらワークスペース外への書き込みは禁止と断られた』という報告があった）。⚠️ 開けるのは『置き場』だけで『設定そのもの』は開けない: ~/.claude/settings.json ・ ~/.claude.json ・ ~/.codex/config.toml ・ ~/.gemini/settings.json ・ ~/.config/opencode/opencode.json(c) ・ ~/.ai-safety/ ・ ~/.deepseek-claude/ は permissions.deny で明示的に閉じてある（AI が自分への指示と安全設定そのものを書き換えられてはいけない、という線引き）。⚠️ 意図的に開けていないもの: ~/.config/opencode/plugin/（opencode 本体のプロセス内で動く JS で、決定的 deny 床そのものを無効化できる）と各 CLI の agents/（ツール権限の上書きを持ち込める）。⚠️ Write(...) ではなく Edit(...) で書くこと: Claude Code はファイル書き込みの権限照合に Edit(path) と Read(path) しか使わず、Write(path) は受け付けるだけで参照せず起動時に警告する。⚠️ hook 側（.ai-safety/hooks/windows/guard-write.ps1）にも同じ免除が要る。permissions で許可しても hook が exit 2 すればブロックされるため。免除の SSOT は policy/safety-policy.json の toolboxWritablePathRegex。",
   "_comment_sandbox": "Windows には sandbox 節を意図的に置いていない（mac 側 settings.mac.json には置いてある）。理由: Claude Code の純正サンドボックスは公式に macOS / Linux / WSL2 のみ対応で、ネイティブ Windows は非対応と明記されている（公式 https://code.claude.com/docs/en/sandboxing 「Native Windows is not supported. On Windows, run Claude Code inside a WSL2 distribution.」）。バイナリには Windows 実装（srt-win / WFP / NTFS ACL）が同梱されているが feature gate で無効化されており、実行時に『The Windows sandbox is not enabled on this build.』を返す。したがって Windows 側は v1.16.0 と同じく hook（guard-bash.ps1 / guard-write.ps1 / guard-webfetch.ps1 / guard-post-output.ps1 / guard-prompt.ps1 / guard-observe.ps1）＋ permissions リストで守る。mac との非対称はここだけで、保護の中身（deny 床・保護パス・秘密検出）は 3 エンジン共通の policy/safety-policy.json で同一。将来 Windows で feature gate が開いたら、この節を settings.mac.json と同じ内容に差し替える。",
   "hooks": {
     "UserPromptSubmit": [

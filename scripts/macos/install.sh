@@ -222,7 +222,7 @@ esac
 #       （scripts/common/test/opencode-harness.test.js が「同梱物に未登録が無いこと」を検査）。
 hash_listing_required() {
   case "$1" in
-    workspace-template/opencode-harness/*|workspace-template/dist-opencode/*|workspace-template/dist-skills/*)
+    workspace-template/opencode-harness/*|workspace-template/dist-opencode/*|workspace-template/dist-skills/*|workspace-template/dist-claude-commands/*)
       return 0 ;;
     *)
       return 1 ;;
@@ -274,6 +274,13 @@ done
 verify_hash "configs/gemini/policies/safety.toml"
 verify_hash "workspace-template/aiexclude.template"
 verify_hash_listed "workspace-template/dist-skills/hearing-ladder/SKILL.md"
+# Claude Code 用の日本語スラッシュコマンド。モデルに読ませる指示書＝実質コード相当なので
+# opencode-harness と同じく丸ごとハッシュ検証対象（登録漏れは fail-closed で中止）。
+if [ -d "$package_root/workspace-template/dist-claude-commands" ]; then
+  while IFS= read -r claude_cmd_file; do
+    verify_hash_listed "${claude_cmd_file#"$package_root"/}"
+  done < <(find "$package_root/workspace-template/dist-claude-commands" -type f -name '*.md' | sort)
+fi
 # OpenCode 用の日本語ハーネス（AGENTS.md / スラッシュコマンド / 追加エージェント）。
 # モデルに読ませる指示書＝実質コード相当なので、同梱ファイルは丸ごとハッシュ検証対象にする。
 for harness_candidate in opencode-harness dist-opencode; do
@@ -393,6 +400,24 @@ if [ -d "$package_root/workspace-template/dist-skills" ]; then
     rm -rf "$dist_skills_dest"
   fi
   cp -R "$package_root/workspace-template/dist-skills" "$dist_skills_dest"
+fi
+
+# d-claude / claude-safe（＝ Claude Code）用の日本語スラッシュコマンドを
+# $workspace/.claude/commands/ へ配置する。Claude Code はここを起動時に読む。
+# リポジトリ側は dist-claude-commands/ に置く（.gitignore が .claude/ を除外するため）。
+# OpenCode 用の 5 本（opencode-harness/commands/）とは読み手が別なので置き場も別にする。
+if [ -d "$package_root/workspace-template/dist-claude-commands" ]; then
+  mkdir -p "$workspace/.claude/commands"
+  for cmd_src in "$package_root/workspace-template/dist-claude-commands"/*.md; do
+    [ -f "$cmd_src" ] || continue
+    cmd_dest="$workspace/.claude/commands/$(basename "$cmd_src")"
+    if [ -e "$cmd_dest" ]; then
+      safe_name="$(printf '%s' "$cmd_dest" | sed 's#[/:]#_#g')"
+      cp "$cmd_dest" "$backup_dir/$safe_name"
+    fi
+    cp "$cmd_src" "$cmd_dest"
+  done
+  echo "Claude Code 用の日本語スラッシュコマンドを配置しました: $workspace/.claude/commands"
 fi
 
 # OpenCode 用の日本語ハーネス一式（AGENTS.md / スラッシュコマンド / 追加エージェント）を

@@ -10,7 +10,7 @@ set -u
 _PLUTIL=/usr/bin/plutil
 _POLICY_REQUIRED_KEYS="secretRegex dangerousCommandRegex protectedPathRegex blockedDomains allowedDomains packageVersion"
 # キャッシュ形式の版。形式を変えたら必ず上げる（旧形式は読まずに再生成される）。
-_POLICY_CACHE_FORMAT=3
+_POLICY_CACHE_FORMAT=4
 _NL='
 '
 
@@ -31,6 +31,9 @@ OUTPUT_SECRET_PATTERNS=""
 DANGEROUS_PATTERNS=""
 PROTECTED_PATH_PATTERNS=""
 REDIRECT_PROTECTED_PATTERNS=""
+# 「道具の置き場」だけ書き込み保護から外す免除リスト（policy の toolboxWritablePathRegex）。
+# 読み込めなければ空のまま＝免除ゼロ＝従来どおり全部 deny なので、失敗しても安全側に倒れる。
+TOOLBOX_WRITABLE_PATTERNS=""
 BLOCKED_DOMAINS=""
 ALLOWED_DOMAINS=""
 _POLICY_LOADED=0
@@ -220,7 +223,7 @@ EOF
 _cache_read() {
   local file="$1" want="$2"
   local line key val fmt="" sha=""
-  local s="" o="" d="" p="" r="" b="" a=""
+  local s="" o="" d="" p="" r="" t="" b="" a=""
   [ -n "$want" ] || return 1
   [ -f "$file" ] || return 1
   [ -L "$file" ] && return 1
@@ -241,6 +244,7 @@ _cache_read() {
       DANGER)  d="${d}${d:+$_NL}${val}" ;;
       PROTECT) p="${p}${p:+$_NL}${val}" ;;
       REDIR)   r="${r}${r:+$_NL}${val}" ;;
+      TOOLBOX) t="${t}${t:+$_NL}${val}" ;;
       BLOCKED) b="${b}${b:+$_NL}${val}" ;;
       ALLOWED) a="${a}${a:+$_NL}${val}" ;;
       *) return 1 ;;
@@ -253,6 +257,7 @@ _cache_read() {
   DANGEROUS_PATTERNS="$d"
   PROTECTED_PATH_PATTERNS="$p"
   REDIRECT_PROTECTED_PATTERNS="$r"
+  TOOLBOX_WRITABLE_PATTERNS="$t"
   BLOCKED_DOMAINS="$b"
   ALLOWED_DOMAINS="$a"
   return 0
@@ -275,6 +280,7 @@ _cache_write() {
       _cache_emit_lines DANGER  "$DANGEROUS_PATTERNS"
       _cache_emit_lines PROTECT "$PROTECTED_PATH_PATTERNS"
       _cache_emit_lines REDIR   "$REDIRECT_PROTECTED_PATTERNS"
+      _cache_emit_lines TOOLBOX "$TOOLBOX_WRITABLE_PATTERNS"
       _cache_emit_lines BLOCKED "$BLOCKED_DOMAINS"
       _cache_emit_lines ALLOWED "$ALLOWED_DOMAINS"
     } > "$tmp" 2>/dev/null \
@@ -389,7 +395,7 @@ load_policy_or_fail() {
   done
 
   # 7. Parse policy via plutil
-  local secret_patterns output_secret_patterns dangerous_patterns protected_patterns redirect_patterns blocked_domains allowed_domains
+  local secret_patterns output_secret_patterns dangerous_patterns protected_patterns redirect_patterns toolbox_patterns blocked_domains allowed_domains
 
   if ! secret_patterns="$(_extract_pattern_list "secretRegex" "$policy")"; then
     printf 'AI Safety Guard FATAL: failed to parse secretRegex from policy\n' >&2
@@ -422,6 +428,15 @@ load_policy_or_fail() {
   else
     redirect_patterns=""
   fi
+  # toolboxWritablePathRegex は「道具の置き場だけ書き込み保護から外す」免除リスト。
+  # 読めなければ空＝免除ゼロ＝従来どおり全部 deny なので、失敗しても安全側に倒れる。
+  # （だからここは exit 2 にしない。免除リストが読めないことで受講者の作業が止まるのは
+  #   本末転倒で、かつ「読めない＝守りが厚いまま」なので危険側には倒れない。）
+  if "$_PLUTIL" -extract toolboxWritablePathRegex raw -o - "$policy" >/dev/null 2>&1; then
+    toolbox_patterns="$(_extract_string_list "toolboxWritablePathRegex" "$policy")" || toolbox_patterns=""
+  else
+    toolbox_patterns=""
+  fi
   if ! blocked_domains="$(_extract_string_list "blockedDomains" "$policy")"; then
     printf 'AI Safety Guard FATAL: failed to parse blockedDomains from policy\n' >&2
     exit 2
@@ -437,6 +452,7 @@ load_policy_or_fail() {
   DANGEROUS_PATTERNS="$dangerous_patterns"
   PROTECTED_PATH_PATTERNS="$protected_patterns"
   REDIRECT_PROTECTED_PATTERNS="$redirect_patterns"
+  TOOLBOX_WRITABLE_PATTERNS="$toolbox_patterns"
   BLOCKED_DOMAINS="$blocked_domains"
   ALLOWED_DOMAINS="$allowed_domains"
 
@@ -826,25 +842,51 @@ redirect_write_targets() {
   return 0
 }
 
+# 与えられたパスが「受講者が自分の道具を増やすための置き場」か（＝書き込み保護の免除）。
+# policy の toolboxWritablePathRegex がそのまま SSOT。Windows(Test-ToolboxWritablePath)・
+# OpenCode(isToolboxWritablePath)と同一形を保つこと。
+#
+# ⚠️ `..` を含むパスは絶対に免除しない。~/.claude/skills/../settings.json のような相対参照で
+# 免除を踏み台にして設定本体へ書き込まれるのを防ぐ。免除は「緩める側」の規則なので、
+# 判定に迷いがあるときは免除しない（＝従来どおり deny）方へ倒す。
+is_toolbox_writable_path() {
+  local combined p="$1"
+  [ -n "$p" ] || return 1
+  combined="$(_join_patterns "$TOOLBOX_WRITABLE_PATTERNS")"
+  [ -z "$combined" ] && return 1
+  case "$p" in
+    ..|../*|*/..|*/../*|*\\..|*\\..\\*|..\\*) return 1 ;;
+  esac
+  printf '%s\n' "$p" | LC_ALL=C grep -E -i -q "$combined"
+}
+
 # 与えられたパス文字列が「書き込み保護対象」に当たるか。
 is_redirect_protected_path() {
   local combined
   [ -n "$1" ] || return 1
+  is_toolbox_writable_path "$1" && return 1
   combined="$(_join_patterns "$REDIRECT_PROTECTED_PATTERNS")"
   [ -z "$combined" ] && return 1
   printf '%s\n' "$1" | LC_ALL=C grep -E -i -q "$combined"
 }
 
 # シェルコマンドのリダイレクト先に保護対象が含まれるか（guard-bash 用）。
+# 宛先を 1 本ずつ is_redirect_protected_path に通す（まとめて grep すると免除が効かない）。
 has_redirect_protected_target() {
-  local combined cmd targets
+  local combined cmd targets target
   combined="$(_join_patterns "$REDIRECT_PROTECTED_PATTERNS")"
   [ -z "$combined" ] && return 1
   cmd="$(_extract_json_field "command")"
   [ -n "$cmd" ] || return 1
   targets="$(redirect_write_targets "$cmd")"
   [ -n "$targets" ] || return 1
-  printf '%s\n' "$targets" | LC_ALL=C grep -E -i -q "$combined"
+  while IFS= read -r target; do
+    [ -z "$target" ] && continue
+    is_redirect_protected_path "$target" && return 0
+  done <<EOF
+$targets
+EOF
+  return 1
 }
 
 # 値が 1 行だけか（復号後に複数行になった入力を、行アンカー付きホワイトリストへ
@@ -882,7 +924,14 @@ extract_url() {
 }
 
 # Domain matching helpers using policy-driven lists.
-# Supports exact match and wildcard prefix (*.example.com).
+# Supports exact match, wildcard prefix (*.example.com), and "*" (matches every host).
+#
+# "*" は「原則すべて通す」を表すための特別扱い。2026-08-21 に WebFetch を許可リスト方式から
+# 拒否リスト方式へ変えたため、allowedDomains は ["*"] の 1 本になった。キーごと消すと
+# load_policy_or_fail の必須キー検査と空チェックが fail-closed で止めるので、「全部通す」は
+# 必ずこの形で書く（configs/claude/settings.mac.json の sandbox.network.allowedDomains と同じ）。
+# blockedDomains 側に "*" を書けば全部止まる（is_allowed_domain が先に blocked を見るため、
+# 拒否が許可より優先される順序はこの特別扱いを入れても変わらない）。
 _domain_matches_list() {
   local host="$1"
   local list="$2"
@@ -890,6 +939,10 @@ _domain_matches_list() {
   while IFS= read -r entry; do
     [ -z "$entry" ] && continue
     case "$entry" in
+      \*)
+        # "*" = すべてのホストに一致
+        return 0
+        ;;
       \*.*)
         # Wildcard: *.example.com matches sub.example.com and example.com
         local suffix="${entry#\*.}"

@@ -80,8 +80,8 @@ cat <<EOF
       安全ガードの呼び出し（絶対パス）を追加します。
 
  4) OpenCode      → $_oc_target
-      危険コマンドの禁止（rm / sudo / git reset --hard / 他エージェントの裸起動）と、
-      確認を挟むコマンド（git push / npm publish など）を追加します。
+      危険コマンドの禁止（rm / sudo / git reset --hard）と、
+      確認を挟むコマンド（git push / npm publish / 他エージェントの起動 など）を追加します。
 
 ・既存の設定は壊しません（安全に関係のない項目は 1 つも変えません）。
 ・書き込む前に ~/.ai-safety/backups/ へ自動でバックアップを取ります。
@@ -118,21 +118,21 @@ run_engine() {
 
 echo ""
 echo "── 1) Claude Code の全体設定に反映 ───────────────────"
-run_engine node "$CLAUDE_JS" apply --source "$SRC" --target "$CLAUDE_TARGET" --os macos --guard-dir "$GUARD_DIR" "${STATE_ARGS[@]}" "$@"
+run_engine node "$CLAUDE_JS" apply --source "$SRC" --target "$CLAUDE_TARGET" --os macos --guard-dir "$GUARD_DIR" ${STATE_ARGS[@]+"${STATE_ARGS[@]}"} "$@"
 
 echo ""
 echo "── 2) Codex の全体設定に反映 ─────────────────────────"
-run_engine node "$CODEX_JS" apply --config-target "$CODEX_CONFIG" --hooks-target "$CODEX_HOOKS" --os macos --guard-dir "$GUARD_DIR" "${STATE_ARGS[@]}" "$@"
+run_engine node "$CODEX_JS" apply --config-target "$CODEX_CONFIG" --hooks-target "$CODEX_HOOKS" --os macos --guard-dir "$GUARD_DIR" ${STATE_ARGS[@]+"${STATE_ARGS[@]}"} "$@"
 echo "  ※ Codex の guard hook を発火させるには、一度だけ codex を起動して /hooks で信頼してください。"
 echo "     常時有効な保護(サンドボックス・承認・APIキー除外)は上の config.toml で決定的に効きます。"
 echo "     この config.toml は Codex デスクトップアプリも読むので、アプリ側にも同時に効きます。"
 
 echo ""
 echo "── 3) agy / Gemini の全体設定に反映 ──────────────────"
-run_engine node "$AGY_JS" apply --target "$AGY_TARGET" --os macos --guard-dir "$GUARD_DIR" "${STATE_ARGS[@]}" "$@"
+run_engine node "$AGY_JS" apply --target "$AGY_TARGET" --os macos --guard-dir "$GUARD_DIR" ${STATE_ARGS[@]+"${STATE_ARGS[@]}"} "$@"
 
 echo ""
 echo "── 4) OpenCode の全体設定に反映 ──────────────────────"
-run_engine node "$OPENCODE_JS" apply --config-dir "$OPENCODE_DIR" "${STATE_ARGS[@]}" "$@"
+run_engine node "$OPENCODE_JS" apply --config-dir "$OPENCODE_DIR" ${STATE_ARGS[@]+"${STATE_ARGS[@]}"} "$@"
 
 exit $rc

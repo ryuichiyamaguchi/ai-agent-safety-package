@@ -180,10 +180,23 @@ function buildMcpConfig({ mcpDir = '', env = process.env, homeDir = os.homedir()
 //       確認カードを 1 枚挟む形にして、判断を受講者に渡す。
 //   ・残したもの: 再帰削除（rm *）・`sudo *`・`git reset --hard*`
 //       いずれも取り消せない破壊で、正当な代替手段がある。
-//   ・追加したもの: 裸の `codex*` / `claude*` を deny、`oc-safe*` を deny
-//       安全フックを通らない裸起動を閉じる。安全ランチャー（codex-safe / claude-safe）は
-//       下の enforcedBashAsk() で ask として明示的に開けてある（壁 A の解消）。
-//       oc-safe は自分自身の再帰起動なので閉じる。
+//   ・追加したもの: `oc-safe*` を deny（自分自身の再帰起動なので閉じる）
+//
+// 2026-08-21 の再訂正（山口さんの明示指示）— 裸の `codex*` / `claude*` は deny → ask:
+//   前版で「安全フックを通らない裸起動」を deny にしたが、**行きすぎだったので撤回する**。
+//   素の `claude` / `codex` を打って使いたい受講者は普通にいるし、禁止するほどの根拠が無い。
+//   - 確認カードを 1 枚挟む（ask）だけにして、「はい」と答えれば素のまま起動できる。
+//   - グローバル安全設定（上級 5 = apply-global-guard / apply-global-deny）を入れてあれば、
+//     素起動でも Claude / Codex 側の hook 層と deny 設定が効く。**素起動＝丸腰ではない**。
+//     効かないのは「このパッケージの作業フォルダ隔離・送信検査 Gateway・見守りモニター」で、
+//     それが要るときは `claude-safe` / `codex-safe` を使う、という案内にとどめる。
+//   - `codex-safe*` / `claude-safe*` は従来どおり ask（下の enforcedBashAsk()）。安全な
+//     起動口は 1 つも塞がない。`oc-safe*` の deny だけは残す（再帰起動の抑止であって、
+//     「別の AI を使わせない」という意味の禁止ではない）。
+//   - `opencode*` / `agy*` の裸起動は、そもそも deny 表にも ask 表にも載っていない＝
+//     `'*': 'ask'` に落ちるので、この訂正のあとの `codex*` / `claude*` と同じ扱いになる。
+//     わざわざ明示しても挙動が変わらないため、表は増やさない。
+//   - longrun（無人）では確認に答える人がいないので、裸起動は従来どおり deny 側に置く。
 //
 // longrun（長時間おまかせモード）の扱い:
 //   目を離している間に ask が出ると答える人がいないので、そこでセッションが止まる。
@@ -194,13 +207,13 @@ function enforcedBashDeny(longrun = false) {
     [['r', 'm *'].join('')]: 'deny',
     'sudo *': 'deny',
     'git reset --hard*': 'deny',
-    'codex*': 'deny',
-    'claude*': 'deny',
     'oc-safe*': 'deny',
   };
   if (!longrun) return base;
   return {
     ...base,
+    'codex*': 'deny',
+    'claude*': 'deny',
     'codex-safe*': 'deny',
     'claude-safe*': 'deny',
     'git push*': 'deny',
@@ -210,8 +223,9 @@ function enforcedBashDeny(longrun = false) {
 
 // 設定・環境変数の両方で必ず ask に固定する bash パターン（SSOT）。
 // **この表は enforcedBashDeny() より後ろに置くこと。** OpenCode の permission は
-// 「最後に一致したルールが勝つ」ので、`codex-safe*` が `codex*`(deny) より後ろに無いと
-// 安全ランチャーが起動できない。並び順そのものが意味を持つため、起動前検査
+// 「最後に一致したルールが勝つ」ので、ask の表全体が deny の表（`rm *` / `sudo *` /
+// `git reset --hard*` / `oc-safe*`、longrun ではさらに裸起動と公開系）より後ろに無いと
+// 確認つきで通したいものが deny に飲まれる。並び順そのものが意味を持つため、起動前検査
 // （verifyResolvedConfig）は「ask が deny より後ろにあること」まで確かめる。
 //
 // codex-safe / claude-safe は PATH 上のシム（install が ~/.ai-safety/bin/ に置く）で、
@@ -221,6 +235,11 @@ function enforcedBashAsk(longrun = false) {
   // 長時間おまかせモードでは「確認して通す」枠そのものを置かない（全部 deny 側へ移した）。
   if (longrun) return {};
   return {
+    // 裸起動は「おすすめしないが使える」。確認カードで 1 度だけ聞く（2026-08-21 の訂正）。
+    // `codex-safe*` / `claude-safe*` はこの後ろに置く（同じ ask なので順序は挙動を変えないが、
+    // 「裸 → -safe」の並びを保つと既存の並び順テストがそのまま意味を持つ）。
+    'codex*': 'ask',
+    'claude*': 'ask',
     'codex-safe*': 'ask',
     'claude-safe*': 'ask',
     'git push*': 'ask',
@@ -232,7 +251,7 @@ function enforcedBashAsk(longrun = false) {
 function buildEnforcedPermissionEnv(longrun = false) {
   return {
     bash: { ...enforcedBashDeny(longrun), ...enforcedBashAsk(longrun) },
-    external_directory: 'deny',
+    external_directory: enforcedExternalDirectoryRules(),
   };
 }
 
@@ -279,7 +298,63 @@ function enforcedEditRules(longrun = false) {
     [`**/${DOT}ai-safety`]: 'deny',
     [`*${DOT}ai-safety/**`]: 'deny',
     [`**/${DOT}ai-safety/**`]: 'deny',
+    // 各 CLI の「設定そのもの」は書き換え禁止（AI が自分への指示と安全設定を書き換えられない
+    // ようにする線引き）。external_directory 側でも道具の置き場しか開けていないので普通は
+    // ここへ届かないが、2 段で閉じておく（片方の綴りが崩れても素通しにならないように）。
+    ...enforcedAgentConfigDenyRules(),
   };
+}
+
+// 「設定そのもの」＝書き換え禁止のファイル。edit 表の末尾に置く（最後に一致したルールが勝つ）。
+function enforcedAgentConfigDenyRules() {
+  const rules = {};
+  for (const file of [
+    `${DOT}claude/settings${DOT}json`,
+    `${DOT}claude/settings${DOT}local${DOT}json`,
+    `${DOT}claude${DOT}json`,
+    `${DOT}codex/config${DOT}toml`,
+    `${DOT}gemini/settings${DOT}json`,
+    `${DOT}config/opencode/opencode${DOT}json`,
+    `${DOT}config/opencode/opencode${DOT}jsonc`,
+  ]) {
+    rules[`~/${file}`] = 'deny';
+    rules[`**/${file}`] = 'deny';
+  }
+  return rules;
+}
+
+// external_directory（作業フォルダの外へのアクセス）の許可表（SSOT）。
+//
+// v1.16 までは丸ごと 'deny' だった。v1.17 で「PC 全体に最低限の安全設定を入れる」「新しい
+// 作業フォルダを安全にする」を入れ、『作業フォルダの中だけで使う』前提が外れたため、
+// 受講者が自分の道具（スキル・コマンド）を増やすための置き場だけを開ける
+// （2026-08-21 の受講生クレーム: グローバルのスキルを入れられない）。
+//
+// ⚠️ '*': 'deny' を先頭に置くこと。OpenCode の権限評価は「最後に一致したルールが勝つ」ので、
+// catch-all を後ろに置くと開けた置き場ごと閉じてしまう。
+// ⚠️ 開けるのは『置き場』だけ。設定そのもの（~/.claude/settings.json ・ ~/.codex/config.toml ・
+// ~/.gemini/settings.json ・ ~/.config/opencode/opencode.json(c)）はこの表に含めない。
+// ⚠️ ~/.config/opencode/plugin/ は意図的に開けない。opencode のプラグインは opencode 本体の
+// プロセス内で動く JS で、決定的 deny 床（opencode-bouncer-monitor.mjs）そのものを無効化
+// できるため、『置き場』ではなく『設定』側に分類する。各 CLI の agents/ も同様（エージェント
+// 定義はツール権限の上書きを持ち込める。AGENT_LOCKED_KEYS の説明を参照）。
+// ⚠️ 免除の SSOT は policy/safety-policy.json の toolboxWritablePathRegex。ここを増やすときは
+// そちらと mac / Windows のガードも必ず揃えること。
+function enforcedExternalDirectoryRules() {
+  const rules = { '*': 'deny' };
+  for (const dir of [
+    `${DOT}claude/skills`,
+    `${DOT}claude/commands`,
+    `${DOT}codex/prompts`,
+    `${DOT}codex/skills`,
+    `${DOT}gemini/commands`,
+    `${DOT}gemini/skills`,
+    `${DOT}config/opencode/command`,
+    `${DOT}config/opencode/skills`,
+  ]) {
+    rules[`~/${dir}/**`] = 'allow';
+  }
+  return rules;
 }
 
 // エージェント個別 permission で「文字列 deny」以外を認めないキー。
@@ -314,9 +389,9 @@ function verifyResolvedConfig(resolved, { longrun = false } = {}) {
   for (const [pattern, action] of Object.entries(enforcedBashAsk(longrun))) {
     if (bash[pattern] !== action) problems.push(`bash の「${pattern}」が確認制になっていません。`);
   }
-  // 並び順の検査。OpenCode は「最後に一致したルールが勝つ」ので、`codex-safe*`(ask) が
-  // `codex*`(deny) より前に来ると安全ランチャーが起動できず、逆に `codex*`(deny) が
-  // 後ろに来ると裸起動が閉じられない。キーの並びそのものを見る。
+  // 並び順の検査。OpenCode は「最後に一致したルールが勝つ」ので、ask にしたいパターンが
+  // deny の表より前に来ると deny に飲まれる（例: longrun 以外での `codex-safe*` が
+  // `oc-safe*`(deny) より前に来る形）。キーの並びそのものを見る。
   {
     const keys = Object.keys(bash);
     const lastDeny = keys.reduce((acc, key, i) => (bash[key] === 'deny' ? i : acc), -1);
@@ -331,7 +406,11 @@ function verifyResolvedConfig(resolved, { longrun = false } = {}) {
   // そのぶん、上の deny 床（再帰削除・sudo・裸起動・公開系）は 1 本も外していないこと、
   // および webfetch / websearch が deny 側へ倒れていることを下で確かめる。
   if (!longrun && bash['*'] === 'allow') problems.push('bash がすべて自動許可になっています。');
-  if (permission.external_directory !== 'deny') problems.push('作業フォルダの外へのアクセスが禁止になっていません。');
+  // external_directory は「'*': deny + 道具の置き場だけ allow」の表。並び順まで含めて
+  // 配布物どおりであることを求める（catch-all の位置が変わるだけで全部開いてしまうため）。
+  if (JSON.stringify(permission.external_directory) !== JSON.stringify(enforcedExternalDirectoryRules())) {
+    problems.push('作業フォルダの外へのアクセス制限（external_directory）が配布物と違います。');
+  }
   if (resolved.share !== 'disabled') problems.push('会話の共有リンク作成が無効になっていません。');
   // read / edit は「並び順まで含めて」配布物どおりであることを求める。ここは最後に一致した
   // ルールが勝つ世界なので、キーが全部残っていても順番を入れ替えるだけで禁止が無効になる
@@ -558,12 +637,12 @@ function buildOpenCodeConfig({
         'pytest*': 'allow',
         'python* -m unittest*': 'allow',
         ...enforcedBashDeny(longrun),
-        // ask は deny の後ろ（最後に一致したルールが勝つ）。codex-safe* を codex*(deny) の
-        // 後ろに置くことで「安全ランチャーは確認つきで通り、裸起動は止まる」に反転させる。
+        // ask は deny の後ろ（最後に一致したルールが勝つ）。裸起動（codex* / claude*）も
+        // 安全ランチャー（codex-safe* / claude-safe*）も、通常モードではここで確認制になる。
         // longrun ではこの表は空（全部 deny 側へ移した）。
         ...enforcedBashAsk(longrun),
       },
-      external_directory: 'deny',
+      external_directory: enforcedExternalDirectoryRules(),
       // 外部送信は無人で確認できないので、longrun では ask ではなく deny へ倒す。
       webfetch: longrun ? 'deny' : 'ask',
       websearch: longrun ? 'deny' : (enableWebSearch ? 'ask' : 'deny'),
@@ -814,6 +893,8 @@ module.exports = {
   MONITOR_PLUGIN_FILE,
   enforcedReadRules,
   enforcedEditRules,
+  enforcedExternalDirectoryRules,
+  enforcedAgentConfigDenyRules,
   buildOpenCodeConfig,
   buildEnforcedPermissionEnv,
   buildMcpConfig,

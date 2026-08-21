@@ -333,20 +333,40 @@ function Get-RedirectWriteTargets([string]$Command) {
     return $targets
 }
 
+# 与えられたパスが「受講者が自分の道具を増やすための置き場」か（＝書き込み保護の免除）。
+# policy の toolboxWritablePathRegex が SSOT。mac(is_toolbox_writable_path)・
+# OpenCode(isToolboxWritablePath)と同一形を保つこと。
+#
+# ⚠️ `..` を含むパスは絶対に免除しない。~\.claude\skills\..\settings.json のような相対参照で
+# 免除を踏み台にして設定本体へ書き込まれるのを防ぐ。免除は「緩める側」の規則なので、
+# 迷うときは免除しない（＝従来どおり deny）方へ倒す。
+function Test-ToolboxWritablePath([string]$Path, [object]$Policy) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    $patterns = @(Get-JsonValue $Policy @("toolboxWritablePathRegex"))
+    if ($patterns.Count -eq 0) { return $false }
+    if ($Path -match '(^|[\\/])\.\.([\\/]|$)') { return $false }
+    foreach ($pattern in $patterns) {
+        if ($Path -match $pattern) { return $true }
+    }
+    return $false
+}
+
 # 単一のパス文字列が「書き込み保護対象」に当たるか。
 function Test-RedirectProtectedPath([string]$Path, [object]$Policy) {
     if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    if (Test-ToolboxWritablePath $Path $Policy) { return $null }
     $patterns = @(Get-JsonValue $Policy @("redirectProtectedPathRegex"))
     if ($patterns.Count -eq 0) { return $null }
     return Find-RegexMatch $Path $patterns "protected write target"
 }
 
 # シェルコマンドのリダイレクト先に保護対象が含まれるか。
+# 宛先を 1 本ずつ Test-RedirectProtectedPath に通す（免除を効かせるため）。
 function Test-RedirectProtectedCommand([string]$Command, [object]$Policy) {
     $patterns = @(Get-JsonValue $Policy @("redirectProtectedPathRegex"))
     if ($patterns.Count -eq 0) { return $null }
     foreach ($target in @(Get-RedirectWriteTargets $Command)) {
-        $hit = Find-RegexMatch $target $patterns "protected write target"
+        $hit = Test-RedirectProtectedPath $target $Policy
         if ($hit) { return [PSCustomObject]@{ Name = $hit.Name; Pattern = $hit.Pattern; Target = $target } }
     }
     return $null
@@ -493,6 +513,11 @@ function Test-IsDomainMatch([string]$HostName, [string]$Pattern) {
     }
     $h = $HostName.ToLowerInvariant()
     $p = $Pattern.ToLowerInvariant()
+    # "*" = すべてのホストに一致。2026-08-21 に WebFetch を許可リスト方式から拒否リスト方式へ
+    # 変えたため allowedDomains は ["*"] の 1 本になった（mac の _domain_matches_list と対称）。
+    # キーごと消すと Assert-PolicyFloor の空検査が fail-closed で止めるので、「全部通す」は
+    # 必ずこの形で書く。判定順は Test-IsAllowedDomain が先に blocked を見るため不変。
+    if ($p -eq "*") { return $true }
     if ($p.StartsWith("*.")) {
         $suffix = $p.Substring(1) # ".pages.dev"
         return $h.EndsWith($suffix)

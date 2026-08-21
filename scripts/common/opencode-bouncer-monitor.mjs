@@ -168,6 +168,10 @@ function loadDenyFloor({ candidates } = {}) {
       skipped,
       'redirectProtected',
     );
+    // 「道具の置き場」だけ書き込み保護から外す免除リスト（mac / Windows と同じ SSOT）。
+    // 項目が無い古いポリシーでは空配列＝免除ゼロ＝従来どおり全部 deny なので、
+    // 読めないことで危険側へ倒れることはない。
+    const toolboxWritable = compileAll(policy.toolboxWritablePathRegex, skipped, 'toolboxWritable');
     // パターンが 1 本も生きていないポリシーは「読めた」とみなさない（fail-closed）。
     if (!dangerous.length || !protectedPaths.length) continue;
     // 本数が揃っていても中身が無害化されていれば床は死んでいる。カナリアで実際に当てる。
@@ -180,10 +184,11 @@ function loadDenyFloor({ candidates } = {}) {
       dangerous,
       protectedPaths,
       redirectProtected,
+      toolboxWritable,
       skipped,
     };
   }
-  return { ok: false, source: '', dangerous: [], protectedPaths: [], redirectProtected: [], skipped };
+  return { ok: false, source: '', dangerous: [], protectedPaths: [], redirectProtected: [], toolboxWritable: [], skipped };
 }
 
 // コマンド文字列から「書き込み先」だけを抜き出す。
@@ -226,6 +231,21 @@ function redirectTargetForms(value) {
   return forms;
 }
 
+// 与えられたパスが「受講者が自分の道具を増やすための置き場」か（＝書き込み保護の免除）。
+// mac(is_toolbox_writable_path)・Windows(Test-ToolboxWritablePath)と同一形を保つこと。
+//
+// ⚠️ `..` を含むパスは絶対に免除しない。~/.claude/skills/../settings.json のような相対参照で
+// 免除を踏み台にして設定本体へ書き込まれるのを防ぐ。免除は「緩める側」の規則なので、
+// 迷うときは免除しない（＝従来どおり deny）方へ倒す。
+function isToolboxWritablePath(target, floor) {
+  const value = String(target || '');
+  if (!value) return false;
+  const list = (floor && Array.isArray(floor.toolboxWritable)) ? floor.toolboxWritable : [];
+  if (!list.length) return false;
+  if (/(^|[\\/])\.\.([\\/]|$)/.test(value)) return false;
+  return list.some((re) => re.test(value));
+}
+
 function writeTargets(command) {
   const targets = [];
   const text = String(command || '');
@@ -258,6 +278,9 @@ function denyReason(command, floor) {
     if (re.test(text)) return dangerMessage(text);
   }
   for (const target of writeTargets(text)) {
+    // 道具の置き場（~/.claude/skills 等）への書き込みは通す。設定そのものは免除表に
+    // 当たらないので、下の 2 つの検査で従来どおり止まる。
+    if (isToolboxWritablePath(target, floor)) continue;
     for (const re of floor.redirectProtected) {
       if (re.test(target)) {
         return `設定ファイル（${target}）を書き換えようとしたため止めました。次に開くときの動きが変わってしまう場所です。`;
@@ -819,6 +842,7 @@ Object.assign(BouncerApprovalMonitor, {
   grepDenyReason,
   redactGrepOutput,
   writeTargets,
+  isToolboxWritablePath,
   verifyReadyMarker,
   runReadyWatchdog,
   READY_OK_TOKEN,

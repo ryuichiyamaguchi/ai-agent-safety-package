@@ -38,18 +38,18 @@ done
 
 rc=0
 echo "── 1) Claude Code の全体設定を元に戻す ───────────────"
-node "$CLAUDE_JS" uninstall --target "$CLAUDE_TARGET" "${STATE_ARGS[@]}" "$@" || rc=1
+node "$CLAUDE_JS" uninstall --target "$CLAUDE_TARGET" ${STATE_ARGS[@]+"${STATE_ARGS[@]}"} "$@" || rc=1
 
 echo ""
 echo "── 2) Codex の全体設定を元に戻す ─────────────────────"
-node "$CODEX_JS" uninstall --config-target "$CODEX_CONFIG" --hooks-target "$CODEX_HOOKS" "${STATE_ARGS[@]}" "$@" || rc=1
+node "$CODEX_JS" uninstall --config-target "$CODEX_CONFIG" --hooks-target "$CODEX_HOOKS" ${STATE_ARGS[@]+"${STATE_ARGS[@]}"} "$@" || rc=1
 
 echo ""
 echo "── 3) agy / Gemini の全体設定を元に戻す ──────────────"
-node "$AGY_JS" uninstall --target "$AGY_TARGET" "${STATE_ARGS[@]}" "$@" || rc=1
+node "$AGY_JS" uninstall --target "$AGY_TARGET" ${STATE_ARGS[@]+"${STATE_ARGS[@]}"} "$@" || rc=1
 
 echo ""
 echo "── 4) OpenCode の全体設定を元に戻す ──────────────────"
-node "$OPENCODE_JS" uninstall --config-dir "$OPENCODE_DIR" "${STATE_ARGS[@]}" "$@" || rc=1
+node "$OPENCODE_JS" uninstall --config-dir "$OPENCODE_DIR" ${STATE_ARGS[@]+"${STATE_ARGS[@]}"} "$@" || rc=1
 
 exit $rc

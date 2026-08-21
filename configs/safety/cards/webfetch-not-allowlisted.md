@@ -1,12 +1,12 @@
 ---
 risk: medium
 icon: 🌐
-title: 許可リスト外（または明示的にブロックしている）ドメインにアクセスしようとしています
+title: ブロックしているドメイン（匿名アップロード・匿名 paste など）にアクセスしようとしています
 ---
 
 # この操作は何？
 
-このパッケージの `WebFetch` ガードは **アクセス可能なドメインを限定** しています（公式ドキュメント・GitHub・npm registry など）。それ以外、特に `gist.github.com` `pastebin.com` `*.pages.dev` `transfer.sh` などの **匿名公開ストレージ** はブロック対象です。
+このパッケージの `WebFetch` ガードは **拒否リスト方式** です。普通のサイトは通りますが、`gist.github.com` `pastebin.com` `*.pages.dev` `transfer.sh` `gofile.io` `webhook.site` `*.ngrok-free.app` などの **匿名公開ストレージ・匿名 paste・webhook 受信箱・使い捨てトンネル**（`policy/safety-policy.json` の `blockedDomains`）はブロック対象です。ここは、プロンプトインジェクションで秘密を持ち出されるときの受け皿になりやすい場所です。
 
 # 承認前にチェック
 

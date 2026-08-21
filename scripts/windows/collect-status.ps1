@@ -17,7 +17,17 @@ $lines = New-Object System.Collections.ArrayList
 foreach ($cmd in @("codex", "claude", "gemini")) {
     $found = Get-Command $cmd -ErrorAction SilentlyContinue
     if ($found) {
-        try { [void]$lines.Add("$cmd=$(& $cmd --version 2>$null)") } catch { [void]$lines.Add("$cmd=error") }
+        # PowerShell 5.1 はネイティブコマンドの標準エラーをリダイレクトすると NativeCommandError に
+        # 変換する。$ErrorActionPreference = "Stop" 下ではそれで catch に落ちてしまい、
+        # 版を出せているのに "error" と記録されてしまうため、終了コードで判定する。
+        try {
+            $prevEap = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $raw = @(& $cmd --version 2>&1)
+            $ErrorActionPreference = $prevEap
+            $ver = (@($raw | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) | Out-String).Trim()
+            if ($ver) { [void]$lines.Add("$cmd=$ver") } else { [void]$lines.Add("$cmd=error") }
+        } catch { $ErrorActionPreference = 'Stop'; [void]$lines.Add("$cmd=error") }
     } else {
         [void]$lines.Add("$cmd=missing")
     }

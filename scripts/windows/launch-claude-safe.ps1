@@ -22,6 +22,37 @@ $env:AI_SAFE_ROOT = Join-Path $Workspace ".ai-safety"
 $env:AI_SAFE_POLICY = Join-Path $env:AI_SAFE_ROOT "policy\safety-policy.json"
 $env:AI_SAFE_LOG_DIR = Join-Path $HOME ".ai-safety\logs"
 
+# --- ネイティブコマンドを「標準エラーで落ちない」形で呼ぶ ---------------------------------
+# Windows PowerShell 5.1 は、ネイティブコマンド (claude 等) が標準エラーへ 1 行でも出すと、
+# その出力をリダイレクト (2>$null / 2>&1) やパイプで受けた時点で NativeCommandError という
+# エラーレコードに変換する。$ErrorActionPreference = "Stop" の下ではそれが終了時エラーになるので、
+# `claude --help` が警告を 1 行出しただけで try/catch に落ち、対応フラグの判定が空になる
+# (= --permission-mode default が黙って付かなくなる)。合否は必ず .ExitCode / .Output で判定する。
+function Invoke-NativeQuiet {
+    param(
+        [Parameter(Mandatory = $true)][string]$File,
+        [string[]]$Arguments = @()
+    )
+    $prevEap = $ErrorActionPreference
+    $prevErrCount = $global:Error.Count
+    $ErrorActionPreference = 'Continue'
+    try {
+        $global:LASTEXITCODE = 0
+        $raw = @(& $File @Arguments 2>&1)
+        $code = $LASTEXITCODE
+        $stdout = @($raw | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+        $stderr = @($raw | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
+        return [pscustomobject]@{
+            ExitCode = $code
+            Output   = ($stdout | Out-String)
+            Error    = (($stderr | ForEach-Object { [string]$_ }) -join "`n")
+        }
+    } finally {
+        $ErrorActionPreference = $prevEap
+        while ($global:Error.Count -gt $prevErrCount) { $global:Error.RemoveAt(0) }
+    }
+}
+
 # claude-safe は「普通の Claude（あなたのログイン認証）」を起動する。DeepSeek 連携(d-claude)が
 # 残したルーティング系の環境変数を引き継ぐと、無効トークンを Anthropic に送って 401 になる
 # (永続 setx の置き土産=footgun)。このプロセス内で消し、claude-safe を常に素の Anthropic に向ける。
@@ -29,7 +60,7 @@ $env:AI_SAFE_LOG_DIR = Join-Path $HOME ".ai-safety\logs"
 # Gateway の BASE_URL/MODEL を「使う」ために渡してくる。その経路では gateway が
 # DS_CLAUDE_MODE=1 を立てるので Remove をスキップする (消すと "not logged in" になる)。
 if ($env:DS_CLAUDE_MODE -ne '1') {
-    foreach ($v in @('ANTHROPIC_AUTH_TOKEN','ANTHROPIC_BASE_URL','ANTHROPIC_MODEL','ANTHROPIC_DEFAULT_OPUS_MODEL','ANTHROPIC_DEFAULT_SONNET_MODEL','ANTHROPIC_DEFAULT_HAIKU_MODEL','CLAUDE_CODE_SUBAGENT_MODEL','CLAUDE_CODE_EFFORT_LEVEL','ANTHROPIC_CUSTOM_MODEL_OPTION')) {
+    foreach ($v in @('ANTHROPIC_AUTH_TOKEN','ANTHROPIC_BASE_URL','ANTHROPIC_MODEL','ANTHROPIC_DEFAULT_OPUS_MODEL','ANTHROPIC_DEFAULT_SONNET_MODEL','ANTHROPIC_DEFAULT_HAIKU_MODEL','CLAUDE_CODE_SUBAGENT_MODEL','CLAUDE_CODE_EFFORT_LEVEL','ANTHROPIC_CUSTOM_MODEL_OPTION','ANTHROPIC_CUSTOM_MODEL_OPTION_NAME','ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION')) {
         if (Test-Path "Env:\$v") { Remove-Item "Env:\$v" -ErrorAction SilentlyContinue }
     }
 }
@@ -66,7 +97,10 @@ if (-not $Claude) {
 $argsList = @("--settings", $settings, "--setting-sources", "user,project,local")
 # claude --help で --permission-mode が存在するか確認してから付ける
 $helpText = ""
-try { $helpText = (& $Claude --help 2>&1 | Out-String) } catch { $helpText = "" }
+try {
+    $helpRun = Invoke-NativeQuiet -File $Claude -Arguments @('--help')
+    $helpText = ($helpRun.Output + "`n" + $helpRun.Error)
+} catch { $helpText = "" }
 if ($helpText -match "--permission-mode") {
     $argsList = @("--permission-mode", "default") + $argsList
 }
@@ -83,7 +117,10 @@ try {
 } catch { $expectedCcVer = $null }
 if ($expectedCcVer) {
     $actualCcRaw = ""
-    try { $actualCcRaw = (& $Claude --version 2>&1 | Out-String) } catch { $actualCcRaw = "" }
+    try {
+        $verRun = Invoke-NativeQuiet -File $Claude -Arguments @('--version')
+        $actualCcRaw = ($verRun.Output + "`n" + $verRun.Error)
+    } catch { $actualCcRaw = "" }
     $ccMatch = [regex]::Match($actualCcRaw, '[0-9]+\.[0-9]+\.[0-9]+')
     if (-not $ccMatch.Success) {
         Write-Warning ("Claude Code の版を確認できませんでした（claude --version が取得できない）。動作確認済みの版は " + $expectedCcVer + " です。")

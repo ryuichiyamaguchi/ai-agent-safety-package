@@ -619,6 +619,8 @@
 
           <p class="muted">目を離して AI に長く作業させたいとき：<span class="fname">（上級）15_長時間おまかせモードで起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … 確認ダイアログをほとんど出さずに進めます。押すとメニューが出るので、<b>Claude／Codex／OpenCode／AntiGravity</b> から選んでください（<b>Mac でも Windows でも使えます</b>）。このモードは「全部素通し」ではありません。<b>再帰削除・秘密ファイルの読み取り・<span class="fname">sudo</span>・<span class="fname">git push</span> などは止まったまま</b>で、記録もそのまま残ります。<b>「壁」（OS が作業フォルダの外への書き込みを止める仕組み）がある組み合わせ</b>（Mac の Claude／Mac と Windows の Codex）では、壁を立てられなかったときは起動しません。<b>壁が無い組み合わせ</b>（Windows の Claude／OpenCode／AntiGravity）では、起動前に「この環境には壁がありません」という確認が<b>一度だけ</b>出ます。「はい」と入力しないかぎり起動しません。<b>この作業フォルダに大事なファイルを置かないでください。</b>くわしくは docs フォルダの <a class="ext" href="docs/20_卒業後ガイド.md">20_卒業後ガイド</a> へ。</p>
 
+          <p class="muted">合言葉やトークンを安全にしまいたいとき：<span class="fname">（上級）16_金庫に秘密をしまう<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … 好きな名前を付けて、短い文字列をパソコンの<b>金庫</b>（<span class="os-mac">Mac のキーチェーン</span><span class="os-win">Windows の DPAPI</span>）に入れます。メモ帳のファイルと違って中身は暗号化され、<b>この PC にログインできる本人だけ</b>が取り出せます。取り出すときは <span class="fname">（上級）17_金庫から秘密を取り出す<span class="os-win">.bat</span><span class="os-mac">.command</span></span>（画面には出さず<b>クリップボードに入れて 60 秒後に自動で消します</b>）、いらなくなったら <span class="fname">（上級）18_金庫の秘密を消す<span class="os-win">.bat</span><span class="os-mac">.command</span></span> です。入れられるのは短い文字列だけです（英数字なら約 90 文字、日本語なら約 30 文字まで）。</p>
+
 
           <div class="info">
             <span class="ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z" stroke="currentColor" stroke-width="1.6"/><path d="M12 10v4M12 8h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>

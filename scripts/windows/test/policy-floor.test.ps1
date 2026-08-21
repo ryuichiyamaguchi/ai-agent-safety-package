@@ -190,6 +190,39 @@ $neuteredGuard = New-Workspace "neutered-ws" {
 }
 ExpectBlock "無害化ポリシーは fail-closed" $neuteredGuard (BashJson $rm) $null
 
+# --- WebFetch の宛先判定（2026-08-21 に許可リスト方式 → 拒否リスト方式へ変更）-------
+#
+#   (1) blockedDomains（45 件）に載っている宛先は止まる
+#   (2) それ以外の普通の宛先は通る（旧 allowedDomains 15 件に無いものも通る）
+#
+# mac の policy-floor.test.sh の同名セクションと対称。ここが逆転したら出荷を止める。
+$guardWebfetch = Join-Path $repo "scripts\windows\guard-webfetch.ps1"
+function WebFetchJson([string]$Url) {
+    return '{"hook_event_name":"PreToolUse","tool_name":"WebFetch","cwd":"' + ($tmp -replace '\\', '\\\\') + '","tool_input":{"url":"' + $Url + '","prompt":"read"}}'
+}
+
+ExpectBlock "WebFetch 拒否: pastebin.com" $guardWebfetch (WebFetchJson 'https://pastebin.com/raw/abc') $null
+ExpectBlock "WebFetch 拒否: gist.github.com" $guardWebfetch (WebFetchJson 'https://gist.github.com/x/y') $null
+ExpectBlock "WebFetch 拒否: 0x0.st" $guardWebfetch (WebFetchJson 'https://0x0.st/abc') $null
+ExpectBlock "WebFetch 拒否: gofile.io (匿名アップロード)" $guardWebfetch (WebFetchJson 'https://gofile.io/d/abc') $null
+ExpectBlock "WebFetch 拒否: catbox.moe (匿名アップロード)" $guardWebfetch (WebFetchJson 'https://catbox.moe/') $null
+ExpectBlock "WebFetch 拒否: files.catbox.moe (ワイルドカード)" $guardWebfetch (WebFetchJson 'https://files.catbox.moe/abc.txt') $null
+ExpectBlock "WebFetch 拒否: webhook.site (受信箱)" $guardWebfetch (WebFetchJson 'https://webhook.site/abc') $null
+ExpectBlock "WebFetch 拒否: *.ngrok-free.app (使い捨てトンネル)" $guardWebfetch (WebFetchJson 'https://abc.ngrok-free.app/x') $null
+ExpectBlock "WebFetch 拒否: *.trycloudflare.com" $guardWebfetch (WebFetchJson 'https://abc.trycloudflare.com/x') $null
+ExpectBlock "WebFetch 拒否: *.workers.dev" $guardWebfetch (WebFetchJson 'https://abc.workers.dev/x') $null
+
+ExpectAllow "WebFetch 許可: example.com" $guardWebfetch (WebFetchJson 'https://example.com/') $null
+ExpectAllow "WebFetch 許可: docs.python.org（旧許可リスト外）" $guardWebfetch (WebFetchJson 'https://docs.python.org/3/library/os.html') $null
+ExpectAllow "WebFetch 許可: qiita.com（旧許可リスト外）" $guardWebfetch (WebFetchJson 'https://qiita.com/items/abc') $null
+ExpectAllow "WebFetch 許可: developer.mozilla.org（旧許可リスト外）" $guardWebfetch (WebFetchJson 'https://developer.mozilla.org/ja/docs/Web') $null
+ExpectAllow "WebFetch 許可: github.com（従来どおり）" $guardWebfetch (WebFetchJson 'https://github.com/anthropics/claude-code') $null
+
+ExpectBlock "WebFetch: 内部ネットワーク宛は止まる" $guardWebfetch (WebFetchJson 'http://127.0.0.1:8080/') $null
+ExpectBlock "WebFetch: 192.168.x 宛は止まる" $guardWebfetch (WebFetchJson 'http://192.168.1.1/') $null
+ExpectBlock "WebFetch: http/https 以外のスキームは止まる" $guardWebfetch (WebFetchJson 'file:///Users/x/.ssh/id_rsa') $null
+ExpectBlock "WebFetch: 入力に秘密が混ざっていたら止まる" $guardWebfetch (WebFetchJson 'https://example.com/?k=sk-ant-abcdefghijklmnopqrstuvwxyz0123') $null
+
 Write-Host ""
 Write-Host "policy-floor(win): $pass passed, $fail failed"
 if ($fail -gt 0) { exit 1 }
