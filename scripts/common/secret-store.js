@@ -559,18 +559,101 @@ function userList() {
   return userIndexRead().map((name) => ({ name, exists: userGet(name) !== null }));
 }
 
+// ---- クリップボードの文字コード（SSOT）-----------------------------------
+//
+// ここが「クリップボードとの受け渡し」の唯一の実装。clipboard-mask.js も
+// これを require して使う（＝伏せる/戻す と 金庫の取り出し で同じ経路を通る）。
+// 逆向き（secret-store → clipboard-mask）に require できないのでこちら側に置く。
+//
+// 文字化けの原因と直し方（すべて実測に基づく。見張りは test/clipboard-encoding.test.js）:
+//
+// mac — pbpaste / pbcopy の文字コードは CoreFoundation が決める。日本語設定の Mac で
+//   ロケール変数が UTF-8 でないと（Terminal の「起動時にロケール環境変数を設定」が
+//   外れている、LC_ALL=C が入っている等）次のことが起きる:
+//     ・pbpaste が CP932 のバイト列を返す → utf8 として読むので化ける（読み側の化け）
+//     ・pbcopy が UTF-8 の入力を扱えず、クリップボードが空になる（書き側の消失）
+//   → 子プロセスの環境だけを UTF-8 に固定する。__CF_USER_TEXT_ENCODING の明示指定は
+//     LC_ALL=C よりも強く効く（実測で確認）。親の環境は変えない。
+//
+// Windows — PowerShell 5.1 の [Console]::OutputEncoding / InputEncoding は日本語 Windows で
+//   既定が CP932。Get-Clipboard -Raw の出力は CP932 のバイト列で届き、
+//   [Console]::In.ReadToEnd() は CP932 として解釈する。
+//   → 本文を base64（ASCII のみ）で受け渡す。ASCII は CP932 でも UTF-8 でも同じバイト列
+//     なので、コンソールの文字コードが何であっても壊れない。
+//
+// 画面出力（console.log の日本語）は触らない。.bat は chcp 932 した実コンソールで node を
+//   直接起動しており、node はコンソール宛ての書き出しを WriteConsoleW（UTF-16）で行うため
+//   コードページの影響を受けない。ここで UTF-8 を強制すると v1.17.3 で確認したのと同じく
+//   「直すつもりで壊す」ことになる。
+const MAX_CLIP = 32 * 1024 * 1024;
+
+// mac の pbpaste / pbcopy を UTF-8 に固定した環境（子プロセス用のコピー）。
+function utf8Env() {
+  const env = Object.assign({}, process.env);
+  // LC_ALL は LC_CTYPE を上書きしてしまうので、UTF-8 でない指定は落とす。
+  delete env.LC_ALL;
+  env.LC_CTYPE = 'UTF-8';
+  // CoreFoundation へ「UTF-8 で」と直接伝える。ロケール変数より強い（実測）。
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 0;
+  env.__CF_USER_TEXT_ENCODING = `0x${uid.toString(16).toUpperCase()}:0x08000100:0x08000100`;
+  return env;
+}
+
+// Windows 側の受け渡しは base64 固定（コンソールのコードページに依存しないため）。
+const PS_READ_B64 =
+  '$t = Get-Clipboard -Raw; if ($null -eq $t) { $t = "" }; ' +
+  '[Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t)))';
+const PS_WRITE_B64 =
+  '$b = [Console]::In.ReadToEnd(); ' +
+  '$t = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b.Trim())); ' +
+  'Set-Clipboard -Value $t';
+
+function clipboardRead() {
+  if (process.platform === 'darwin') {
+    const r = spawnSync('/usr/bin/pbpaste', [], { env: utf8Env(), maxBuffer: MAX_CLIP });
+    return r.status === 0 && r.stdout ? r.stdout.toString('utf8') : null;
+  }
+  if (process.platform === 'win32') {
+    // 値は base64（ASCII）で受け取るので、コンソールが CP932 でも壊れない。
+    const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', PS_READ_B64],
+      { maxBuffer: MAX_CLIP });
+    if (r.status !== 0 || !r.stdout) return null;
+    try {
+      return Buffer.from(r.stdout.toString('ascii').trim(), 'base64').toString('utf8');
+    } catch { return null; }
+  }
+  return null;
+}
+
+function clipboardWrite(text) {
+  if (process.platform === 'darwin') {
+    return spawnSync('/usr/bin/pbcopy', [], { input: Buffer.from(text, 'utf8'), env: utf8Env() }).status === 0;
+  }
+  if (process.platform === 'win32') {
+    // 値をコマンド文字列に埋めない（長文・引用符・改行で壊れるため標準入力から渡す）。
+    // さらに base64（ASCII）にして、[Console]::In が CP932 でも壊れないようにする。
+    const input = Buffer.from(Buffer.from(text, 'utf8').toString('base64'), 'ascii');
+    return spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', PS_WRITE_B64],
+      { input, maxBuffer: MAX_CLIP }).status === 0;
+  }
+  return false;
+}
+
 // クリップボードへ入れる。値は標準出力にも引数にも出さない（stdin 経由で渡す）。
 // 外部コマンドには必ず制限時間を付ける（金庫呼び出しと同じ方針）。
+// ⚠️ 文字コードの扱いは上の clipboardWrite() に一本化してある。ここで独自に
+//    pbcopy / Set-Clipboard を呼び直さないこと（日本語の値が化ける・空になる）。
 function copyToClipboard(text) {
   const t = String(text == null ? '' : text);
   try {
     if (process.platform === 'darwin') {
-      const r = spawnSync('/usr/bin/pbcopy', [], Object.assign({ input: t }, runOpts(VAULT_TIMEOUT_MS)));
+      const r = spawnSync('/usr/bin/pbcopy', [],
+        Object.assign({ input: Buffer.from(t, 'utf8'), env: utf8Env() }, runOpts(VAULT_TIMEOUT_MS)));
       return !r.error && r.status === 0;
     }
     if (process.platform === 'win32') {
-      const r = runPowerShell('$t=[Console]::In.ReadToEnd(); Set-Clipboard -Value $t',
-        { input: t, timeoutMs: VAULT_TIMEOUT_MS });
+      const input = Buffer.from(Buffer.from(t, 'utf8').toString('base64'), 'ascii');
+      const r = runPowerShell(PS_WRITE_B64, { input, timeoutMs: VAULT_TIMEOUT_MS });
       return !r.error && r.status === 0;
     }
   } catch { /* ignore */ }
@@ -590,6 +673,9 @@ module.exports = {
   // 自由枠（受講生が名前を付けてしまう秘密）
   isValidUserName, userSet, userGet, userRemove, userList, userExists, userCopy,
   userIndexPath, USER_PREFIX, USER_NAME_MAX, MAC_KEYCHAIN_MAX,
+  // クリップボードの文字コード（SSOT）。clipboard-mask.js と
+  // test/clipboard-encoding.test.js がここを使う。
+  clipboardRead, clipboardWrite, utf8Env, PS_READ_B64, PS_WRITE_B64,
   // 失敗の記録・実測用（値は一切含まない）
   warmUp, takeLastFailure,
   VAULT_TIMEOUT_MS, VAULT_TIMEOUT_RETRY_MS, VAULT_PROBE_TIMEOUT_MS,

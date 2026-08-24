@@ -24,7 +24,6 @@
 //   node clipboard-mask.js --clear     対応表を今すぐ捨てる
 'use strict';
 
-const { spawnSync } = require('node:child_process');
 const store = require('./secret-store.js');
 const { maskText } = require('./secret-patterns.js');
 const { loadDenylist } = require('./denylist.js');
@@ -43,31 +42,19 @@ function ttlMs() {
 }
 
 // ---- クリップボード -------------------------------------------------------
-function clipboardRead() {
-  if (process.platform === 'darwin') {
-    const r = spawnSync('/usr/bin/pbpaste', [], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
-    return r.status === 0 ? r.stdout : null;
-  }
-  if (process.platform === 'win32') {
-    const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', 'Get-Clipboard -Raw'],
-      { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
-    return r.status === 0 ? r.stdout.replace(/\r\n$/, '') : null;
-  }
-  return null;
-}
-
-function clipboardWrite(text) {
-  if (process.platform === 'darwin') {
-    return spawnSync('/usr/bin/pbcopy', [], { input: text, encoding: 'utf8' }).status === 0;
-  }
-  if (process.platform === 'win32') {
-    // 値をコマンド文字列に埋めない（長文・引用符・改行で壊れるため標準入力から渡す）。
-    const script = '$t=[Console]::In.ReadToEnd(); Set-Clipboard -Value $t';
-    return spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script],
-      { input: text, encoding: 'utf8' }).status === 0;
-  }
-  return false;
-}
+//
+// 文字コードの扱いは secret-store.js に一本化してある（SSOT）。理由と実測の内訳は
+// あちらの「クリップボードの文字コード（SSOT）」の節に書いてある。要点だけ:
+//   mac     … pbpaste / pbcopy を UTF-8 に固定した環境で呼ぶ（LC_ALL=C だと CP932 で
+//             返る / 書き込みが空になる）。
+//   Windows … 本文を base64（ASCII）で受け渡す（PowerShell 5.1 の [Console]::In /
+//             OutputEncoding は日本語 Windows で CP932 のため）。
+//   画面出力は触らない（.bat が chcp 932 した実コンソールへ node が直接書くので、
+//   UTF-8 を強制すると v1.17.3 で確認したとおり逆に化ける）。
+//
+// ⚠️ ここで pbcopy / Get-Clipboard を呼び直さないこと。金庫の取り出し
+//    （secret-store.js の copyToClipboard）と経路が分かれ、片方だけ化ける。
+const { clipboardRead, clipboardWrite, utf8Env, PS_READ_B64, PS_WRITE_B64 } = store;
 
 // ---- 対応表（有効期限つき） ------------------------------------------------
 //
@@ -248,7 +235,11 @@ function doRestore() {
   return 0;
 }
 
-module.exports = { doMask, doRestore, clearMap, loadMap, saveMap, TOKEN_RE, LIMIT_LINE, ttlMs };
+module.exports = {
+  doMask, doRestore, clearMap, loadMap, saveMap, TOKEN_RE, LIMIT_LINE, ttlMs,
+  // 文字化けの見張り（test/clipboard-encoding.test.js）から使う。
+  clipboardRead, clipboardWrite, utf8Env, PS_READ_B64, PS_WRITE_B64,
+};
 
 if (require.main === module) {
   const args = process.argv.slice(2);

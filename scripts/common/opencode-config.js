@@ -259,6 +259,150 @@ function buildEnforcedPermissionEnv(longrun = false) {
 // 安全ガードの保護パス検査に自分で引っかかるため）。
 const DOT = String.fromCharCode(46);
 
+// 各 AI の「会話ログ（過去のやりとり）」の置き場（SSOT）。2026-08-21 に読み取り範囲を
+// 緩めたときの許可対象。**実際に存在を確認したものだけ**を載せること（推測で足さない）。
+//   ~/.claude/projects                        … Claude Code のセッション JSONL
+//   ~/.codex/sessions ・ ~/.codex/archived_sessions … Codex CLI のセッション JSONL
+//   ~/.gemini/tmp                             … Gemini CLI のチャット履歴・チェックポイント
+//   ~/.gemini/antigravity-cli/conversations   … Antigravity の会話 DB
+//   ~/.local/share/opencode/storage ・ log    … OpenCode のセッション差分とログ
+//
+// ⚠️ ここに載せてよいのは『フォルダ単位で開けても隣に鍵が無い』置き場だけ。ファイル 1 本を
+// 開けたいときは下の CONVERSATION_LOG_FILES を使う（OpenCode の external_directory は
+// 「対象の**親フォルダ** + /*」しか照合しないため、ファイル 1 本の許可は必ず親フォルダごとの
+// 許可になる。閉じ直しの手当てがセットで要る）。
+// ⚠️ 各置き場の**隣**にある鍵ファイルは AGENT_SECRET_FILES で読み取り deny のまま残す。
+const CONVERSATION_LOG_DIRS = [
+  `${DOT}claude/projects`,
+  `${DOT}codex/sessions`,
+  `${DOT}codex/archived_sessions`,
+  `${DOT}gemini/tmp`,
+  `${DOT}gemini/antigravity-cli/conversations`,
+  `${DOT}local/share/opencode/storage`,
+  `${DOT}local/share/opencode/log`,
+];
+
+// 会話ログのうち『フォルダごとは開けられない』もの＝**ファイル 1 本だけ**を開ける対象（SSOT）。
+// ~/.codex/history.jsonl は「Codex に打ち込んだ指示の履歴」で、過去の作業を振り返るのに使う。
+// 2026-08-21・依頼者裁定「そこも読めた方がいい」により、v1.17.3 で ask に落としていたものを
+// 既定で読めるようにした。
+//
+// ⚠️ 仕組み上の代償と、その閉じ直し方（1.18.9 実測にもとづく）:
+//   OpenCode の external_directory は `path.join(path.dirname(filepath), '*')` を照合対象にする。
+//   つまり「~/.codex/history.jsonl だけ」を external_directory で許すことはできず、
+//   `~/.codex/*` をフォルダごと allow にするしかない。そのままだと隣の auth.json や
+//   config.toml.bak まで開いてしまう。そこで:
+//     ・**read 表**の末尾に「`~/.codex/*`（直下）は丸ごと deny → history.jsonl だけ allow」を
+//       この順で書く。OpenCode の権限評価は findLast＝**最後に一致したルールが勝つ**なので、
+//       後ろに書いた 1 本だけが開く（enforcedOpenedDirReadRules）。
+//     ・**edit 表**の末尾でも `~/.codex/*`（直下）を deny にする。external_directory は
+//       読み取り専用の関門ではないので、開けたぶん書き込み側も閉じ直す
+//       （enforcedOpenedDirEditDenyRules）。
+//     ・**guard 側**（policy/safety-policy.json の protectedPathRegex）にも
+//       `.codex/auth.json` ・ `.codex/*config.toml` ・ `.codex/*.bak*` を追加した。
+//       read 表は read ツール専用で、`cat ~/.codex/auth.json` のようなシェル経由には効かないため。
+//   `*` は `/` をまたがないので、この deny は ~/.codex/sessions/** や ~/.codex/prompts/** には
+//   当たらない（会話ログと道具の置き場はこれまでどおり開いたまま）。
+const CONVERSATION_LOG_FILES = [`${DOT}codex/history${DOT}jsonl`];
+
+// CONVERSATION_LOG_FILES のためにフォルダごと開けた場所（＝直下を閉じ直す対象）。
+const OPENED_DIR_LOCKDOWN = Array.from(
+  new Set(CONVERSATION_LOG_FILES.map((f) => f.slice(0, f.lastIndexOf('/')))),
+);
+
+// 「設定そのもの」と「鍵の実物」（SSOT）。会話ログを開けても、その隣にあるこれらは
+// 読み取り deny のまま残す（AI が自分への指示と安全設定を読み書きできてはいけない、
+// 鍵の実物はそもそもモデルへ渡してはいけない、という線引き）。
+const AGENT_SECRET_FILES = [
+  `${DOT}claude/settings${DOT}json`,
+  `${DOT}claude/settings${DOT}local${DOT}json`,
+  `${DOT}claude${DOT}json`,
+  `${DOT}claude/${DOT}credentials${DOT}json`,
+  `${DOT}codex/config${DOT}toml`,
+  `${DOT}codex/auth${DOT}json`,
+  `${DOT}gemini/settings${DOT}json`,
+  `${DOT}gemini/oauth_creds${DOT}json`,
+  `${DOT}gemini/google_accounts${DOT}json`,
+  `${DOT}gemini/antigravity-cli/antigravity-oauth-token`,
+  `${DOT}gemini/antigravity-cli/settings${DOT}json`,
+  `${DOT}config/opencode/opencode${DOT}json`,
+  `${DOT}config/opencode/opencode${DOT}jsonc`,
+  `${DOT}local/share/opencode/auth${DOT}json`,
+  `${DOT}local/share/opencode/mcp-auth${DOT}json`,
+];
+
+// 「読まれたら困る」秘密の置き場（フォルダ単位）。policy/safety-policy.json の
+// protectedPathRegex と同じ集合を read ツールの表でも閉じる。v1.17.3 までは
+// external_directory: '*' deny が結果的に止めていたが、ホーム配下を ask に緩めたので
+// read 表の側にも明示的な deny を置く（緩めた分だけ、床を明示的に敷き直す）。
+const SECRET_DIRS = [
+  `${DOT}ssh`,
+  `${DOT}aws`,
+  `${DOT}azure`,
+  `${DOT}gnupg`,
+  `${DOT}kube`,
+  `${DOT}deepseek-claude`,
+  `${DOT}config/gcloud`,
+];
+
+// 「読まれたら困る」秘密のファイル（単体）。
+const SECRET_FILES = [
+  `${DOT}npmrc`,
+  `${DOT}pypirc`,
+  `${DOT}docker/config${DOT}json`,
+];
+
+// 秘密の読み取り deny 表。read 表の末尾に置く（最後に一致したルールが勝つ）。
+// ⚠️ `..` を含む形も 1 本足してある。OpenCode は照合前にパスを正規化する（1.18.9 の
+// resolve が canonical を返し、location_escape を別途エラーにする）ので通常は当たらないが、
+// 「会話ログの置き場から親をたどって設定本体へ」という踏み台を、正規化に頼らずに閉じる。
+function enforcedSecretReadDenyRules() {
+  const rules = {};
+  for (const dir of SECRET_DIRS) {
+    rules[`~/${dir}`] = 'deny';
+    rules[`~/${dir}/**`] = 'deny';
+    rules[`**/${dir}`] = 'deny';
+    rules[`**/${dir}/**`] = 'deny';
+  }
+  for (const file of [...SECRET_FILES, ...AGENT_SECRET_FILES]) {
+    rules[`~/${file}`] = 'deny';
+    rules[`**/${file}`] = 'deny';
+  }
+  return rules;
+}
+
+// 「ファイル 1 本のためにフォルダごと開けた場所」の閉じ直し（read 表用・SSOT）。
+// 直下（`*` は `/` をまたがない）を丸ごと deny してから、開けたい 1 本だけを allow で開ける。
+// **この順序（deny → allow）を絶対に崩さないこと**。OpenCode は findLast＝最後に一致した
+// ルールが勝つ実装なので、逆順に書くとフォルダごと素通しになる（1.18.9 実測）。
+// この表は enforcedSecretReadDenyRules() の**後ろ**に置く。したがって「直下は全部 deny」は
+// 秘密の deny と同じ結論になり、開くのは CONVERSATION_LOG_FILES の 1 本だけになる。
+function enforcedOpenedDirReadRules() {
+  const rules = {};
+  for (const dir of OPENED_DIR_LOCKDOWN) {
+    rules[`~/${dir}/*`] = 'deny';
+    rules[`**/${dir}/*`] = 'deny';
+  }
+  for (const file of CONVERSATION_LOG_FILES) {
+    rules[`~/${file}`] = 'allow';
+    rules[`**/${file}`] = 'allow';
+  }
+  return rules;
+}
+
+// 同じ場所の書き込み側の閉じ直し（edit 表用・SSOT）。
+// external_directory は読み取り専用の関門ではないので、`~/.codex/*` を allow にした時点で
+// 直下への書き込みも通り得る。会話ログを読ませたかっただけで AI 自身への指示
+// （~/.codex/AGENTS.md など）を書き換えられては困るため、直下は書き込み deny にする。
+function enforcedOpenedDirEditDenyRules() {
+  const rules = {};
+  for (const dir of OPENED_DIR_LOCKDOWN) {
+    rules[`~/${dir}/*`] = 'deny';
+    rules[`**/${dir}/*`] = 'deny';
+  }
+  return rules;
+}
+
 // read ツールの許可表（SSOT）。設定の生成と起動前検査の両方がこれを使う。
 // read ツールは bash を通らないので、決定的 deny 床（tool.execute.before）が効かない。
 // ここで禁止しなかったものは、シェルを一切使わずにそのまま読み出される。
@@ -281,6 +425,13 @@ function enforcedReadRules() {
     [`**/${DOT}ai-safety`]: 'deny',
     [`*${DOT}ai-safety/**`]: 'deny',
     [`**/${DOT}ai-safety/**`]: 'deny',
+    // 2026-08-21: ホーム配下の読み取りを ask に緩めたぶん、秘密の床を read 表にも敷き直す。
+    ...enforcedSecretReadDenyRules(),
+    // 2026-08-21 追補: ~/.codex/history.jsonl のためにフォルダごと開けた分を閉じ直す。
+    // 「直下は全部 deny → history.jsonl だけ allow」の順で書く（findLast＝最後勝ち）。
+    ...enforcedOpenedDirReadRules(),
+    // `..` の踏み台封じは**必ず最後**に置く（会話ログの allow に追い越されないように）。
+    '**/../**': 'deny',
   };
 }
 
@@ -302,6 +453,9 @@ function enforcedEditRules(longrun = false) {
     // ようにする線引き）。external_directory 側でも道具の置き場しか開けていないので普通は
     // ここへ届かないが、2 段で閉じておく（片方の綴りが崩れても素通しにならないように）。
     ...enforcedAgentConfigDenyRules(),
+    // 2026-08-21: ~/.codex/history.jsonl を読ませるために external_directory で
+    // ~/.codex/* をフォルダごと開けた。その分、直下への**書き込み**は明示的に閉じる。
+    ...enforcedOpenedDirEditDenyRules(),
   };
 }
 
@@ -340,8 +494,24 @@ function enforcedAgentConfigDenyRules() {
 // 定義はツール権限の上書きを持ち込める。AGENT_LOCKED_KEYS の説明を参照）。
 // ⚠️ 免除の SSOT は policy/safety-policy.json の toolboxWritablePathRegex。ここを増やすときは
 // そちらと mac / Windows のガードも必ず揃えること。
+//
+// 2026-08-21 追補（読み取り範囲の緩和・山口さん裁定「一つ目をメインに、二つ目も確認付きで」）:
+//   ・会話ログの置き場（CONVERSATION_LOG_DIRS）は allow＝確認なしで読める。
+//     「過去のやりとりを振り返る」は卒業後にこそ有用な使い方で、置き場が作業フォルダの
+//     外にあるという一点だけで塞がっていた。
+//   ・それ以外のホーム配下（`~/**`）は deny → **ask** に緩める。確認カードに「はい」と
+//     答えれば読める。v1.17.3 までは '*': 'deny' 1 本で、ホームのメモ 1 枚すら開けなかった。
+//   ・秘密の実体（~/.ssh ・ ~/.aws ・ ~/.ai-safety ・ 各 CLI の鍵と設定そのもの）は
+//     read 表の enforcedSecretReadDenyRules() が deny のまま止める。external_directory は
+//     「対象の親フォルダ + /*」しか見ない（＝同じフォルダの中を区別できない）ので、
+//     ファイル単位の線引きは必ず read 表の側で書くこと。
+//   ⚠️ `~/**` を ask にすると、作業フォルダの外への**書き込み**も確認付きで可能になる
+//     （external_directory は read 専用の関門ではない）。これは mac / Windows の
+//     guard-write.sh / guard-write.ps1 が以前から「外部書き込みは ask」で揃えている挙動と
+//     同じで、決定的 deny 床（redirectProtectedPathRegex / protectedPathRegex / edit 表の
+//     deny）は 1 本も外していない。
 function enforcedExternalDirectoryRules() {
-  const rules = { '*': 'deny' };
+  const rules = { '*': 'deny', '~/**': 'ask' };
   for (const dir of [
     `${DOT}claude/skills`,
     `${DOT}claude/commands`,
@@ -354,6 +524,20 @@ function enforcedExternalDirectoryRules() {
   ]) {
     rules[`~/${dir}/**`] = 'allow';
   }
+  for (const dir of CONVERSATION_LOG_DIRS) {
+    rules[`~/${dir}/**`] = 'allow';
+  }
+  // ファイル 1 本だけ開けたい会話ログ（~/.codex/history.jsonl）。external_directory は
+  // 「対象の親フォルダ + /*」しか照合しないので、ここはフォルダごとの allow にならざるを得ない。
+  // 開きすぎた分は read 表の enforcedOpenedDirReadRules() と edit 表の
+  // enforcedOpenedDirEditDenyRules()、および guard の protectedPathRegex が閉じ直す。
+  for (const dir of OPENED_DIR_LOCKDOWN) {
+    rules[`~/${dir}/*`] = 'allow';
+  }
+  // `..` の踏み台封じは**必ず最後**に置く（会話ログの allow に追い越されないように）。
+  // read 表と同じ流儀。会話ログを開けたぶん `~/.codex/sessions/../auth.json` のように
+  // 隣の鍵へ回り込める経路が残っていた（回帰テストが検知。2026-08-24）。
+  rules['**/../**'] = 'deny';
   return rules;
 }
 
@@ -891,6 +1075,15 @@ module.exports = {
   SECRET_ENV_VARS,
   AGENT_LOCKED_KEYS,
   MONITOR_PLUGIN_FILE,
+  CONVERSATION_LOG_DIRS,
+  CONVERSATION_LOG_FILES,
+  OPENED_DIR_LOCKDOWN,
+  AGENT_SECRET_FILES,
+  SECRET_DIRS,
+  SECRET_FILES,
+  enforcedSecretReadDenyRules,
+  enforcedOpenedDirReadRules,
+  enforcedOpenedDirEditDenyRules,
   enforcedReadRules,
   enforcedEditRules,
   enforcedExternalDirectoryRules,
