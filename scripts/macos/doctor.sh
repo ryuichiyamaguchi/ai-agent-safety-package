@@ -444,7 +444,7 @@ if [ -f "$secret_status_js" ] && command -v node >/dev/null 2>&1; then
         elif [ "$_keep" = "KEEP" ]; then
           printf '\033[31mWARN secrets: %s が平文のまま残っています（%s / 権限 %s。パッケージ外で使われている可能性があるため自動削除はしません）\033[0m\n' "$_label" "$_file" "$_mode"
         else
-          printf '\033[31mWARN secrets: %s がまだ平文のままです（%s / 権限 %s）。「7_AIコーチのキーを登録」等で登録し直すと金庫へ移ります\033[0m\n' "$_label" "$_file" "$_mode"
+          printf '\033[31mWARN secrets: %s がまだ平文のままです（%s / 権限 %s）。スタートの「キーと金庫」→「3_AIコーチのキーを登録」等で登録し直すと金庫へ移ります\033[0m\n' "$_label" "$_file" "$_mode"
         fi
       done
       # world-readable が1件でもあれば FAIL 扱いにする（サブシェルを跨ぐので再判定）。
@@ -465,6 +465,46 @@ if [ -f "$secret_status_js" ] && command -v node >/dev/null 2>&1; then
       echo "INFO secrets: 詳しい記録 → $HOME/.ai-safety/logs/secret-migrate-events.jsonl"
     fi
   fi
+fi
+
+# --- 野良 d-claude 検出（v1.18.0: 退治ボタンを診断へ統合。検出と案内のみ・何も変更しない） ---
+# 正規判定は退治スクリプトと同じ思想: 解決先が <workspace>/.ai-safety/ 配下なら正規。
+# 見つかっても自動では動かさず、退避は .ai-safety/hooks/macos/野良d-claudeを退治.command に任せる
+# （あちらは「表示 → y/N 確認 → 退避」で、削除ではなくバックアップへの移動）。
+_rogue_dclaude=""
+_legit_dclaude_prefix="$workspace/.ai-safety/"
+_dclaude_dirs="$PATH"
+_npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+if [ -n "$_npm_prefix" ]; then
+  _dclaude_dirs="$_dclaude_dirs:$_npm_prefix/bin"
+fi
+for _extra in "$HOME/.npm-global/bin" "/usr/local/bin" "/opt/homebrew/bin" "$HOME/bin" "$HOME/.local/bin"; do
+  _dclaude_dirs="$_dclaude_dirs:$_extra"
+done
+_OLDIFS="$IFS"; IFS=":"
+for _dir in $_dclaude_dirs; do
+  { [ -n "$_dir" ] && [ -d "$_dir" ]; } || continue
+  _cand="$_dir/d-claude"
+  { [ -e "$_cand" ] || [ -L "$_cand" ]; } || continue
+  case "$_cand" in
+    "$_legit_dclaude_prefix"*) continue ;;
+  esac
+  case "$_rogue_dclaude" in
+    *"|$_cand|"*) ;;
+    *) _rogue_dclaude="${_rogue_dclaude}|$_cand|" ;;
+  esac
+done
+IFS="$_OLDIFS"
+if [ -n "$_rogue_dclaude" ]; then
+  printf '%s\n' "$_rogue_dclaude" | tr '|' '\n' | while IFS= read -r _f; do
+    [ -n "$_f" ] || continue
+    printf '\033[31mWARN d-claude: 正規ランチャー以外の d-claude が見つかりました: %s\033[0m\n' "$_f"
+  done
+  echo "INFO d-claude: 正規のもの以外は乗っ取りの可能性があります。退避（バックアップへ移動・確認つき）するには:"
+  echo "INFO d-claude:   bash \"$workspace/.ai-safety/hooks/macos/野良d-claudeを退治.command\" \"$workspace\""
+else
+  echo "PASS d-claude: 野良の d-claude はありません（正規ランチャー以外は見つかりませんでした）"
+  pass=$((pass + 1))
 fi
 
 echo "doctor summary: pass=$pass fail=$fail"

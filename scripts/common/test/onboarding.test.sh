@@ -37,14 +37,15 @@ grep -Fq 'powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows
 # 6) workspace 内ラッパー（.command）構文 + 相対 ws 解決
 #
 #    「自分の場所から親をたどる」($HERE/..) 解決が要るのは、作業フォルダ配下の
-#    ファイル（.ai-safety/... のガードやランチャー）を呼ぶラッパーだけ。
-#    npm でツールを入れるだけのラッパーのように作業フォルダの場所を知る必要が
-#    ないものは、この要件の対象外にする。
+#    ファイル（.ai-safety/... のガードやランチャー、workspace の docs/）を呼ぶ
+#    ラッパーだけ。Codex デスクトップアプリの起動のように作業フォルダの場所を
+#    知る必要がないものは、この要件の対象外にする。
 #    免除の条件は「作業フォルダを一切参照しないこと」で、$HERE を使って別の場所を
 #    組み立てているファイルは免除しない（免除の乱用防止）。
-for f in "$START_DIR/"*.command; do
+#    v1.18.0: サブフォルダ「キーと金庫」の .command も同じ規律で見る。
+for f in "$START_DIR/"*.command "$START_DIR/キーと金庫/"*.command; do
   bash -n "$f" || { note "FAIL syntax: $f"; fail=1; }
-  if grep -q '\.ai-safety' "$f"; then
+  if grep -qE '\.ai-safety|docs/' "$f"; then
     grep -q 'HERE/\.\.' "$f" || { note "FAIL: ws 解決(HERE/..)なし: $f"; fail=1; }
   else
     grep -q 'HERE' "$f" && { note "FAIL: 作業フォルダを参照しないのに \$HERE を組み立てている: $f"; fail=1; }
@@ -52,8 +53,14 @@ for f in "$START_DIR/"*.command; do
 done
 
 # 7) workspace 内ラッパー（.bat）相対解決 + ターゲット呼び出し
-for f in "$START_DIR/"*.bat; do
-  grep -q '%HERE%' "$f" || { note "FAIL: %HERE% なし: $f"; fail=1; }
+#    作業フォルダ（WORKSPACE）を使う .bat は %HERE% から相対で解決すること。
+#    作業フォルダを一切参照しない .bat（例: Codex デスクトップアプリの起動）は対象外。
+for f in "$START_DIR/"*.bat "$START_DIR/キーと金庫/"*.bat; do
+  if LC_ALL=C grep -q 'WORKSPACE' "$f"; then
+    grep -q '%HERE%' "$f" || { note "FAIL: %HERE% なし: $f"; fail=1; }
+  else
+    LC_ALL=C grep -q '%HERE%' "$f" && { note "FAIL: 作業フォルダを参照しないのに %HERE% を組み立てている: $f"; fail=1; }
+  fi
 done
 
 # 7b) オンボーディング入口の .bat は CP932 + 行頭 chcp 932 に固定
@@ -70,7 +77,7 @@ done
 #     行頭以外の chcp 65001 は対象外 (start で開く別ウィンドウ側を UTF-8 に
 #     切り替えるのは正当な用途のため)。
 cp932_probe="/tmp/onboarding-cp932.$$"
-for f in "$ROOT"/0_*.bat "$ROOT"/1_*.bat "$START_DIR/"*.bat; do
+for f in "$ROOT"/0_*.bat "$ROOT"/1_*.bat "$START_DIR/"*.bat "$START_DIR/キーと金庫/"*.bat; do
   [ -f "$f" ] || continue
   if ! iconv -f CP932 -t UTF-8 "$f" > "$cp932_probe" 2>/dev/null; then
     note "FAIL: CP932 ではない: $f"; fail=1
@@ -108,92 +115,106 @@ else
 fi
 rm -f "$win_installer_txt"
 
-# 9) 期待される番号ファイルが揃う（v1.17.1 番号再編後: 基本 1..11 と 上級1..15）
-#    v1.17.1: 「5_セーフOpenCodeを起動」を基本枠へ入れ、旧 5〜12 を 1 つずつ繰り下げた。
-#    これで AI 4 種（Codex / Claude / AntiGravity / OpenCode）が 2〜5 に並ぶ。
-for base in "1_AIをまとめて起動" "2_セーフCodexを起動" "3_セーフClaudeを起動" "4_セーフAntiGravityを起動" "5_セーフOpenCodeを起動" "6_見守りモニターを起動" "7_AIコーチのキーを登録" "8_安全パッケージを最新版に更新" "9_AIツールを最新版に更新" "10_困ったとき診断" "11_野良d-claudeを退治" "（上級）1_DeepSeekキーを登録" "（上級）2_DeepSeek-Claudeを起動" "（上級）3_モニターをコンソールで見る" "（上級）4_ステータスラインを入れる" "（上級）5_このPC全体に最低限の安全設定を入れる" "（上級）6_PC全体の安全設定を解除" "（上級）7_DeepSeekキーを削除" "（上級）8_Bufferのキーを登録" "（上級）9_プラグインの置き場を開く" "（上級）14_新しい作業フォルダを安全にする" "（上級）15_長時間おまかせモードで起動" "（上級）16_金庫に秘密をしまう" "（上級）17_金庫から秘密を取り出す" "（上級）18_金庫の秘密を消す"; do
+# 9) 期待される番号ファイルが揃う（v1.18.0 再編後: 直下 基本 1..9 + Windows 専用 10..12、
+#    サブフォルダ「キーと金庫」1..13）。
+#    v1.18.0: 個別のセーフ起動ボタンは「4_AIを起動する」（統合ランチャー）へ集約し、
+#    「（上級）」プレフィックスを全廃。キー・金庫系は「キーと金庫」へ移した。
+VAULT_DIR="$START_DIR/キーと金庫"
+for base in "1_安全パッケージを最新版にする" "2_AIツールをまとめて入れる" "3_じぶんに合うAIを選ぶ" "4_AIを起動する" "5_Codexデスクトップアプリを起動" "6_長時間おまかせモードで起動" "7_見守りモニターを起動" "8_使い方ガイドを開く" "9_困ったとき診断"; do
   [ -f "$START_DIR/$base.command" ] || { note "FAIL: $base.command がない"; fail=1; }
   [ -f "$START_DIR/$base.bat" ] || { note "FAIL: $base.bat がない"; fail=1; }
 done
-# Windows だけの追加ボタン（.command は無い）。番号の繰り下げに追従しているか。
-#   14 は v1.17.2 新設のアクセス権修復ボタン。Windows の ACL 固有の事故（install が
+for base in "1_DeepSeekキーを登録" "2_DeepSeekキーを削除" "3_AIコーチのキーを登録" "4_AIコーチのキーを削除" "5_Bufferのキーを登録" "6_Bufferのキーを削除" "7_金庫に秘密をしまう" "8_金庫から秘密を取り出す" "9_金庫の秘密を消す" "10_コピーした文章から秘密を伏せる" "11_伏せた文章を元に戻す" "12_PC全体に安全設定を入れる" "13_PC全体の安全設定を解除"; do
+  [ -f "$VAULT_DIR/$base.command" ] || { note "FAIL: キーと金庫/$base.command がない"; fail=1; }
+  [ -f "$VAULT_DIR/$base.bat" ] || { note "FAIL: キーと金庫/$base.bat がない"; fail=1; }
+done
+# Windows だけの追加ボタン（.command は無い）。
+#   12 は v1.17.2 新設のアクセス権修復ボタン。Windows の ACL 固有の事故（install が
 #   USERDOMAIN\USERNAME という解決できない名前に権限を与え、本人まで締め出す）への
 #   回復口なので mac 版は無い。
-for base in "12_PowerShellを開く" "13_作業フォルダを開く" "14_フォルダのアクセス権を直す"; do
+for base in "10_PowerShellを開く" "11_作業フォルダを開く" "12_フォルダのアクセス権を直す"; do
   [ -f "$START_DIR/$base.bat" ] || { note "FAIL: $base.bat がない"; fail=1; }
 done
-grep -q 'repair-permissions.ps1' "$START_DIR/14_フォルダのアクセス権を直す.bat" || { note "FAIL: 14 のボタンが repair-permissions.ps1 を呼ばない"; fail=1; }
-grep -Fq '14_フォルダのアクセス権を直す' "$HTML" || { note "FAIL: スタート.html に 14_フォルダのアクセス権を直す の案内がない"; fail=1; }
+grep -q 'repair-permissions.ps1' "$START_DIR/12_フォルダのアクセス権を直す.bat" || { note "FAIL: 12 のボタンが repair-permissions.ps1 を呼ばない"; fail=1; }
+grep -Fq '12_フォルダのアクセス権を直す' "$HTML" || { note "FAIL: スタート.html に 12_フォルダのアクセス権を直す の案内がない"; fail=1; }
 # 旧番号が残っていないこと（旧新併存で番号が重複すると受講者が迷う）。
-for old in "5_見守りモニターを起動" "6_AIコーチのキーを登録" "7_安全パッケージを最新版に更新" \
-           "8_AIツールを最新版に更新" "9_困ったとき診断" "10_野良d-claudeを退治" \
-           "11_PowerShellを開く" "12_作業フォルダを開く"; do
+for old in "1_AIをまとめて起動" "2_セーフCodexを起動" "3_セーフClaudeを起動" \
+           "4_セーフAntiGravityを起動" "5_セーフOpenCodeを起動" "9_AIツールを最新版に更新" \
+           "10_困ったとき診断" "11_野良d-claudeを退治" "（上級）2_DeepSeek-Claudeを起動" \
+           "（上級）15_長時間おまかせモードで起動" "（上級）16_金庫に秘密をしまう"; do
   for ext in command bat; do
     [ -f "$START_DIR/$old.$ext" ] && { note "FAIL: 旧番号のボタンが残っている: $old.$ext"; fail=1; }
   done
 done
 # install の旧名掃除リストに旧番号が入っているか（更新した受講者の手元で二重に残らないため）。
-for old in "5_見守りモニターを起動.command" "6_AIコーチのキーを登録.command" "7_安全パッケージを最新版に更新.command" \
-           "8_AIツールを最新版に更新.command" "9_困ったとき診断.command" "10_野良d-claudeを退治.command" \
-           "11_PowerShellを開く.bat" "12_作業フォルダを開く.bat"; do
+for old in "1_AIをまとめて起動.command" "2_セーフCodexを起動.command" "5_セーフOpenCodeを起動.command" \
+           "8_安全パッケージを最新版に更新.command" "9_AIツールを最新版に更新.command" "10_困ったとき診断.command" \
+           "11_野良d-claudeを退治.command" "12_PowerShellを開く.bat" "13_作業フォルダを開く.bat" \
+           "14_フォルダのアクセス権を直す.bat" "（上級）2_DeepSeek-Claudeを起動.command" \
+           "（上級）14_新しい作業フォルダを安全にする.command" "（上級）15_長時間おまかせモードで起動.command" \
+           "（上級）16_金庫に秘密をしまう.command" "（上級）17_金庫から秘密を取り出す.command" "（上級）18_金庫の秘密を消す.command"; do
   grep -Fq "$old" "$ROOT/scripts/macos/install.sh" || { note "FAIL: install.sh の旧名掃除リストに $old がない"; fail=1; }
   grep -Fq "$old" "$ROOT/scripts/windows/install.ps1" || { note "FAIL: install.ps1 の旧名掃除リストに $old がない"; fail=1; }
 done
 
-# 9a) セーフ OpenCode 単独ボタン（v1.17.1 新設）は既存の安全起動口 oc-safe を呼ぶ。
-grep -q 'oc-safe' "$START_DIR/5_セーフOpenCodeを起動.command" || { note "FAIL: 5_セーフOpenCode .command が oc-safe を呼ばない"; fail=1; }
-grep -q 'oc-safe.ps1' "$START_DIR/5_セーフOpenCodeを起動.bat" || { note "FAIL: 5_セーフOpenCode .bat が oc-safe.ps1 を呼ばない"; fail=1; }
-grep -Fq '5_セーフOpenCodeを起動' "$HTML" || { note "FAIL: スタート.html に 5_セーフOpenCodeを起動 の案内がない"; fail=1; }
+# 9a) OpenCode の起動導線は「4_AIを起動する」（統合ランチャー）に集約された。
+#     ボタンはメニューの正本（launch-integrated の menu モード）へ委譲し、
+#     メニューから OpenCode を standard で起動できること。
+grep -q 'menu standard' "$START_DIR/4_AIを起動する.command" || { note "FAIL: 4_AIを起動する .command が menu モードへ委譲しない"; fail=1; }
+LC_ALL=C grep -q -- '-Agent menu' "$START_DIR/4_AIを起動する.bat" || { note "FAIL: 4_AIを起動する .bat が menu モードへ委譲しない"; fail=1; }
+grep -q 'agent="opencode"; profile="standard"' "$ROOT/scripts/macos/launch-integrated.sh" || { note "FAIL: 統合ランチャーのメニューから OpenCode を起動できない"; fail=1; }
+grep -Fq '4_AIを起動する' "$HTML" || { note "FAIL: スタート.html に 4_AIを起動する の案内がない"; fail=1; }
 
-# 9b) PC 全体の安全設定（上級5）と その解除（上級6）が正しい wrapper を呼ぶ（4 エンジン対応）
-grep -q 'apply-global-guard.sh' "$START_DIR/（上級）5_このPC全体に最低限の安全設定を入れる.command" || { note "FAIL: 上級5 .command が apply-global-guard.sh を呼ばない"; fail=1; }
-grep -q 'apply-global-guard.ps1' "$START_DIR/（上級）5_このPC全体に最低限の安全設定を入れる.bat" || { note "FAIL: 上級5 .bat が apply-global-guard.ps1 を呼ばない"; fail=1; }
-grep -q 'uninstall-global-guard.sh' "$START_DIR/（上級）6_PC全体の安全設定を解除.command" || { note "FAIL: 上級6 .command が uninstall-global-guard.sh を呼ばない"; fail=1; }
-grep -q 'uninstall-global-guard.ps1' "$START_DIR/（上級）6_PC全体の安全設定を解除.bat" || { note "FAIL: 上級6 .bat が uninstall-global-guard.ps1 を呼ばない"; fail=1; }
-grep -Fq '（上級）5' "$HTML" || { note "FAIL: スタート.html に 上級5 の案内がない"; fail=1; }
-grep -Fq '（上級）6' "$HTML" || { note "FAIL: スタート.html に 上級6 の案内がない"; fail=1; }
+# 9b) PC 全体の安全設定（キーと金庫 12）と その解除（キーと金庫 13）が正しい wrapper を呼ぶ（4 エンジン対応）
+grep -q 'apply-global-guard.sh' "$VAULT_DIR/12_PC全体に安全設定を入れる.command" || { note "FAIL: キーと金庫12 .command が apply-global-guard.sh を呼ばない"; fail=1; }
+grep -q 'apply-global-guard.ps1' "$VAULT_DIR/12_PC全体に安全設定を入れる.bat" || { note "FAIL: キーと金庫12 .bat が apply-global-guard.ps1 を呼ばない"; fail=1; }
+grep -q 'uninstall-global-guard.sh' "$VAULT_DIR/13_PC全体の安全設定を解除.command" || { note "FAIL: キーと金庫13 .command が uninstall-global-guard.sh を呼ばない"; fail=1; }
+grep -q 'uninstall-global-guard.ps1' "$VAULT_DIR/13_PC全体の安全設定を解除.bat" || { note "FAIL: キーと金庫13 .bat が uninstall-global-guard.ps1 を呼ばない"; fail=1; }
+grep -Fq 'キーと金庫/12_PC全体に安全設定を入れる' "$HTML" || { note "FAIL: スタート.html に キーと金庫12 の案内がない"; fail=1; }
+grep -Fq 'キーと金庫/13_PC全体の安全設定を解除' "$HTML" || { note "FAIL: スタート.html に キーと金庫13 の案内がない"; fail=1; }
 
-# 9c) 新しい作業フォルダを安全にする（上級14）が protect-folder を呼ぶ
-grep -q 'protect-folder.sh' "$START_DIR/（上級）14_新しい作業フォルダを安全にする.command" || { note "FAIL: 上級14 .command が protect-folder.sh を呼ばない"; fail=1; }
-grep -q 'protect-folder.ps1' "$START_DIR/（上級）14_新しい作業フォルダを安全にする.bat" || { note "FAIL: 上級14 .bat が protect-folder.ps1 を呼ばない"; fail=1; }
-grep -Fq '（上級）14' "$HTML" || { note "FAIL: スタート.html に 上級14 の案内がない"; fail=1; }
+# 9c) 「新しい作業フォルダを安全にする」ボタンは v1.18.0 で廃止（スタートの絞り込み）。
+#     旧ボタンが配布物に残っておらず、既存ワークスペースからも掃除されること。
+for ext in command bat; do
+  [ -f "$START_DIR/（上級）14_新しい作業フォルダを安全にする.$ext" ] && { note "FAIL: 廃止した 上級14 ボタンが残っている (.$ext)"; fail=1; }
+done
 
-# 9c-2) 長時間おまかせモード（上級15）。v1.17.1 で 4 エンジン × 2 OS に対応した。
+# 9c-2) 長時間おまかせモード（6 番）。v1.17.1 で 4 エンジン × 2 OS に対応した。
 #       壁（OS サンドボックス）がある環境では従来どおり、壁が無い環境では一度だけ確認を取る。
 #       「Windows では起動しない」旧仕様に戻っていないこともここで見る。
-grep -q 'launch-longrun.sh' "$START_DIR/（上級）15_長時間おまかせモードで起動.command" || { note "FAIL: 上級15 .command が launch-longrun.sh を呼ばない"; fail=1; }
-grep -q 'launch-longrun.ps1' "$START_DIR/（上級）15_長時間おまかせモードで起動.bat" || { note "FAIL: 上級15 .bat が launch-longrun.ps1 を呼ばない"; fail=1; }
-grep -Fq '（上級）15' "$HTML" || { note "FAIL: スタート.html に 上級15 の案内がない"; fail=1; }
+grep -q 'launch-longrun.sh' "$START_DIR/6_長時間おまかせモードで起動.command" || { note "FAIL: 6 番 .command が launch-longrun.sh を呼ばない"; fail=1; }
+grep -q 'launch-longrun.ps1' "$START_DIR/6_長時間おまかせモードで起動.bat" || { note "FAIL: 6 番 .bat が launch-longrun.ps1 を呼ばない"; fail=1; }
+grep -Fq '6_長時間おまかせモード' "$HTML" || { note "FAIL: スタート.html に 6_長時間おまかせモード の案内がない"; fail=1; }
 
-# 9c-3) 汎用の金庫ボタン（上級16 しまう / 17 取り出す / 18 消す。v1.17.2 新設）。
+# 9c-3) 汎用の金庫ボタン（キーと金庫 7 しまう / 8 取り出す / 9 消す）。
 #       固定枠（AIコーチ・Buffer 等）とは別の「自由枠」で、受講者が名前を付けて
 #       任意の文字列をしまう。3 本とも secret-store.js の自由枠 CLI を呼ぶこと。
-grep -q 'secret-store.js' "$START_DIR/（上級）16_金庫に秘密をしまう.command" || { note "FAIL: 上級16 .command が secret-store.js を呼ばない"; fail=1; }
-grep -q -- '--user-set' "$START_DIR/（上級）16_金庫に秘密をしまう.command" || { note "FAIL: 上級16 .command が --user-set を呼ばない"; fail=1; }
-grep -q -- '--user-list' "$START_DIR/（上級）17_金庫から秘密を取り出す.command" || { note "FAIL: 上級17 .command が --user-list を呼ばない"; fail=1; }
-grep -q -- '--user-copy' "$START_DIR/（上級）17_金庫から秘密を取り出す.command" || { note "FAIL: 上級17 .command が --user-copy を呼ばない"; fail=1; }
-grep -q -- '--user-remove' "$START_DIR/（上級）18_金庫の秘密を消す.command" || { note "FAIL: 上級18 .command が --user-remove を呼ばない"; fail=1; }
-# 値を画面に出さない（16 は read -s、17 はクリップボード経由）ことを固定する。
-grep -q 'read -r -s' "$START_DIR/（上級）16_金庫に秘密をしまう.command" || { note "FAIL: 上級16 .command が中身をエコーしない入力になっていない"; fail=1; }
-grep -q 'AsSecureString' "$START_DIR/（上級）16_金庫に秘密をしまう.bat" || { note "FAIL: 上級16 .bat が中身をエコーしない入力になっていない"; fail=1; }
+grep -q 'secret-store.js' "$VAULT_DIR/7_金庫に秘密をしまう.command" || { note "FAIL: 金庫7 .command が secret-store.js を呼ばない"; fail=1; }
+grep -q -- '--user-set' "$VAULT_DIR/7_金庫に秘密をしまう.command" || { note "FAIL: 金庫7 .command が --user-set を呼ばない"; fail=1; }
+grep -q -- '--user-list' "$VAULT_DIR/8_金庫から秘密を取り出す.command" || { note "FAIL: 金庫8 .command が --user-list を呼ばない"; fail=1; }
+grep -q -- '--user-copy' "$VAULT_DIR/8_金庫から秘密を取り出す.command" || { note "FAIL: 金庫8 .command が --user-copy を呼ばない"; fail=1; }
+grep -q -- '--user-remove' "$VAULT_DIR/9_金庫の秘密を消す.command" || { note "FAIL: 金庫9 .command が --user-remove を呼ばない"; fail=1; }
+# 値を画面に出さない（7 は read -s、8 はクリップボード経由）ことを固定する。
+grep -q 'read -r -s' "$VAULT_DIR/7_金庫に秘密をしまう.command" || { note "FAIL: 金庫7 .command が中身をエコーしない入力になっていない"; fail=1; }
+grep -q 'AsSecureString' "$VAULT_DIR/7_金庫に秘密をしまう.bat" || { note "FAIL: 金庫7 .bat が中身をエコーしない入力になっていない"; fail=1; }
 # .bat 側も同じ CLI を呼ぶ（CP932 なので grep は復号してから）。
-for _n in 16 17 18; do
+for _n in 7 8 9; do
   case "$_n" in
-    16) _bat="（上級）16_金庫に秘密をしまう.bat"; _need='--user-set' ;;
-    17) _bat="（上級）17_金庫から秘密を取り出す.bat"; _need='--user-copy' ;;
-    18) _bat="（上級）18_金庫の秘密を消す.bat"; _need='--user-remove' ;;
+    7) _bat="7_金庫に秘密をしまう.bat"; _need='--user-set' ;;
+    8) _bat="8_金庫から秘密を取り出す.bat"; _need='--user-copy' ;;
+    9) _bat="9_金庫の秘密を消す.bat"; _need='--user-remove' ;;
   esac
   _tmp="$(mktemp)"
-  if iconv -f CP932 -t UTF-8 "$START_DIR/$_bat" > "$_tmp" 2>/dev/null; then
-    grep -q -- "$_need" "$_tmp" || { note "FAIL: 上級$_n .bat が $_need を呼ばない"; fail=1; }
+  if iconv -f CP932 -t UTF-8 "$VAULT_DIR/$_bat" > "$_tmp" 2>/dev/null; then
+    grep -q -- "$_need" "$_tmp" || { note "FAIL: 金庫$_n .bat が $_need を呼ばない"; fail=1; }
   else
-    note "FAIL: 上級$_n .bat を CP932 として読めない"; fail=1
+    note "FAIL: 金庫$_n .bat を CP932 として読めない"; fail=1
   fi
   rm -f "$_tmp"
 done
-grep -Fq '（上級）16' "$HTML" || { note "FAIL: スタート.html に 上級16 の案内がない"; fail=1; }
-grep -Fq '（上級）17' "$HTML" || { note "FAIL: スタート.html に 上級17 の案内がない"; fail=1; }
-grep -Fq '（上級）18' "$HTML" || { note "FAIL: スタート.html に 上級18 の案内がない"; fail=1; }
+grep -Fq 'キーと金庫/7_金庫に秘密をしまう' "$HTML" || { note "FAIL: スタート.html に 金庫7 の案内がない"; fail=1; }
+grep -Fq 'キーと金庫/8_金庫から秘密を取り出す' "$HTML" || { note "FAIL: スタート.html に 金庫8 の案内がない"; fail=1; }
+grep -Fq 'キーと金庫/9_金庫の秘密を消す' "$HTML" || { note "FAIL: スタート.html に 金庫9 の案内がない"; fail=1; }
 for _need in 'sandbox-exec' 'sandbox.enabled' 'disableBypassPermissionsMode' 'p.ask = \[\]' 'mktemp -d'; do
   grep -q "$_need" "$ROOT/scripts/macos/launch-longrun.sh" || { note "FAIL: 長時間おまかせモードに $_need の守りがない"; fail=1; }
 done

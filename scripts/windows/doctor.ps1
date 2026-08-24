@@ -452,7 +452,7 @@ if (Test-Path -LiteralPath $secretDir -PathType Container) {
         #    「SeSecurityPrivilege がありません」）。成功したのは icacls /reset だけ。
         #    PowerShell では %USERPROFILE% が展開されないので「cmd で」と必ず書く。
         Add-Result "secrets: 金庫フォルダのアクセス権" $false ($secretDirDetail +
-            " → スタート\14_フォルダのアクセス権を直す を実行してください（キーの作り直しは不要）。" +
+            " → スタート\12_フォルダのアクセス権を直す を実行してください（キーの作り直しは不要）。" +
             " 手作業で直すなら、コマンドプロンプト（cmd）で次の 1 行:" +
             ' icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q' +
             "（PowerShell では %USERPROFILE% が展開されないため動きません）。" +

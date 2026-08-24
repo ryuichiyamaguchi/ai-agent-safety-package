@@ -6,6 +6,11 @@
     [switch]$LongRun,
     # 前回のセッションを開き直す（OpenCode の --continue）。
     [switch]$Resume,
+    # モデル自由選択モード（無料モデルあり・2026-08-24 依頼者裁定）。DeepSeek キーも送信検査
+    # Gateway も使わず、OpenCode 標準のモデル選択に任せる。permission の表（deny 床・edit 表・
+    # read 表・external_directory・プラグイン床）は DeepSeek 版と同一
+    # （opencode-config.js --free が同じ表から生成する）。
+    [switch]$Free,
     # 作業フォルダ。OpenCode は「起動したフォルダ」が作業対象になり、動き出したあとで
     # cd しても移らない (本体仕様)。プロジェクトごとに分けて作業できるよう、
     # 起動するフォルダをここで指定する。既定はワークスペース直下。
@@ -76,16 +81,25 @@ if (-not (Test-Path -LiteralPath $configJs -PathType Leaf)) { throw "OpenCode �
 if (-not (Test-Path -LiteralPath $monitorPlugin -PathType Leaf)) { throw "OpenCode承認モニターが見つかりません: $monitorPlugin" }
 
 if ($env:AI_SAFE_DRY_RUN -eq '1') {
-    Write-Output 'OpenCode + DeepSeek dry-run'
-    Write-Output "  workspace: $Workspace"
-    Write-Output "  project:   $Project"
-    if ($env:DS_GATEWAY_PORT) {
-        Write-Output "  gateway:   http://127.0.0.1:$port/v1 (mandatory)"
+    if ($Free) {
+        Write-Output 'OpenCode free-model dry-run'
+        Write-Output "  workspace: $Workspace"
+        Write-Output "  project:   $Project"
+        Write-Output '  gateway:   none (-Free / 送信検査 Gateway を使いません)'
+        Write-Output '  config:    OPENCODE_CONFIG_CONTENT'
+        Write-Output '  model:     free (OpenCode のモデル一覧から自分で選択)'
     } else {
-        Write-Output "  gateway:   http://127.0.0.1:8788/v1 (mandatory / 使用中なら 8789-8797 から自動選択)"
+        Write-Output 'OpenCode + DeepSeek dry-run'
+        Write-Output "  workspace: $Workspace"
+        Write-Output "  project:   $Project"
+        if ($env:DS_GATEWAY_PORT) {
+            Write-Output "  gateway:   http://127.0.0.1:$port/v1 (mandatory)"
+        } else {
+            Write-Output "  gateway:   http://127.0.0.1:8788/v1 (mandatory / 使用中なら 8789-8797 から自動選択)"
+        }
+        Write-Output '  config:    OPENCODE_CONFIG_CONTENT'
+        Write-Output '  model:     DeepSeek V4 Flash / small: V4 Flash'
     }
-    Write-Output '  config:    OPENCODE_CONFIG_CONTENT'
-    Write-Output '  model:     DeepSeek V4 Flash / small: V4 Flash'
     Write-Output ('  websearch: ' + $(if ($WebSearch) { 'opt-in (approval required)' } else { 'off' }))
     Write-Output ('  session:   ' + $(if ($Resume) { 'continue last' } else { 'new' }))
     exit 0
@@ -145,9 +159,13 @@ if (-not $openCode) { throw 'OpenCode が見つかりません。先に OpenCode
 # 実キーはここで一度だけ解決する (環境変数 → 金庫(DPAPI) → 旧平文)。金庫に移したあとは
 # 旧平文が消えるので、ファイルの有無で判定してはいけない。
 # 解決できなければ fail-closed (鍵なしで gateway を立てると素通しの中継になる)。
-$dsKey = Read-AiSafeSecret -DpapiName 'deepseek.dpapi' -EnvName 'DEEPSEEK_API_KEY' -LegacyFile $keyFile
-if (-not $dsKey) {
-    throw 'DeepSeek APIキーが未登録です。先に「DeepSeekキーを登録」を実行してください。'
+# -Free (モデル自由選択) では DeepSeek キーも Gateway も使わないので、未登録でも止めない。
+$dsKey = ''
+if (-not $Free) {
+    $dsKey = Read-AiSafeSecret -DpapiName 'deepseek.dpapi' -EnvName 'DEEPSEEK_API_KEY' -LegacyFile $keyFile
+    if (-not $dsKey) {
+        throw 'DeepSeek APIキーが未登録です。先に「DeepSeekキーを登録」を実行してください。'
+    }
 }
 
 $openCodeVersion = Invoke-NativeQuiet -File $openCode -Arguments @('--version')
@@ -206,8 +224,12 @@ function Test-GatewayReusable {
 # OpenCode を 2 枚開いたり d-claude と併用したりすると、後発が先発の gateway を殺すため、
 # 先に開いていた窓だけが古い合言葉のまま取り残されて全リクエストが 401 になっていた。
 # コマンドライン引数には載せない (プロセス一覧に出るため)。標準出力で受け取る。
-$gatewayToken = (& $node.Source $gatewayTokenJs '--ensure' '--gateway' $gatewayJs | Out-String).Trim()
-if (-not $gatewayToken) { throw '送信検査 Gateway の合言葉を用意できませんでした (fail-closed)。' }
+# -Free では Gateway を使わないので合言葉も用意しない。
+$gatewayToken = ''
+if (-not $Free) {
+    $gatewayToken = (& $node.Source $gatewayTokenJs '--ensure' '--gateway' $gatewayJs | Out-String).Trim()
+    if (-not $gatewayToken) { throw '送信検査 Gateway の合言葉を用意できませんでした (fail-closed)。' }
+}
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $gatewayOut = Join-Path $logDir 'opencode-deepseek-gateway.log'
@@ -224,7 +246,10 @@ if ($env:DS_GATEWAY_PORT) { $portCandidates = @($env:DS_GATEWAY_PORT) } else { $
 $gw = $null
 $gatewayReused = $false
 $port = $null
-$recordedPort = (& $node.Source $gatewayTokenJs '--recorded-port' | Out-String).Trim()
+$recordedPort = ''
+if (-not $Free) {
+    $recordedPort = (& $node.Source $gatewayTokenJs '--recorded-port' | Out-String).Trim()
+}
 if ($recordedPort -and (Test-GatewayReusable -Port $recordedPort -GatewayJs $gatewayJs -GatewayTokenJs $gatewayTokenJs -NodePath $node.Source)) {
     $port = $recordedPort
     $gatewayReused = $true
@@ -232,7 +257,8 @@ if ($recordedPort -and (Test-GatewayReusable -Port $recordedPort -GatewayJs $gat
 
 # 再利用できないときは、候補ポートを順に試して自分で立てる。
 # ポートを他に取られていれば gateway は即座に終了するので、次の候補へ進む。
-if (-not $gatewayReused) {
+# -Free では gateway を一切立てない (DeepSeek へ送る通信そのものが無い)。
+if ((-not $Free) -and (-not $gatewayReused)) {
     # 更新直後は「記録されたポートで、中身が古い自分たちの gateway」が動いている。候補ポートの
     # 範囲外 (DS_GATEWAY_PORT の明示指定など) だと下のループでは止まらず、そのポートを掴んだまま
     # 残ってしまうので、記録されたポートは先に必ず止める。
@@ -294,7 +320,7 @@ if (-not $gatewayReused) {
 }
 
 try {
-    if (-not $port) {
+    if ((-not $Free) -and (-not $port)) {
         # 原因の実物 (EADDRINUSE 等) を画面にも出す。ログを開かないと分からない状態にしない。
         $hint = ''
         try {
@@ -313,7 +339,7 @@ try {
     }
     if ($gatewayReused) {
         Write-Host "稼働中の送信検査 Gateway をそのまま使います (127.0.0.1:$port)。"
-    } elseif ("$port" -ne '8788') {
+    } elseif ((-not $Free) -and ("$port" -ne '8788')) {
         Write-Host "ポート 8788 は他のプログラムが使っていたため、送信検査 Gateway は 127.0.0.1:$port で動かします。"
     }
 
@@ -330,7 +356,7 @@ try {
     # (OpenCode の環境からは秘密の環境変数を消すので、環境変数だけでは MCP に届かないため)。
     $coachRegistered = [bool](Read-AiSafeSecret -DpapiName 'gemini.dpapi' -EnvName '' -LegacyFile $coachKeyFile)
     if (($env:GEMINI_API_KEY -or $env:GOOGLE_API_KEY) -and -not $coachRegistered) {
-        Write-Warning '環境変数の Gemini キーは OpenCode へ渡しません (AI から見えてしまうため)。検索と画像読み取りを使うときは「7_AIコーチのキーを登録」で登録してください。'
+        Write-Warning '環境変数の Gemini キーは OpenCode へ渡しません (AI から見えてしまうため)。検索と画像読み取りを使うときは「キーと金庫\3_AIコーチのキーを登録」で登録してください。'
     }
     foreach ($secretName in $secretEnvNames) {
         Remove-Item -LiteralPath "Env:\$secretName" -ErrorAction SilentlyContinue
@@ -574,7 +600,12 @@ try {
         }
     }
 
-    $configArgs = @($configJs, '--port', $port, '--monitor-plugin', $monitorPlugin)
+    # -Free ではポートも合言葉も要らない (provider を注入しない設定を生成する)。
+    if ($Free) {
+        $configArgs = @($configJs, '--free', '--monitor-plugin', $monitorPlugin)
+    } else {
+        $configArgs = @($configJs, '--port', $port, '--monitor-plugin', $monitorPlugin)
+    }
     if ($LongRun) { $configArgs += '--longrun' }
     if ($WebSearch) {
         $env:OPENCODE_ENABLE_EXA = '1'
@@ -629,7 +660,8 @@ try {
         }
         # 解決済み設定には provider の apiKey (= gateway の合言葉) が含まれる。検証は
         # permission / share / agent しか見ないので、ディスクへ書く前に伏せる。
-        $resolvedSafe = $resolved.Replace($gatewayToken, 'REDACTED')
+        # (-Free では合言葉が無い。空文字の Replace は .NET が例外を投げるので飛ばす。)
+        $resolvedSafe = if ($gatewayToken) { $resolved.Replace($gatewayToken, 'REDACTED') } else { $resolved }
         # リモート MCP (Buffer 等) の鍵も Authorization ヘッダとして入るので、同じく伏せる。
         $remoteKeyFile = Join-Path $env:USERPROFILE '.ai-safety\buffer-api-key.txt'
         $remoteKey = Read-AiSafeSecret -DpapiName 'buffer.dpapi' -EnvName '' -LegacyFile $remoteKeyFile
@@ -659,8 +691,16 @@ try {
         Remove-Item -LiteralPath $readyMarker -Force -ErrorAction SilentlyContinue
         $watchdog = Start-Process -FilePath $node.Source -ArgumentList @($monitorPlugin, '--watchdog', '--timeout-ms', '30000') -PassThru -WindowStyle Hidden
 
-        Set-Content -NoNewline -Encoding ascii -LiteralPath $coachMarker -Value 'opencode-deepseek'
-        Write-Host '送信検査（伏せる人）: 有効 / モデル: DeepSeek V4 Flash / 補助: V4 Flash'
+        # coach マーカーの値はモニターが「本文が DeepSeek へ流れる」バナーの判定に使う。
+        # -Free では DeepSeek へは流れない (選んだモデルの提供元へ直接流れる) ので別の値にする。
+        if ($Free) {
+            Set-Content -NoNewline -Encoding ascii -LiteralPath $coachMarker -Value 'opencode-free'
+            Write-Host '送信検査（伏せる人）: なし / モデル: OpenCode の一覧から自分で選択（無料モデルあり）'
+            Write-Host '会話の内容は選んだモデルの提供元へ直接送信されます（マスキングは掛かりません）。'
+        } else {
+            Set-Content -NoNewline -Encoding ascii -LiteralPath $coachMarker -Value 'opencode-deepseek'
+            Write-Host '送信検査（伏せる人）: 有効 / モデル: DeepSeek V4 Flash / 補助: V4 Flash'
+        }
         Write-Host ('変更操作は確認、外部フォルダは禁止、Web検索は' + $(if ($WebSearch) { '許可時のみ' } else { '無効' }) + 'です。')
         Write-Host '危険なコマンド（まとめて削除・鍵の読み出し・ネットから拾った実行）は確認なしで止まります。'
 
@@ -699,7 +739,7 @@ try {
     # coach マーカーは d-claude と OpenCode が同じパスを共有する。並行起動時に片方の終了で
     # もう片方のバナーが消えないよう、「自分が書いた値のままのときだけ」消す。
     try {
-        if ((Get-Content -LiteralPath $coachMarker -Raw -ErrorAction Stop).Trim() -eq 'opencode-deepseek') {
+        if ((Get-Content -LiteralPath $coachMarker -Raw -ErrorAction Stop).Trim() -in @('opencode-deepseek', 'opencode-free')) {
             Remove-Item -LiteralPath $coachMarker -Force -ErrorAction SilentlyContinue
         }
     } catch {}

@@ -32,7 +32,7 @@ const MAX_RESPONSE_BYTES = 1 << 20; // 1MiB 上限（応答肥大化対策）
 const NO_KEY_MSG =
   'Gemini API キーが未設定です。AIコーチを使うには、無料キーの登録が必要です（初回だけ）。' +
   'モニター画面の「🔑 キーを登録／変更する」から、Google AI Studio (https://aistudio.google.com/apikey) で' +
-  '作ったキーを貼り付けて登録してください（「7_AIコーチのキーを登録」でも可。ファイル「' + KEY_FILE + '」／環境変数 GEMINI_API_KEY でも可）。登録後はすぐ使えます。';
+  '作ったキーを貼り付けて登録してください（「キーと金庫/3_AIコーチのキーを登録」でも可。ファイル「' + KEY_FILE + '」／環境変数 GEMINI_API_KEY でも可）。登録後はすぐ使えます。';
 const BAD_KEY_MSG = 'Gemini API キーが無効でした（認証エラー）。AI Studio でキーを取り直して登録し直してください。';
 const RATE_MSG = 'いま無料枠の上限に達しているようです（少し待つと戻ります）。下の「自動の解説」も参考にしてください。';
 const MODEL_MSG = 'AI モデルが見つかりませんでした（モデル名の指定を確認してください）。';
@@ -60,7 +60,7 @@ function resolveApiKey() {
     try {
       process.stderr.write(
         `\x1b[33m[警告] Gemini のキーがまだ平文のまま置かれています: ${r.legacyPath}\n` +
-        '        「10_困ったとき診断」を実行すると、金庫への入れ直し方を案内します。\x1b[0m\n');
+        '        「9_困ったとき診断」を実行すると、金庫への入れ直し方を案内します。\x1b[0m\n');
     } catch { /* stderr が使えない環境でも本体は動かす */ }
   }
   return r.value;

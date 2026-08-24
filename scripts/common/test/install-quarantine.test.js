@@ -33,7 +33,7 @@ test('install は「更新のたびに検疫が戻る」を起こさない', { s
   const first = spawnSync('bash', [INSTALL_SH, workspace], { env, encoding: 'utf8' });
   assert.strictEqual(first.status, 0, `install(1回目) が失敗: ${first.stdout}\n${first.stderr}`);
 
-  const button = path.join(workspace, 'スタート', '1_AIをまとめて起動.command');
+  const button = path.join(workspace, 'スタート', '4_AIを起動する.command');
   const hook = path.join(workspace, '.ai-safety', 'hooks', 'macos', 'doctor.sh');
   assert.ok(fs.existsSync(button), 'スタートのボタンが配置されること');
   assert.ok(fs.existsSync(hook), 'ガード本体が配置されること');
@@ -45,7 +45,7 @@ test('install は「更新のたびに検疫が戻る」を起こさない', { s
     assert.ok(hasQuarantine(f), `前提として検疫が付いていること: ${f}`);
   }
 
-  // 「8_安全パッケージを最新版に更新」に相当する再インストール。
+  // 「1_安全パッケージを最新版にする」に相当する再インストール。
   const second = spawnSync('bash', [INSTALL_SH, workspace], { env, encoding: 'utf8' });
   assert.strictEqual(second.status, 0, `install(2回目) が失敗: ${second.stdout}\n${second.stderr}`);
 

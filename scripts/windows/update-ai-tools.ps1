@@ -75,7 +75,7 @@ function Get-ToolVersion($cmdName) {
 
 function Show-FailHint($name) {
     Line ("【失敗】" + $name + " を更新できませんでした。よくある原因: ①ネット接続 ②npm が見つからない（スタート.html の Step 0 をやり直す）。")
-    Line " もう一度このボタンを押して直らなければ、10_困ったとき診断 を実行してください。"
+    Line " もう一度このボタンを押して直らなければ、9_困ったとき診断 を実行してください。"
 }
 
 function Update-Tool($name, $cmdName, $pkg) {

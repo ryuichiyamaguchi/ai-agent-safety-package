@@ -333,8 +333,10 @@ const AGENT_SECRET_FILES = [
 
 // 「読まれたら困る」秘密の置き場（フォルダ単位）。policy/safety-policy.json の
 // protectedPathRegex と同じ集合を read ツールの表でも閉じる。v1.17.3 までは
-// external_directory: '*' deny が結果的に止めていたが、ホーム配下を ask に緩めたので
+// external_directory: '*' deny が結果的に止めていたが、ホーム配下を緩めた
+// （v1.17.3 で ask → 2026-08-24 に読み取り全体開放で allow）ので
 // read 表の側にも明示的な deny を置く（緩めた分だけ、床を明示的に敷き直す）。
+// external_directory が素通しになった今、read ツール経路の秘密はこの表が**唯一の床**。
 const SECRET_DIRS = [
   `${DOT}ssh`,
   `${DOT}aws`,
@@ -479,39 +481,43 @@ function enforcedAgentConfigDenyRules() {
 
 // external_directory（作業フォルダの外へのアクセス）の許可表（SSOT）。
 //
-// v1.16 までは丸ごと 'deny' だった。v1.17 で「PC 全体に最低限の安全設定を入れる」「新しい
-// 作業フォルダを安全にする」を入れ、『作業フォルダの中だけで使う』前提が外れたため、
-// 受講者が自分の道具（スキル・コマンド）を増やすための置き場だけを開ける
-// （2026-08-21 の受講生クレーム: グローバルのスキルを入れられない）。
-//
-// ⚠️ '*': 'deny' を先頭に置くこと。OpenCode の権限評価は「最後に一致したルールが勝つ」ので、
-// catch-all を後ろに置くと開けた置き場ごと閉じてしまう。
-// ⚠️ 開けるのは『置き場』だけ。設定そのもの（~/.claude/settings.json ・ ~/.codex/config.toml ・
-// ~/.gemini/settings.json ・ ~/.config/opencode/opencode.json(c)）はこの表に含めない。
-// ⚠️ ~/.config/opencode/plugin/ は意図的に開けない。opencode のプラグインは opencode 本体の
-// プロセス内で動く JS で、決定的 deny 床（opencode-bouncer-monitor.mjs）そのものを無効化
-// できるため、『置き場』ではなく『設定』側に分類する。各 CLI の agents/ も同様（エージェント
-// 定義はツール権限の上書きを持ち込める。AGENT_LOCKED_KEYS の説明を参照）。
+// v1.16 までは丸ごと 'deny'。v1.17 で道具の置き場だけ allow、v1.17.3 で会話ログ allow ＋
+// ホーム配下 ask。**2026-08-24（依頼者承認済み設計）: catch-all を 'allow' にし、この層を
+// 「素通しの関門」へ変えた。** 読み取りはホームを含む PC 全体を開放し、書き込みだけ確認制に
+// するのが承認済み設計だが、OpenCode の external_directory は **read と write を区別できない
+// 単一の関門**である（1.18.9 実測: read ツールも edit/write ツールも同じ
+// Tool.assertExternalDirectory を通り、照合対象はどちらも path.join(dirname(filepath), '*')。
+// 「読みは allow・書きは ask」をこの表 1 枚で書く構文は存在しない）。
+// そこで区別は**後段のツール別の表**で行う:
+//   ・読み取り … read 表（enforcedReadRules: '*': allow ＋ 秘密の deny 床）。1.18.9 実測で
+//     read ツールは external_directory の後に必ず read 権限も assert する（ReadTool.execute:
+//     assert(external) → assert({action:"read"})）ので、外の秘密はこれまでどおり deny で止まる。
+//   ・書き込み … edit 表（enforcedEditRules: 通常モードは '*': ask ＋ 設定/.ai-safety の
+//     deny 床）が同様に external の後で assert される。つまり通常モードでは
+//     「ワークスペース外への書き込み＝確認カード（ask）」が維持される。
+//   ・シェル経由 … opencode-bouncer-monitor.mjs の決定的 deny 床
+//     （redirectProtectedPathRegex / protectedPathRegex / 秘密パターン）は不変。
+// ⚠️ longrun の代償（読み取り開放を longrun でも効かせるための構造的トレードオフ）:
+//   longrun では edit 表の '*' が allow なので、外の書き込みも確認なしで通る
+//   （v1.17.3 までは '~/**': ask がここで止めていたが、ask のままだと無人のため
+//   読み取りもそこで固まる）。ただし deny 床は 1 本も外れない: edit 表の
+//   .ai-safety / 各 CLI 設定 / ~/.codex 直下の deny、プラグイン床の
+//   redirectProtectedPathRegex（.ssh / .aws / .config / .claude / .codex / .gemini /
+//   シェル初期化ファイル / LaunchAgents / システム領域など）、生成内容の秘密パターン検査。
+// ⚠️ catch-all は '*' と '**' の **2 本セット**で先頭に置く（OpenCode の権限評価は
+//   「最後に一致したルールが勝つ」。deny を後ろに置く並びを保つため）。glob の `*` は
+//   `/` をまたがないため、'/Users/x/Documents/*' のようなスラッシュ入りの照合対象には
+//   '**' でないと当たらない（当たらなければ evaluate の既定 = ask に落ちて、読み取り開放が
+//   効かない）。'*' 単体はスラッシュ無しの照合対象向けの保険として残す。
+// ⚠️ 下の個別 allow（道具の置き場・会話ログ・~/.codex/*）は catch-all に包含されるが、
+//   「どこを意図的に開けたか」の SSOT 記録と、将来 catch-all を絞り直すときに開けた場所が
+//   巻き添えで閉じないための保険として残す。消さないこと。
+// ⚠️ ~/.config/opencode/plugin/ と各 CLI の agents/ は**書き込み側**で引き続き開けない
+//   （edit 表・toolboxWritablePathRegex・guard の管轄。AGENT_LOCKED_KEYS の説明を参照）。
 // ⚠️ 免除の SSOT は policy/safety-policy.json の toolboxWritablePathRegex。ここを増やすときは
-// そちらと mac / Windows のガードも必ず揃えること。
-//
-// 2026-08-21 追補（読み取り範囲の緩和・山口さん裁定「一つ目をメインに、二つ目も確認付きで」）:
-//   ・会話ログの置き場（CONVERSATION_LOG_DIRS）は allow＝確認なしで読める。
-//     「過去のやりとりを振り返る」は卒業後にこそ有用な使い方で、置き場が作業フォルダの
-//     外にあるという一点だけで塞がっていた。
-//   ・それ以外のホーム配下（`~/**`）は deny → **ask** に緩める。確認カードに「はい」と
-//     答えれば読める。v1.17.3 までは '*': 'deny' 1 本で、ホームのメモ 1 枚すら開けなかった。
-//   ・秘密の実体（~/.ssh ・ ~/.aws ・ ~/.ai-safety ・ 各 CLI の鍵と設定そのもの）は
-//     read 表の enforcedSecretReadDenyRules() が deny のまま止める。external_directory は
-//     「対象の親フォルダ + /*」しか見ない（＝同じフォルダの中を区別できない）ので、
-//     ファイル単位の線引きは必ず read 表の側で書くこと。
-//   ⚠️ `~/**` を ask にすると、作業フォルダの外への**書き込み**も確認付きで可能になる
-//     （external_directory は read 専用の関門ではない）。これは mac / Windows の
-//     guard-write.sh / guard-write.ps1 が以前から「外部書き込みは ask」で揃えている挙動と
-//     同じで、決定的 deny 床（redirectProtectedPathRegex / protectedPathRegex / edit 表の
-//     deny）は 1 本も外していない。
+//   そちらと mac / Windows のガードも必ず揃えること。
 function enforcedExternalDirectoryRules() {
-  const rules = { '*': 'deny', '~/**': 'ask' };
+  const rules = { '*': 'allow', '**': 'allow' };
   for (const dir of [
     `${DOT}claude/skills`,
     `${DOT}claude/commands`,
@@ -534,9 +540,10 @@ function enforcedExternalDirectoryRules() {
   for (const dir of OPENED_DIR_LOCKDOWN) {
     rules[`~/${dir}/*`] = 'allow';
   }
-  // `..` の踏み台封じは**必ず最後**に置く（会話ログの allow に追い越されないように）。
-  // read 表と同じ流儀。会話ログを開けたぶん `~/.codex/sessions/../auth.json` のように
-  // 隣の鍵へ回り込める経路が残っていた（回帰テストが検知。2026-08-24）。
+  // `..` の踏み台封じは**必ず最後**に置く（allow 群に追い越されないように）。
+  // read 表と同じ流儀。opencode は照合前にパスを canonical へ解決するので通常この形は
+  // 現れないが、正規化に頼らずに `~/.codex/sessions/../auth.json` のような回り込みを塞ぐ
+  // 保険として残す（回帰テストが検知。2026-08-24）。
   rules['**/../**'] = 'deny';
   return rules;
 }
@@ -590,8 +597,9 @@ function verifyResolvedConfig(resolved, { longrun = false } = {}) {
   // そのぶん、上の deny 床（再帰削除・sudo・裸起動・公開系）は 1 本も外していないこと、
   // および webfetch / websearch が deny 側へ倒れていることを下で確かめる。
   if (!longrun && bash['*'] === 'allow') problems.push('bash がすべて自動許可になっています。');
-  // external_directory は「'*': deny + 道具の置き場だけ allow」の表。並び順まで含めて
-  // 配布物どおりであることを求める（catch-all の位置が変わるだけで全部開いてしまうため）。
+  // external_directory は「'*': allow（読み取り開放）＋ 末尾の `..` 封じ deny」の表
+  // （2026-08-24。書き込みの確認は後段の edit 表が担う）。並び順まで含めて配布物どおりで
+  // あることを求める（末尾の deny を前へ動かすだけで保険が無効になるため）。
   if (JSON.stringify(permission.external_directory) !== JSON.stringify(enforcedExternalDirectoryRules())) {
     problems.push('作業フォルダの外へのアクセス制限（external_directory）が配布物と違います。');
   }
@@ -690,20 +698,33 @@ function buildOpenCodeConfig({
   // 長時間おまかせモード（目を離して走らせる）。確認を出さない代わりに、
   // ask だったものは deny 側へ倒す。deny 床は 1 本も外さない。
   longrun = false,
+  // モデル自由選択モード（2026-08-24 依頼者裁定「free のモデルは自由に選ばせればいい。
+  // リスク込みでモデルに任せる」）。DeepSeek キーも送信検査 Gateway も使わず、provider /
+  // model を一切固定しない（未指定なら OpenCode 標準のモデル選択で無料モデルを含めて選べる）。
+  // **permission の表（bash deny 床・read 表・edit 表・external_directory・プラグイン床）は
+  // DeepSeek 版と同一のまま生成する**。この関数が同じ enforced* 群から作るので、free で
+  // 緩む向きの分岐は構造的に存在しない。代償は送信検査（マスキング）を通らないことだけ。
+  free = false,
 } = {}) {
   const safePort = Number(port);
   if (!Number.isInteger(safePort) || safePort < 1 || safePort > 65535) {
     throw new Error('OpenCode gateway port must be an integer between 1 and 65535');
   }
-  const apiKey = resolveGatewayToken(gatewayToken);
+  // free モードでは合言葉を要求しない（Gateway 自体を使わないため）。DeepSeek 経路は
+  // 従来どおり、合言葉なしでの設定生成を拒否する（fail-closed）。
+  const apiKey = free ? '' : resolveGatewayToken(gatewayToken);
   const mcpConfig = buildMcpConfig({ mcpDir, env, homeDir });
   if (monitorPlugin && !path.isAbsolute(monitorPlugin)) {
     throw new Error('OpenCode monitor plugin path must be absolute');
   }
   const config = {
     $schema: 'https://opencode.ai/config.json',
-    model: 'bouncer-deepseek/deepseek-v4-flash',
-    small_model: 'bouncer-deepseek/deepseek-v4-flash',
+    // free モードではモデルを固定しない（未指定だと OpenCode がモデル選択画面を出し、
+    // 無料モデルを含む一覧から利用者が選ぶ）。
+    ...(free ? {} : {
+      model: 'bouncer-deepseek/deepseek-v4-flash',
+      small_model: 'bouncer-deepseek/deepseek-v4-flash',
+    }),
     default_agent: 'bouncer',
     share: 'disabled',
     // 既定は true。勝手な自動更新で安全ハーネスが静かに壊れるのを防ぐため明示的に無効化する。
@@ -719,7 +740,8 @@ function buildOpenCodeConfig({
       bouncer: {
         description: 'Bouncer-protected primary coding agent',
         mode: 'primary',
-        model: 'bouncer-deepseek/deepseek-v4-flash',
+        // free モードではエージェント側でもモデルを固定しない（利用者の選択に従う）。
+        ...(free ? {} : { model: 'bouncer-deepseek/deepseek-v4-flash' }),
         permission: {
           task: {
             '*': 'deny',
@@ -730,7 +752,7 @@ function buildOpenCodeConfig({
       'bouncer-helper': {
         description: 'Fast Bouncer-protected helper for focused research and analysis',
         mode: 'subagent',
-        model: 'bouncer-deepseek/deepseek-v4-flash',
+        ...(free ? {} : { model: 'bouncer-deepseek/deepseek-v4-flash' }),
         // OpenCode の権限評価は「最後に一致したルールが勝つ」。エージェント個別 permission は
         // グローバル permission の後ろに連結されるため、ここに bash / edit / external_directory /
         // webfetch / websearch を書くとグローバルの deny 床を上書きして無効化してしまう。
@@ -744,27 +766,31 @@ function buildOpenCodeConfig({
       build: { disable: true },
       plan: { disable: true },
     },
-    enabled_providers: ['bouncer-deepseek'],
-    provider: {
-      'bouncer-deepseek': {
-        npm: '@ai-sdk/openai-compatible',
-        name: 'DeepSeek via Bouncer inspection gateway',
-        options: {
-          baseURL: `http://127.0.0.1:${safePort}/v1`,
-          apiKey,
-        },
-        models: {
-          'deepseek-v4-pro': {
-            name: 'DeepSeek V4 Pro (Bouncer protected)',
-            limit: { context: 1048576, output: 393216 },
+    // free モードでは provider を注入せず enabled_providers でも絞らない
+    // （OpenCode が持つ一覧から、無料モデルを含めて利用者が選ぶ）。
+    ...(free ? {} : {
+      enabled_providers: ['bouncer-deepseek'],
+      provider: {
+        'bouncer-deepseek': {
+          npm: '@ai-sdk/openai-compatible',
+          name: 'DeepSeek via Bouncer inspection gateway',
+          options: {
+            baseURL: `http://127.0.0.1:${safePort}/v1`,
+            apiKey,
           },
-          'deepseek-v4-flash': {
-            name: 'DeepSeek V4 Flash (Bouncer protected)',
-            limit: { context: 1048576, output: 393216 },
+          models: {
+            'deepseek-v4-pro': {
+              name: 'DeepSeek V4 Pro (Bouncer protected)',
+              limit: { context: 1048576, output: 393216 },
+            },
+            'deepseek-v4-flash': {
+              name: 'DeepSeek V4 Flash (Bouncer protected)',
+              limit: { context: 1048576, output: 393216 },
+            },
           },
         },
       },
-    },
+    }),
     permission: {
       '*': longrun ? 'allow' : 'ask',
       read: enforcedReadRules(),
@@ -859,6 +885,7 @@ function parseArgs(argv) {
   let verifyResolved = false;
   let verifyResolvedFile = '';
   let longrun = false;
+  let free = false;
   // MCP 実体（*-mcp.js）は、このスクリプトと同じ hooks/common に配置される。
   // 既定を __dirname にしておけばランチャーがパスを組み立て直す必要がない。
   let mcpDir = __dirname;
@@ -883,6 +910,8 @@ function parseArgs(argv) {
       enableWebSearch = true;
     } else if (arg === '--longrun') {
       longrun = true;
+    } else if (arg === '--free') {
+      free = true;
     } else if (arg === '--monitor-plugin') {
       monitorPlugin = String(argv[index + 1] || '');
       index += 1;
@@ -902,6 +931,7 @@ function parseArgs(argv) {
     verifyResolved,
     verifyResolvedFile,
     longrun,
+    free,
     mcpDir,
   };
 }

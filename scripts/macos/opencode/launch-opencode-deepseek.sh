@@ -34,12 +34,17 @@ COACH_MARKER="$LOG_DIR/coach-engine"
 # 第 2 引数以降はフラグ。順不同で受ける。
 #   --websearch        Web 検索を確認制で有効化
 #   --resume           前回の続きから開く（OpenCode の --continue）
+#   --free             モデル自由選択モード（無料モデルあり）。DeepSeek キー・送信検査
+#                      Gateway を使わず、OpenCode 標準のモデル選択に任せる。permission の
+#                      表（deny 床・edit 表・read 表・external_directory・プラグイン床）は
+#                      DeepSeek 版と同一（opencode-config.js --free が同じ表から生成する）。
 #   --project <path>   作業フォルダ。OpenCode は「起動したフォルダ」が作業対象になり、
 #                      動き出したあとで cd しても移らない（本体仕様）。プロジェクトごとに
 #                      分けて作業できるよう、起動するフォルダをここで指定する。
 WEBSEARCH=""
 RESUME=""
 LONGRUN=""
+FREE=""
 PROJECT_DIR=""
 # 画面から雇うための「裏で1件だけ実行する」モード用（--task を渡すと TUI を開かず run で走る）
 TITLE=""
@@ -69,6 +74,9 @@ for _arg in "$@"; do
     # 長時間おまかせモード（目を離して走らせる）。確認を出さない代わりに ask だったものは
     # deny 側へ倒す（opencode-config.js --longrun）。deny 床は 1 本も外さない。
     --longrun) LONGRUN="--longrun" ;;
+    # モデル自由選択（2026-08-24 依頼者裁定）。無料モデル利用時は送信検査を通らない
+    # ことを許容する。安全設定（permission の表）は DeepSeek 版と同一に生成する。
+    --free) FREE="--free" ;;
     --resume|--continue) RESUME="--continue" ;;
     --title) _expect_title=1 ;;
     --title=*) TITLE="${_arg#--title=}" ;;
@@ -78,7 +86,7 @@ for _arg in "$@"; do
     --session=*) SESSION="${_arg#--session=}" ;;
     --project) _expect_project=1 ;;
     --project=*) PROJECT_DIR="${_arg#--project=}" ;;
-    *) echo "使い方: $0 [workspace] [--websearch] [--longrun] [--resume] [--project <フォルダ>] [--title <名前>] [--task <指示>] [--session <ID>]" >&2; exit 2 ;;
+    *) echo "使い方: $0 [workspace] [--websearch] [--longrun] [--free] [--resume] [--project <フォルダ>] [--title <名前>] [--task <指示>] [--session <ID>]" >&2; exit 2 ;;
   esac
 done
 [ "$_expect_project" = "0" ] || { echo "--project の後にフォルダを指定してください。" >&2; exit 2; }
@@ -112,6 +120,14 @@ fi
 [ -f "$MONITOR_PLUGIN" ] || { echo "OpenCode承認モニターが見つかりません: $MONITOR_PLUGIN" >&2; exit 2; }
 
 if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
+  if [ -n "$FREE" ]; then
+    echo "OpenCode free-model dry-run"
+    echo "  workspace: $WORKSPACE"
+    echo "  project:   $PROJECT_DIR"
+    echo "  gateway:   none (--free / 送信検査 Gateway を使いません)"
+    echo "  config:    OPENCODE_CONFIG_CONTENT"
+    echo "  model:     free (OpenCode のモデル一覧から自分で選択)"
+  else
   echo "OpenCode + DeepSeek dry-run"
   echo "  workspace: $WORKSPACE"
   echo "  project:   $PROJECT_DIR"
@@ -122,6 +138,7 @@ if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
   fi
   echo "  config:    OPENCODE_CONFIG_CONTENT"
   echo "  model:     DeepSeek V4 Flash / small: V4 Flash"
+  fi
   if [ "$WEBSEARCH" = "--websearch" ]; then
     echo "  websearch: opt-in (approval required)"
   else
@@ -147,8 +164,12 @@ OPENCODE_BIN="${OPENCODE_BIN:-$(command -v opencode 2>/dev/null || true)}"
 # 実キーはここで一度だけ解決する（環境変数 → 金庫 → 旧平文）。金庫に移したあとは
 # 旧平文が消えるので、ファイルの有無で判定してはいけない。
 # 解決できなければ fail-closed（鍵なしで gateway を立てると素通しの中継になる）。
-DS_KEY="$(read_secret ai-safety.deepseek DEEPSEEK_API_KEY "$KEY_FILE" || true)"
-[ -n "$DS_KEY" ] || { echo "DeepSeek APIキーが未登録です。先に「DeepSeekキーを登録」を実行してください。" >&2; exit 1; }
+# --free（モデル自由選択）では DeepSeek キーも Gateway も使わないので、未登録でも止めない。
+DS_KEY=""
+if [ -z "$FREE" ]; then
+  DS_KEY="$(read_secret ai-safety.deepseek DEEPSEEK_API_KEY "$KEY_FILE" || true)"
+  [ -n "$DS_KEY" ] || { echo "DeepSeek APIキーが未登録です。先に「DeepSeekキーを登録」を実行してください。" >&2; exit 1; }
+fi
 
 VERSION="$("$OPENCODE_BIN" --version 2>/dev/null | head -n1 | tr -d '\r')"
 if ! node -e 'const m=require(process.argv[1]);process.exit(m.isSupportedVersion(process.argv[2])?0:1)' "$CONFIG_JS" "$VERSION"; then
@@ -232,8 +253,12 @@ wait_for_own_gateway() {
 # OpenCode を 2 枚開いたり d-claude と併用したりすると、後発が先発の gateway を殺すため、
 # 先に開いていた窓だけが古い合言葉のまま取り残されて全リクエストが 401 になっていた。
 # コマンドライン引数には載せない（ps に出るため）。標準出力で受け取る。
-GATEWAY_TOKEN="$(node "$GATEWAY_TOKEN_JS" --ensure --gateway "$GATEWAY_JS" 2>/dev/null || true)"
-[ -n "$GATEWAY_TOKEN" ] || { echo "送信検査 Gateway の合言葉を用意できませんでした（fail-closed）。" >&2; exit 1; }
+# --free では Gateway を使わないので合言葉も用意しない。
+GATEWAY_TOKEN=""
+if [ -z "$FREE" ]; then
+  GATEWAY_TOKEN="$(node "$GATEWAY_TOKEN_JS" --ensure --gateway "$GATEWAY_JS" 2>/dev/null || true)"
+  [ -n "$GATEWAY_TOKEN" ] || { echo "送信検査 Gateway の合言葉を用意できませんでした（fail-closed）。" >&2; exit 1; }
+fi
 
 mkdir -p "$LOG_DIR"
 GATEWAY_LOG="$LOG_DIR/opencode-deepseek-gateway.log"
@@ -256,7 +281,10 @@ PORT=""
 # 1) 既に動いている gateway があれば、そのまま使う（＝複数の窓を同時に開ける）。
 #    どのポートで動いているかは gateway 自身が合言葉ファイルへ記録しているのでそれを見る。
 #    条件は「自分たちのプロセスであること」と「中身が今と同じであること」の両方。
-RECORDED_PORT="$(node "$GATEWAY_TOKEN_JS" --recorded-port 2>/dev/null || true)"
+RECORDED_PORT=""
+if [ -z "$FREE" ]; then
+  RECORDED_PORT="$(node "$GATEWAY_TOKEN_JS" --recorded-port 2>/dev/null || true)"
+fi
 if [ -n "$RECORDED_PORT" ] \
    && our_gateway_pid "$RECORDED_PORT" >/dev/null 2>&1 \
    && node "$GATEWAY_TOKEN_JS" --probe --gateway "$GATEWAY_JS" --port "$RECORDED_PORT" >/dev/null 2>&1; then
@@ -266,7 +294,8 @@ fi
 
 # 2) 再利用できないときは、候補ポートを順に試して自分で立てる。
 #    ポートを他に取られていれば gateway は即座に終了するので、次の候補へ進む。
-if [ "$GATEWAY_REUSED" -ne 1 ]; then
+#    --free では gateway を一切立てない（DeepSeek へ送る通信そのものが無い）。
+if [ -z "$FREE" ] && [ "$GATEWAY_REUSED" -ne 1 ]; then
   for candidate in $PORT_CANDIDATES; do
     # 自分たちの gateway が中身違い（更新後に古いものが居座っている）で居るなら止める。
     stop_stale_gateway "$candidate"
@@ -288,7 +317,7 @@ if [ "$GATEWAY_REUSED" -ne 1 ]; then
   done
 fi
 
-if [ -z "$PORT" ]; then
+if [ -z "$FREE" ] && [ -z "$PORT" ]; then
   echo "送信検査 Gateway を起動できないため、OpenCode は起動しません（fail-closed）。" >&2
   if [ -n "${DS_GATEWAY_PORT:-}" ]; then
     echo "指定されたポート $DS_GATEWAY_PORT を他のプログラムが使っている可能性があります。" >&2
@@ -306,8 +335,10 @@ WATCHDOG_PID=""
 # coach マーカーは d-claude と OpenCode が同じパスを共有する。並行起動時に片方の終了で
 # もう片方のバナーが消えないよう、「自分が書いた値のままのときだけ」消す。
 remove_own_coach_marker() {
-  [ "$(cat "$COACH_MARKER" 2>/dev/null || true)" = "opencode-deepseek" ] || return 0
-  rm -f "$COACH_MARKER" 2>/dev/null || true
+  case "$(cat "$COACH_MARKER" 2>/dev/null || true)" in
+    opencode-deepseek|opencode-free) rm -f "$COACH_MARKER" 2>/dev/null || true ;;
+  esac
+  return 0
 }
 cleanup() {
   # 自分で立てた gateway だけを止める。共用中の gateway（GATEWAY_REUSED=1）を止めると、
@@ -330,14 +361,14 @@ if [ -n "$GW_PID" ] && gateway_process_alive "$GW_PID"; then
 elif [ "$GATEWAY_REUSED" = "1" ] && our_gateway_pid "$PORT" >/dev/null 2>&1; then
   gateway_alive=1
 fi
-if [ "$gateway_alive" -ne 1 ]; then
+if [ -z "$FREE" ] && [ "$gateway_alive" -ne 1 ]; then
   echo "送信検査 Gateway を確認できないため、OpenCode は起動しません（fail-closed）。" >&2
   echo "確認先: $GATEWAY_LOG" >&2
   exit 1
 fi
 if [ "$GATEWAY_REUSED" = "1" ]; then
   echo "稼働中の送信検査 Gateway をそのまま使います（127.0.0.1:${PORT}）。"
-elif [ "$PORT" != "8788" ]; then
+elif [ -z "$FREE" ] && [ "$PORT" != "8788" ]; then
   # 既定ポートが空いていなかったことは、黙って別ポートに逃げず利用者へ伝える。
   echo "ポート 8788 は他のプログラムが使っていたため、送信検査 Gateway は 127.0.0.1:${PORT} で動かします。"
 fi
@@ -351,7 +382,7 @@ SECRET_ENV_VARS="$(node "$CONFIG_JS" --print-secret-env)"
 [ -n "$SECRET_ENV_VARS" ] || { echo "OpenCode 安全設定を生成できませんでした。" >&2; exit 1; }
 if [ -n "${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-}" ] && ! read_secret ai-safety.gemini '' "$HOME/.ai-safety/gemini-api-key.txt" >/dev/null 2>&1; then
   echo "注意: 環境変数の Gemini キーは OpenCode へ渡しません（AI から見えてしまうため）。" >&2
-  echo "      検索と画像読み取りを使うときは「7_AIコーチのキーを登録」で登録してください。" >&2
+  echo "      検索と画像読み取りを使うときは「キーと金庫/3_AIコーチのキーを登録」で登録してください。" >&2
 fi
 # shellcheck disable=SC2086
 unset $SECRET_ENV_VARS 2>/dev/null || true
@@ -588,7 +619,12 @@ fi
 # 合言葉は provider の apiKey として設定に埋め込む（gateway 側で照合される）。
 # opencode-config.js へは環境変数で渡す（引数にすると ps に出る）。この行限定の
 # 環境変数なのでランチャー自身の環境には残らない。
-CONFIG_ARGS=(--port "$PORT" --monitor-plugin "$MONITOR_PLUGIN")
+# --free ではポートも合言葉も要らない（provider を注入しない設定を生成する）。
+if [ -n "$FREE" ]; then
+  CONFIG_ARGS=(--free --monitor-plugin "$MONITOR_PLUGIN")
+else
+  CONFIG_ARGS=(--port "$PORT" --monitor-plugin "$MONITOR_PLUGIN")
+fi
 if [ -n "$LONGRUN" ]; then CONFIG_ARGS+=("$LONGRUN"); fi
 if [ "$WEBSEARCH" = "--websearch" ]; then
   export OPENCODE_ENABLE_EXA=1
@@ -674,8 +710,16 @@ rm -f "$READY_MARKER" 2>/dev/null || true
 node "$MONITOR_PLUGIN" --watchdog --timeout-ms 30000 >/dev/null 2>&1 &
 WATCHDOG_PID=$!
 
-printf 'opencode-deepseek' > "$COACH_MARKER" 2>/dev/null || true
-echo "送信検査（伏せる人）: 有効 / モデル: DeepSeek V4 Flash / 補助: V4 Flash"
+# coach マーカーの値はモニターが「本文が DeepSeek へ流れる」バナーの判定に使う。
+# --free では DeepSeek へは流れない（選んだモデルの提供元へ直接流れる）ので別の値にする。
+if [ -n "$FREE" ]; then
+  printf 'opencode-free' > "$COACH_MARKER" 2>/dev/null || true
+  echo "送信検査（伏せる人）: なし / モデル: OpenCode の一覧から自分で選択（無料モデルあり）"
+  echo "会話の内容は選んだモデルの提供元へ直接送信されます（マスキングは掛かりません）。"
+else
+  printf 'opencode-deepseek' > "$COACH_MARKER" 2>/dev/null || true
+  echo "送信検査（伏せる人）: 有効 / モデル: DeepSeek V4 Flash / 補助: V4 Flash"
+fi
 echo "変更操作は確認、外部フォルダは禁止、Web検索は${WEBSEARCH:+許可時のみ}$( [ -n "$WEBSEARCH" ] || printf '無効' )です。"
 echo "危険なコマンド（まとめて削除・鍵の読み出し・ネットから拾った実行）は確認なしで止まります。"
 

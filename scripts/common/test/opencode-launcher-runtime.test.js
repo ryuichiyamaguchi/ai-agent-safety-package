@@ -134,9 +134,9 @@ function makeStage(t, { mode = 'loads' } = {}) {
 // 同時実行しても衝突しないよう、テストごとに違う待ち受けポートを使う。
 let nextPort = 18800 + (process.pid % 400);
 
-function runLauncher(stageInfo, extraEnv = {}) {
+function runLauncher(stageInfo, extraEnv = {}, extraArgs = []) {
   nextPort += 1;
-  const result = spawnSync('bash', [launcher, stageInfo.workspace], {
+  const result = spawnSync('bash', [launcher, stageInfo.workspace, ...extraArgs], {
     encoding: 'utf8',
     timeout: 90000,
     env: {
@@ -437,4 +437,76 @@ test('配布するハーネスとスキルにはシェル実行の書き方も s
       assert.ok(!body.includes('!`'), `シェル実行の書き方が同梱物に入っている: ${full}`);
     }
   }
+});
+
+// --- モデル自由選択（--free・2026-08-24 依頼者裁定） -------------------------------
+// 完全無課金の受講者向けに、DeepSeek キー無し・送信検査 Gateway 無しで OpenCode を起動し、
+// モデルは OpenCode 標準の一覧（無料モデルを含む）から利用者が選ぶ。
+// **permission の表は DeepSeek 版と同一**であることを、本体が実際に受け取った設定で確かめる。
+
+test('--free は DeepSeek キー未登録でも本体まで起動し、Gateway を使わない', (t) => {
+  const stage = makeStage(t);
+  // 鍵をあえて消す（完全無課金の受講者を再現）。DeepSeek 経路ならここで fail-closed になる。
+  fs.rmSync(path.join(stage.home, '.deepseek-claude'), { recursive: true, force: true });
+  const run = runLauncher(stage, {}, ['--free']);
+
+  assert.strictEqual(run.status, 0, run.output);
+  assert.strictEqual(run.launched, true, '--free で本体が起動していない');
+  // 表示の正直さ: 送信検査が無いことを起動時に伝える。「有効」と偽ってはいけない。
+  assert.match(run.output, /送信検査（伏せる人）: なし/);
+  assert.doesNotMatch(run.output, /送信検査（伏せる人）: 有効/);
+  assert.match(run.output, /選んだモデルの提供元へ直接送信/);
+
+  // 本体が受け取った設定そのものを見る。
+  const received = fs.readFileSync(stage.envDump, 'utf8');
+  const configLine = received.split('\n').find((line) => line.startsWith('OPENCODE_CONFIG_CONTENT='));
+  assert.ok(configLine, '本体に OPENCODE_CONFIG_CONTENT が渡っていない');
+  const config = JSON.parse(configLine.slice('OPENCODE_CONFIG_CONTENT='.length));
+
+  // provider / モデル固定が無い（OpenCode のモデル選択に任せる）。
+  assert.ok(!('provider' in config), 'free なのに provider が注入されている');
+  assert.ok(!('enabled_providers' in config), 'free なのに enabled_providers で絞っている');
+  assert.ok(!('model' in config), 'free なのにモデルが固定されている');
+  assert.ok(!('small_model' in config), 'free なのに small_model が固定されている');
+  assert.ok(!JSON.stringify(config).includes('bouncer-deepseek'), 'free なのに DeepSeek 経路が残っている');
+
+  // permission の表は DeepSeek 版と同一（同じ入力から在庫の生成器で作った期待値と丸ごと比較）。
+  // 期待値の生成が「この PC の本物の金庫」を見ると、開発機に Gemini キーが登録されている
+  // だけで MCP の顔ぶれが変わってしまう。opencode-config.test.js と同じく検査専用の
+  // 接頭辞へ逃がして、実機の登録状態から切り離す（launcher 側は HOME 差し替えで隔離済み）。
+  process.env.AI_SAFE_KEYCHAIN_PREFIX = 'ai-safety-test-opencode-launcher-runtime.';
+  const configModule = require('../opencode-config.js');
+  const expected = configModule.buildOpenCodeConfig({
+    gatewayToken: 'expected-token-for-comparison',
+    monitorPlugin: '/opt/bouncer/opencode-bouncer-monitor.mjs',
+    mcpDir: path.join(stage.workspace, '.ai-safety', 'hooks', 'common'),
+    homeDir: stage.home,
+    env: {},
+  });
+  assert.strictEqual(JSON.stringify(config.permission), JSON.stringify(expected.permission),
+    'free の permission 表が DeepSeek 版と一致しない（並び順まで含めて同一であること）');
+
+  // 決定的 deny 床のプラグインも載っていること。
+  assert.ok(Array.isArray(config.plugin) && config.plugin[0].endsWith('opencode-bouncer-monitor.mjs'),
+    '安全プラグインが free の設定から消えている');
+
+  // 環境変数側の床（OPENCODE_PERMISSION）も DeepSeek 版と同じものが渡っていること。
+  const permLine = received.split('\n').find((line) => line.startsWith('OPENCODE_PERMISSION='));
+  assert.ok(permLine, '本体に OPENCODE_PERMISSION が渡っていない');
+  assert.strictEqual(permLine.slice('OPENCODE_PERMISSION='.length),
+    JSON.stringify(configModule.buildEnforcedPermissionEnv(false)));
+
+  // Gateway は使わない（再利用の案内もポート移動の案内も出ない）。
+  assert.doesNotMatch(run.output, /送信検査 Gateway をそのまま使います/);
+  assert.doesNotMatch(run.output, /Gateway は 127\.0\.0\.1/);
+});
+
+test('--free でも安全プラグインが載らなければ本体を起動しない（fail-closed は共通）', (t) => {
+  const stage = makeStage(t, { mode: 'silent' });
+  fs.rmSync(path.join(stage.home, '.deepseek-claude'), { recursive: true, force: true });
+  const run = runLauncher(stage, {}, ['--free']);
+
+  assert.notStrictEqual(run.status, 0, 'fail-closed で落ちていない');
+  assert.strictEqual(run.launched, false, '安全プラグインが載っていないのに本体が起動した');
+  assert.match(run.output, /安全プラグインが読み込まれない/);
 });

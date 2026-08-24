@@ -109,7 +109,7 @@ foreach ($pn in @('AllUsersAllHosts','AllUsersCurrentHost','CurrentUserAllHosts'
     }
 }
 if ($shadowFound) {
-    Write-Host "  → 対処: スタートフォルダの 11_野良d-claudeを退治 を実行すると、バックアップ付きでコメントアウトできます。" -ForegroundColor Yellow
+    Write-Host "  → 対処: スタートフォルダの 9_困ったとき診断 を実行してください（野良 d-claude の検出と、バックアップ付きコメントアウトの手順を案内します）。" -ForegroundColor Yellow
     Write-Host "     手で直す場合は、上の行を削除するか行頭に # を付けて、新しいターミナルを開き直してください。" -ForegroundColor Yellow
 }
 

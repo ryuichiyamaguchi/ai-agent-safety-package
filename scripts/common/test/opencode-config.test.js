@@ -73,9 +73,12 @@ test('OpenCode runtime config preserves useful reads while gating mutations and 
   assert.strictEqual(config.permission.edit['*'], 'ask');
   assert.strictEqual(config.permission.edit['*.ai-safety/**'], 'deny');
   assert.strictEqual(config.permission.edit['**/.ai-safety/**'], 'deny');
-  // 作業フォルダの外は既定 deny のまま。開けてあるのは『受講者が自分の道具を増やす置き場』だけ。
-  assert.strictEqual(config.permission.external_directory['*'], 'deny');
+  // 作業フォルダの外は読み取り開放（2026-08-24）。external_directory は read/write を
+  // 区別できない単一の関門なので catch-all を allow にし、書き込みの確認は edit 表の
+  // '*': 'ask'、秘密の読み取り禁止は read 表の deny 床が受け止める。
+  assert.strictEqual(config.permission.external_directory['*'], 'allow');
   assert.strictEqual(config.permission.external_directory['~/.claude/skills/**'], 'allow');
+  assert.strictEqual(config.permission.external_directory['**/../**'], 'deny');
   assert.strictEqual(config.permission.websearch, 'deny');
   assert.strictEqual(config.permission.webfetch, 'ask');
   assert.strictEqual(config.permission.read['*'], 'allow');
@@ -98,7 +101,7 @@ test('Exa web search is opt-in and only relaxes websearch to ask', () => {
   assert.deepStrictEqual(enabled.provider, disabled.provider);
   assert.strictEqual(enabled.permission.edit['*'], 'ask');
   assert.strictEqual(enabled.permission.edit['**/.ai-safety/**'], 'deny');
-  assert.strictEqual(enabled.permission.external_directory['*'], 'deny');
+  assert.strictEqual(enabled.permission.external_directory['*'], 'allow');
 });
 
 test('OpenCode minimum supported version is 1.14.24', () => {

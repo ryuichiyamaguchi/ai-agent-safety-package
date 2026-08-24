@@ -137,7 +137,9 @@ test('oc-safe は統合ランチャー（モニターを起動する入口）を
 
   // 統合ランチャー側が作業フォルダを受け取れること
   assert.match(read('scripts/macos/launch-integrated.sh'), /--project=\*/, 'mac 統合: --project= を受けること');
-  assert.match(read('scripts/windows/launch-integrated.ps1'), /-Project \$Project/, 'Windows 統合: -Project を渡すこと');
+  const winIntegrated = read('scripts/windows/launch-integrated.ps1');
+  assert.match(winIntegrated, /\[string\]\$Project/, 'Windows 統合: -Project を受けること');
+  assert.match(winIntegrated, /Project = \$Project/, 'Windows 統合: -Project を OpenCode 側へ渡すこと');
 });
 
 // ccmux ボタンは v1.16.0（卒業版）で廃止（docs に説明の無いボタンは卒業後導線に置かない）。
@@ -156,25 +158,22 @@ test('ccmux ボタンは廃止済みで、スタートフォルダに存在し�
 // OpenCode は起動したフォルダが作業対象になるので、案件ごとに分けて作業するには
 // 起動時にどこで始めるかを決める必要がある（受講者にパスを打たせない形にする）。
 test('起動メニューから作業フォルダを番号で選べる（Mac / Windows とも）', () => {
-  const cmd = read('workspace-template/スタート/1_AIをまとめて起動.command');
+  // v1.18.0: メニュー（フォルダ選択含む）の正本はランチャー本体の menu モードに集約し、
+  // スタートのボタンは委譲だけにした。フォルダ選択はランチャー側で検査する。
+  const cmd = read('scripts/macos/launch-integrated.sh');
   assert.match(cmd, /choose_project/, 'mac: フォルダ選択を持つこと');
   assert.match(cmd, /どのフォルダで作業しますか/, 'mac: 選ばせる文言を出すこと');
-  assert.match(cmd, /--project=\$WORKSPACE\/\$_sel/, 'mac: 選んだフォルダを渡すこと');
-  // OpenCode の 3 経路（通常 / Web検索 / 続きから）すべてで選べること。
-  assert.strictEqual((cmd.match(/choose_project;/g) || []).length, 3, 'mac: OpenCode の 3 経路で呼ぶこと');
+  assert.match(cmd, /--project=\$workspace\/\$_sel/, 'mac: 選んだフォルダを渡すこと');
+  // OpenCode の 4 経路（無料モデル / 通常 / Web検索 / 続きから）すべてで選べること。
+  assert.strictEqual((cmd.match(/choose_project;/g) || []).length, 4, 'mac: OpenCode の 4 経路で呼ぶこと');
   // 変数の直後に日本語が続くと bash 3.2 が変数名を取り違えるので ${} で囲む。
   assert.match(cmd, /「\$\{_sel\}」/, 'mac: 日本語の直前の変数は ${} で囲むこと');
 
-  const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/1_AIをまとめて起動.bat'));
-  assert.ok(batBytes[0] !== 0xef, '.bat に BOM を付けない');
-  const bat = new TextDecoder('shift_jis').decode(batBytes);
-  assert.match(bat, /setlocal enabledelayedexpansion/, 'Windows: 連番変数を引くため遅延展開を使うこと');
-  assert.match(bat, /:choose_project/, 'Windows: フォルダ選択を持つこと');
-  assert.strictEqual((bat.match(/call :choose_project/g) || []).length, 3, 'Windows: OpenCode の 3 経路で呼ぶこと');
-  assert.strictEqual((bat.match(/-Project "!PROJECT_DIR!"/g) || []).length, 3, 'Windows: 選んだフォルダを渡すこと');
-  assert.match(bat, /どのフォルダで作業しますか/, 'Windows: CP932 のまま日本語が壊れていないこと');
-  // 変数名の中で番号を展開するには call を挟む必要がある（!PDIR_!PICK!! は書けない）。
-  assert.match(bat, /call set "PSEL=%%PDIR_!PICK!%%"/, 'Windows: 連番変数の引き方が正しいこと');
+  const win = read('scripts/windows/launch-integrated.ps1');
+  assert.match(win, /function Select-ProjectFolder/, 'Windows: フォルダ選択を持つこと');
+  assert.match(win, /どのフォルダで作業しますか/, 'Windows: 選ばせる文言を出すこと');
+  assert.strictEqual((win.match(/\$Project = Select-ProjectFolder/g) || []).length, 4,
+    'Windows: OpenCode の 4 経路で呼ぶこと');
 });
 
 // ★ 実際に起こした事故の回帰テスト。

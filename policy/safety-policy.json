@@ -1,5 +1,5 @@
 {
-  "packageVersion": "1.17.4",
+  "packageVersion": "1.18.0",
   "hookApiVersion": "1",
   "_comment_testedClaudeCodeVersion": "2026-08-20 撤去: Claude Code のバージョン固定（testedClaudeCodeVersion = 2.1.201）をやめ、最新版追従に切り替えた。理由 = (a) 純正サンドボックス（settings の sandbox 節）は新しい版でしか使えない機能が多く、固定すると純正機能の恩恵を受けられない (b) 固定版は日々古びる一方で、実際の受講者環境は npm の都合で最新が入りがちで、毎回「版ちがい」警告が出るドリフトになっていた。launch-claude-safe.{sh,ps1} と 診断.ps1 はこのキーが無いときは版照合を静かにスキップする実装なので、キーを消すだけで警告が止まる（コード変更不要）。導入・更新スクリプトは @latest を入れる。",
   "defaultWorkspaceName": "safe-workspace",

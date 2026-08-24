@@ -45,22 +45,23 @@ else
   ng "local development health check should stay automatic (rc=$rc)"
 fi
 
-codex_entry="$START_DIR/2_セーフCodexを起動.command"
-if grep -q 'launch-integrated.sh' "$codex_entry" &&
-   grep -q '"$WORKSPACE" codex standard' "$codex_entry" &&
-   ! grep -q 'TARGET=.*launch-codex-safe' "$codex_entry"; then
-  ok "legacy Codex start button routes through integrated standard mode"
+# v1.18.0: 個別のセーフ起動ボタン（2_セーフCodex / 3_セーフClaude）は「4_AIを起動する」に
+# 集約され、ボタンはメニューの正本（launch-integrated.sh の menu モード）へ委譲する。
+start_entry="$START_DIR/4_AIを起動する.command"
+if grep -q 'launch-integrated.sh' "$start_entry" &&
+   grep -q '"$WORKSPACE" menu standard' "$start_entry" &&
+   ! grep -q 'TARGET=.*launch-codex-safe' "$start_entry" &&
+   ! grep -q 'TARGET=.*launch-claude-safe' "$start_entry"; then
+  ok "start button routes through integrated launcher menu"
 else
-  ng "legacy Codex start button bypasses integrated launcher"
+  ng "start button bypasses integrated launcher menu"
 fi
 
-claude_entry="$START_DIR/3_セーフClaudeを起動.command"
-if grep -q 'launch-integrated.sh' "$claude_entry" &&
-   grep -q '"$WORKSPACE" claude standard' "$claude_entry" &&
-   ! grep -q 'TARGET=.*launch-claude-safe' "$claude_entry"; then
-  ok "legacy Claude start button routes through integrated standard mode"
+if grep -q 'agent="codex"; profile="standard"' "$REPO/scripts/macos/launch-integrated.sh" &&
+   grep -q 'agent="claude"; profile="standard"' "$REPO/scripts/macos/launch-integrated.sh"; then
+  ok "integrated menu maps Codex / Claude to standard mode"
 else
-  ng "legacy Claude start button bypasses integrated launcher"
+  ng "integrated menu lost the Codex / Claude standard mappings"
 fi
 
 if grep -q 'launch-integrated.sh' "$REPO/scripts/macos/install-one-click.command" &&
@@ -71,7 +72,7 @@ else
 fi
 
 if grep -q 'launch-integrated.sh.*codex standard' "$REPO/docs/00_クイックスタート.md" &&
-   grep -q '統合版の標準モード' "$REPO/スタート.html"; then
+   grep -q '4_AIを起動する' "$REPO/スタート.html"; then
   ok "quick start and onboarding UI describe the integrated entry point"
 else
   ng "user-facing guidance does not consistently describe the integrated entry point"

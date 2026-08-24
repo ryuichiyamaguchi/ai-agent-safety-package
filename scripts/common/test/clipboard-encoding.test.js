@@ -102,8 +102,9 @@ test('画面出力のコードページは触っていない', () => {
 });
 
 test('ボタン（.bat / .command）は node を直接起動している', () => {
-  const dir = path.join(PKG, 'workspace-template', 'スタート');
-  const names = fs.readdirSync(dir).filter((n) => /^（上級）1[01]_/.test(n));
+  // v1.18.0: マスキングボタンはサブフォルダ「キーと金庫」の 10 / 11 へ移った。
+  const dir = path.join(PKG, 'workspace-template', 'スタート', 'キーと金庫');
+  const names = fs.readdirSync(dir).filter((n) => /^1[01]_/.test(n));
   assert.ok(names.length >= 4, `伏せる / 元に戻すのボタンが見つからない: ${names.join(', ')}`);
   for (const n of names) {
     const buf = fs.readFileSync(path.join(dir, n));

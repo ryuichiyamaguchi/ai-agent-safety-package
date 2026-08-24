@@ -113,7 +113,7 @@ function readImage(imagePath) {
 function callGemini(model, question, mime, b64) {
   return new Promise((resolve) => {
     const key = resolveApiKey();
-    if (!key) return resolve({ ok: false, status: 0, message: 'Gemini API キーが未設定です（「7_AIコーチのキーを登録」で登録してください）。' });
+    if (!key) return resolve({ ok: false, status: 0, message: 'Gemini API キーが未設定です（「キーと金庫/3_AIコーチのキーを登録」で登録してください）。' });
     const body = JSON.stringify({
       contents: [{ role: 'user', parts: [
         { text: String(question || DEFAULT_QUESTION).slice(0, MAX_QUESTION_CHARS) },

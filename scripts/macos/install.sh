@@ -304,9 +304,9 @@ copy_with_backup() {
 
 cp "$package_root/policy/safety-policy.json" "$workspace/.ai-safety/policy/safety-policy.json"
 
-# コピー元パッケージの場所を残す。「新しい作業フォルダを安全にする」ボタンは、
-# ワークスペース側から実行されたときにこれを辿ってパッケージ本体（configs / policy /
-# workspace-template）を見つける。見つからなければボタン側が案内して止まる。
+# コピー元パッケージの場所を残す。作業フォルダを安全にする仕組み（protect-folder /
+# oc-safe）は、ワークスペース側から実行されたときにこれを辿ってパッケージ本体
+#（configs / policy / workspace-template）を見つける。見つからなければ案内して止まる。
 printf '%s\n' "$package_root" > "$workspace/.ai-safety/package-source.txt"
 chmod 600 "$workspace/.ai-safety/package-source.txt" 2>/dev/null || true
 
@@ -446,8 +446,12 @@ fi
 # ファイルシステム構造とは別に「ここを見てポチポチやれば使える」入口を用意する。
 if [ -d "$package_root/workspace-template/スタート" ]; then
   mkdir -p "$workspace/スタート"
-  # v1.16.0 / v1.17.1 の番号再編で名前が変わった旧ボタンを掃除する（旧新併存による番号重複の防止）。
+  # v1.16.0 / v1.17.1 / v1.18.0 の番号再編で名前が変わった旧ボタンを掃除する（旧新併存による番号重複の防止）。
   # v1.17.1: 「5_セーフOpenCodeを起動」を基本枠に入れたぶん、旧 5〜12 が 1 つずつ繰り下がった。
+  # v1.18.0: スタートを基本 9 個 +（Windows のみ）3 個へ再編し、キー・金庫系は
+  #          サブフォルダ「キーと金庫」へ移した。個別のセーフ起動ボタンは
+  #          「4_AIを起動する」（統合ランチャー）へ集約し、「（上級）」プレフィックスは全廃。
+  #          野良 d-claude 退治ボタンは診断（9_困ったとき診断）へ統合した。
   # 消すのは「パッケージが過去に配布した既知の旧名」だけに限定し、受講者の自作ファイルには触らない。
   # Finder / Archive Utility 経由の展開はファイル名が NFD (UTF-8-MAC) になることがあるため、
   # 名前を NFC に正規化してから照合する（install のハッシュ照合と同じ手法）。
@@ -488,12 +492,71 @@ if [ -d "$package_root/workspace-template/スタート" ]; then
 7_安全パッケージを最新版に更新.bat
 8_AIツールを最新版に更新.command
 8_AIツールを最新版に更新.bat
-9_困ったとき診断.command
-9_困ったとき診断.bat
 10_野良d-claudeを退治.command
 10_野良d-claudeを退治.bat
 11_PowerShellを開く.bat
-12_作業フォルダを開く.bat'
+12_作業フォルダを開く.bat
+1_AIをまとめて起動.command
+1_AIをまとめて起動.bat
+2_セーフCodexを起動.command
+2_セーフCodexを起動.bat
+3_セーフClaudeを起動.command
+3_セーフClaudeを起動.bat
+4_セーフAntiGravityを起動.command
+4_セーフAntiGravityを起動.bat
+5_セーフOpenCodeを起動.command
+5_セーフOpenCodeを起動.bat
+6_見守りモニターを起動.command
+6_見守りモニターを起動.bat
+7_AIコーチのキーを登録.command
+7_AIコーチのキーを登録.bat
+8_安全パッケージを最新版に更新.command
+8_安全パッケージを最新版に更新.bat
+9_AIツールを最新版に更新.command
+9_AIツールを最新版に更新.bat
+10_困ったとき診断.command
+10_困ったとき診断.bat
+11_野良d-claudeを退治.command
+11_野良d-claudeを退治.bat
+12_PowerShellを開く.bat
+13_作業フォルダを開く.bat
+14_フォルダのアクセス権を直す.bat
+（上級）1_DeepSeekキーを登録.command
+（上級）1_DeepSeekキーを登録.bat
+（上級）2_DeepSeek-Claudeを起動.command
+（上級）2_DeepSeek-Claudeを起動.bat
+（上級）3_モニターをコンソールで見る.command
+（上級）3_モニターをコンソールで見る.bat
+（上級）4_ステータスラインを入れる.command
+（上級）4_ステータスラインを入れる.bat
+（上級）5_このPC全体に最低限の安全設定を入れる.command
+（上級）5_このPC全体に最低限の安全設定を入れる.bat
+（上級）6_PC全体の安全設定を解除.command
+（上級）6_PC全体の安全設定を解除.bat
+（上級）7_DeepSeekキーを削除.command
+（上級）7_DeepSeekキーを削除.bat
+（上級）8_Bufferのキーを登録.command
+（上級）8_Bufferのキーを登録.bat
+（上級）9_プラグインの置き場を開く.command
+（上級）9_プラグインの置き場を開く.bat
+（上級）10_コピーした文章から秘密を伏せる.command
+（上級）10_コピーした文章から秘密を伏せる.bat
+（上級）11_伏せた文章を元に戻す.command
+（上級）11_伏せた文章を元に戻す.bat
+（上級）12_AIコーチのキーを削除.command
+（上級）12_AIコーチのキーを削除.bat
+（上級）13_Bufferのキーを削除.command
+（上級）13_Bufferのキーを削除.bat
+（上級）14_新しい作業フォルダを安全にする.command
+（上級）14_新しい作業フォルダを安全にする.bat
+（上級）15_長時間おまかせモードで起動.command
+（上級）15_長時間おまかせモードで起動.bat
+（上級）16_金庫に秘密をしまう.command
+（上級）16_金庫に秘密をしまう.bat
+（上級）17_金庫から秘密を取り出す.command
+（上級）17_金庫から秘密を取り出す.bat
+（上級）18_金庫の秘密を消す.command
+（上級）18_金庫の秘密を消す.bat'
   for _old in "$workspace/スタート"/*; do
     [ -f "$_old" ] || continue
     _old_name="$(normalize_hash_rel_path "$(basename "$_old")")"
@@ -509,12 +572,13 @@ if [ -d "$package_root/workspace-template/スタート" ]; then
     sed 's#href="docs/#href="../docs/#g' "$package_root/スタート.html" > "$workspace/スタート/スタート.html"
   fi
   # 受講者が同名ファイル（.command と .bat）で迷わないよう、当該 OS 用だけ残す。
+  # v1.18.0: サブフォルダ「キーと金庫」も同様に掃除・実行権付与の対象にする。
   if [[ "$PLATFORM" == "mac" ]]; then
-    rm -f "$workspace/スタート/"*.bat
+    rm -f "$workspace/スタート/"*.bat "$workspace/スタート/キーと金庫/"*.bat
   elif [[ "$PLATFORM" == "win" ]]; then
-    rm -f "$workspace/スタート/"*.command
+    rm -f "$workspace/スタート/"*.command "$workspace/スタート/キーと金庫/"*.command
   fi
-  chmod +x "$workspace/スタート/"*.command 2>/dev/null || true
+  chmod +x "$workspace/スタート/"*.command "$workspace/スタート/キーと金庫/"*.command 2>/dev/null || true
   echo "スタートフォルダを配置しました: $workspace/スタート"
 fi
 
@@ -566,7 +630,7 @@ EOF_DOCS_COPY
   echo "説明書を配置しました: $docs_dest"
 fi
 
-# 動作確認済みツール版の表 (SSOT)。「9_AIツールを最新版に更新」が参照する。
+# 動作確認済みツール版の表 (SSOT)。「2_AIツールをまとめて入れる」が参照する。
 if [ -f "$package_root/configs/tested-tool-versions.json" ]; then
   cp "$package_root/configs/tested-tool-versions.json" "$workspace/.ai-safety/tested-tool-versions.json"
 fi

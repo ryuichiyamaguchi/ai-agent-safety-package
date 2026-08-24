@@ -144,7 +144,7 @@ function runAI(prompt) {
 
 // ---- 無料 Gemini キーの登録（受講者がモニター画面から一度だけ貼り付けて保存） ----------
 // 設計: コーチ（本体）はキー未登録だと沈黙するため、必要な瞬間にブラウザ画面から登録できる導線を用意する。
-//   保存先は gemini-client.js と同じ ~/.ai-safety/gemini-api-key.txt（SSOT）。既存の「7_AIコーチのキーを登録」
+//   保存先は gemini-client.js と同じ ~/.ai-safety/gemini-api-key.txt（SSOT）。既存の「キーと金庫/3_AIコーチのキーを登録」
 //   スクリプトと同じ操作を、モニターの 127.0.0.1・トークン付きエンドポイント越しに行うだけ（新たな権限は増やさない）。
 // 安全: 保存先はこの固定パスのみ・キー書式（英数 _ -、20〜200 文字）だけ受理・0600 保存・キー本文はログに出さない。
 const KEY_FILE = gemini.KEY_FILE;
@@ -162,13 +162,13 @@ function saveApiKey(raw) {
     };
   }
   // v1.17.0: 保存先を OS の金庫（macOS キーチェーン / Windows DPAPI）へ移した。
-  // この画面は「7_AIコーチのキーを登録」ボタンとは別の副経路なので、ここを直し忘れると
+  // この画面は「キーと金庫/3_AIコーチのキーを登録」ボタンとは別の副経路なので、ここを直し忘れると
   // 平文が復活する（設計書 W3）。金庫が使えない PC だけ、従来どおり 0600 のファイルに落とす。
   try {
     if (secretStore.available()) {
       secretStore.set('gemini', key);
       if (secretStore.get('gemini') !== key) {
-        return { ok: false, text: 'キーを金庫に入れましたが、読み戻して確認できませんでした。「7_AIコーチのキーを登録」から登録し直してください。' };
+        return { ok: false, text: 'キーを金庫に入れましたが、読み戻して確認できませんでした。「キーと金庫/3_AIコーチのキーを登録」から登録し直してください。' };
       }
       // 旧平文が残っていれば、金庫に入った時点で消す（同じ鍵が2箇所に残らないようにする）。
       try { if (fs.existsSync(KEY_FILE)) fs.rmSync(KEY_FILE, { force: true }); } catch { /* best effort */ }
@@ -180,7 +180,7 @@ function saveApiKey(raw) {
     try { fs.chmodSync(KEY_FILE, 0o600); } catch { /* 既存ファイルの権限も念のため絞る（ベストエフォート） */ }
     return { ok: true, text: '登録できました。AIコーチがすぐ使えます。' };
   } catch {
-    return { ok: false, text: 'キーの保存に失敗しました。「7_AIコーチのキーを登録」をダブルクリックして登録してみてください。' };
+    return { ok: false, text: 'キーの保存に失敗しました。「キーと金庫/3_AIコーチのキーを登録」をダブルクリックして登録してみてください。' };
   }
 }
 
@@ -1729,7 +1729,7 @@ function renderPage() {
 	          <button id="b-savekey" type="button">登録して有効化</button>
 	        </div>
 	        <div id="ks-msg" class="ks-msg muted">キーはこのパソコンの中だけに保存されます（外部には送りません・権限600）。</div>
-	        <div class="ks-fallback muted">うまくいかない時は「7_AIコーチのキーを登録」をダブルクリックしても登録できます。</div>
+	        <div class="ks-fallback muted">うまくいかない時は「キーと金庫/3_AIコーチのキーを登録」をダブルクリックしても登録できます。</div>
 	      </div>
 	      <div id="target-note" class="disclaim">検索や会話の中身は表示されない場合があります。この画面は、危険なコマンド実行・ファイル書き込み・外部アクセスなどの安全イベントを確認するためのものです。</div>
 	      <div id="hi" class="hibanner" style="display:none">自動判定は「高リスク」です。AI が何と言っても、基本は「許可しない」のが安全です。</div>

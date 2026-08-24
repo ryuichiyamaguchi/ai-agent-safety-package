@@ -10,7 +10,10 @@ unset AI_SAFE_POLICY AI_SAFE_ROOT
 usage() {
   cat <<'EOF'
 Usage:
-  launch-integrated.sh [workspace] [codex|claude|opencode|d-claude] [standard|assisted] [--websearch] [--longrun] [--resume] [--project=<フォルダ>]
+  launch-integrated.sh [workspace] [menu|codex|claude|opencode|d-claude] [standard|assisted] [--websearch] [--longrun] [--resume] [--free] [--plan] [--project=<フォルダ>]
+
+Menu:
+  menu      Show an interactive menu ordered by billing plan and launch the choice.
 
 Profiles:
   standard  Safety hooks + approval monitor. No local LLM is required.
@@ -19,6 +22,8 @@ Profiles:
 OpenCode:
   standard only. DeepSeek V4 Pro/Flash is routed through the send inspection gateway.
   Web search is off by default; --websearch makes it approval-based.
+  --free / --plan request the free / contract model when the OpenCode launcher
+  in this workspace supports it (otherwise the flag is dropped with a notice).
 
 d-claude:
   standard only. Claude Code UX with DeepSeek, safety hooks, Bouncer monitor,
@@ -35,9 +40,9 @@ extra="${4:-}"
 extra2="${5:-}"
 
 case "$agent" in
-  codex|claude|opencode|d-claude) ;;
+  menu|codex|claude|opencode|d-claude) ;;
   -h|--help) usage; exit 0 ;;
-  *) echo "agent must be codex, claude, opencode, or d-claude" >&2; usage >&2; exit 2 ;;
+  *) echo "agent must be menu, codex, claude, opencode, or d-claude" >&2; usage >&2; exit 2 ;;
 esac
 
 case "$profile" in
@@ -62,18 +67,26 @@ fi
 for _flag in "$extra" "$extra2"; do
   case "$_flag" in
     "") ;;
-    --websearch|--longrun|--resume|--project=*)
+    --websearch|--longrun|--resume|--free|--plan|--project=*)
       if [ "$agent" != "opencode" ]; then
-        echo "--websearch / --longrun / --resume / --project は OpenCode だけで指定できます。" >&2
+        echo "--websearch / --longrun / --resume / --free / --plan / --project は OpenCode だけで指定できます。" >&2
         exit 2
       fi
       ;;
     *)
-      echo "第4引数以降に指定できるのは --websearch / --longrun / --resume / --project=<フォルダ> だけです。" >&2
+      echo "第4引数以降に指定できるのは --websearch / --longrun / --resume / --free / --plan / --project=<フォルダ> だけです。" >&2
       exit 2
       ;;
   esac
 done
+if [ "$extra" = "--free" ] && [ "$extra2" = "--plan" ]; then
+  echo "--free と --plan は同時に指定できません。" >&2
+  exit 2
+fi
+if [ "$extra" = "--plan" ] && [ "$extra2" = "--free" ]; then
+  echo "--free と --plan は同時に指定できません。" >&2
+  exit 2
+fi
 
 if [ ! -d "$workspace" ]; then
   echo "作業フォルダが見つかりません: $workspace" >&2
@@ -97,6 +110,133 @@ mkdir -p "$log_dir"
   exit 2
 }
 
+# --- 対話メニュー（agent=menu のとき）--------------------------------------------
+# 並びは「どの課金プランの人か」順。スタートのボタンはここへ委譲すれば、
+# mac / Windows でメニューの正本が 1 か所（このランチャー）にまとまる。
+# OpenCode は「起動したフォルダ」が作業対象になり、動き出したあとで cd しても移らない
+# （OpenCode 本体の仕様）。案件ごとにフォルダを分けて作業できるよう、起動前にどこで
+# 始めるかを選んでもらう。パスを打たせず、作業フォルダ直下の一覧から番号で選ぶ。
+PROJECT_FLAG=""
+choose_project() {
+  # 直下のフォルダだけを候補にする（隠しフォルダと、パッケージが使う場所は除く）。
+  _dirs=""
+  _n=0
+  for _d in "$workspace"/*/; do
+    [ -d "$_d" ] || continue
+    _name="$(basename "$_d")"
+    case "$_name" in
+      .*|スタート|safe-workspace) continue ;;
+    esac
+    _n=$((_n + 1))
+    _dirs="$_dirs$_name"$'\n'
+  done
+
+  if [ "$_n" -eq 0 ]; then
+    return 0
+  fi
+
+  echo
+  echo "どのフォルダで作業しますか？"
+  echo "────────────────────────────────"
+  echo "0) $(basename "$workspace")（そのまま）"
+  _i=0
+  printf '%s' "$_dirs" | while IFS= read -r _name; do
+    [ -n "$_name" ] || continue
+    _i=$((_i + 1))
+    echo "$_i) $_name"
+  done
+  echo
+  read -r -p "番号を入力してください [0]: " _pick || _pick="0"
+  _pick="${_pick:-0}"
+
+  case "$_pick" in
+    0) return 0 ;;
+    ''|*[!0-9]*)
+      echo "番号で選んでください。作業フォルダ直下で起動します。"
+      return 0
+      ;;
+  esac
+  if [ "$_pick" -gt "$_n" ]; then
+    echo "その番号はありません。作業フォルダ直下で起動します。"
+    return 0
+  fi
+
+  _sel="$(printf '%s' "$_dirs" | sed -n "${_pick}p")"
+  [ -n "$_sel" ] || return 0
+  PROJECT_FLAG="--project=$workspace/$_sel"
+  # 変数の直後に日本語が続くと、bash 3.2 は変数名の切れ目を取り違える。必ず ${} で囲む。
+  echo "「${_sel}」で起動します。"
+}
+
+if [ "$agent" = "menu" ]; then
+  echo
+  echo "AIをまとめて起動（安全装置つき）"
+  echo "いまの契約（課金プラン）に合わせて番号を選んでください。"
+  echo "────────────────────────────────"
+  echo " 1) OpenCode（無料モデルを自分で選ぶ）… 完全無課金で使いたい人向け（送信検査なし）"
+  echo " 2) セーフ AntiGravity（agy）       … こちらも無料（Google の無料 CLI）"
+  echo " 3) OpenCode + DeepSeek             … DeepSeek のキーに少額チャージして使う人向け（送信検査つき）"
+  echo " 4) DeepSeek-Claude（d-claude）     … DeepSeek の API キーを登録してある人向け"
+  echo "    ※4 は在校中のみ。卒業後は使えなくなります（OpenCode へ移行 → 説明書 docs/20_卒業後ガイド）"
+  echo " 5) Claude Code                     … Claude を課金契約している人向け"
+  echo " 6) セーフ Codex                    … Codex（ChatGPT）を使う人向け。デスクトップアプリは無料プランでも使えます"
+  echo "────────────────────────────────"
+  echo "そのほかの起動方法:"
+  echo " 7) Claude AI補助モード             … Claude 課金の人向け。グレーな操作を AI が二重チェックします"
+  echo " 8) OpenCode（Web検索を確認制でON） … OpenCode で Web 検索も使いたい人向け"
+  echo " 9) OpenCode（前回の続きから開く）  … 前回の OpenCode 作業のつづきをする人向け"
+  echo "10) 長時間おまかせモード（上級）    … 目を離して長時間 AI に任せたい人向け"
+  echo
+  read -r -p "番号を入力してください [1]: " choice || {
+    echo
+    echo "入力が読み取れなかったため中止しました。" >&2
+    exit 2
+  }
+  choice="${choice:-1}"
+
+  case "$choice" in
+    # 1 は無料モデルの自由選択（--free）。DeepSeek キー不要・送信検査 Gateway なし。
+    # 安全設定（permission の表）は DeepSeek 版と同一（2026-08-24 依頼者裁定）。
+    1) agent="opencode"; profile="standard"; choose_project; extra="--free"; extra2="$PROJECT_FLAG" ;;
+    2)
+      # 旧ボタン「4_セーフAntiGravityを起動」と同じ挙動（専用ランチャーへ委譲）。
+      agy_launcher="$hooks/launch-agy-safe.sh"
+      [ -f "$agy_launcher" ] || { echo "AntiGravity 用の起動スクリプトが見つかりません: $agy_launcher" >&2; exit 2; }
+      if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
+        echo "安全装置（Bouncer）dry-run"
+        echo "  workspace: $workspace"
+        echo "  agent:     agy (launch-agy-safe.sh へ委譲)"
+        exit 0
+      fi
+      exec bash "$agy_launcher" "$workspace"
+      ;;
+    3) agent="opencode"; profile="standard"; choose_project; extra="$PROJECT_FLAG"; extra2="" ;;
+    4) agent="d-claude"; profile="standard" ;;
+    5) agent="claude"; profile="standard" ;;
+    6) agent="codex"; profile="standard" ;;
+    7) agent="claude"; profile="assisted" ;;
+    8) agent="opencode"; profile="standard"; choose_project; extra="--websearch"; extra2="$PROJECT_FLAG" ;;
+    9) agent="opencode"; profile="standard"; choose_project; extra="--resume"; extra2="$PROJECT_FLAG" ;;
+    10)
+      # 既存ボタン「6_長時間おまかせモードで起動」と同じ挙動（専用ランチャーへ委譲。
+      # どの AI で走らせるかは launch-longrun.sh 側の選択画面で選ぶ）。
+      longrun_launcher="$hooks/launch-longrun.sh"
+      [ -f "$longrun_launcher" ] || { echo "長時間おまかせモードの起動スクリプトが見つかりません: $longrun_launcher" >&2; exit 2; }
+      if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
+        echo "安全装置（Bouncer）dry-run"
+        echo "  workspace: $workspace"
+        echo "  agent:     longrun (launch-longrun.sh へ委譲)"
+        exit 0
+      fi
+      exec bash "$longrun_launcher" "$workspace"
+      ;;
+    *)
+      echo "1〜10 の番号を選んでください。" >&2
+      exit 2
+      ;;
+  esac
+fi
+
 if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
   echo "安全装置（Bouncer）dry-run"
   echo "  workspace: $workspace"
@@ -106,16 +246,22 @@ if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
   if [ "$agent" = "opencode" ]; then
     _session="new"
     _project=""
+    _model_req=""
     for _f in "$extra" "$extra2"; do
       case "$_f" in
         --resume) _session="continue last" ;;
         --project=*) _project="${_f#--project=}" ;;
+        --free) _model_req="free (無料モデル指定)" ;;
+        --plan) _model_req="plan (契約モデル指定)" ;;
       esac
     done
     echo "  session:   $_session"
     [ -n "$_project" ] && echo "  project:   $_project"
+    [ -n "$_model_req" ] && echo "  model:     $_model_req"
   fi
-  if [ "$agent" = "opencode" ] || [ "$agent" = "d-claude" ]; then
+  if [ "$agent" = "opencode" ] && { [ "$extra" = "--free" ] || [ "$extra2" = "--free" ]; }; then
+    echo "  gateway:   none (--free / 送信検査 Gateway を使いません)"
+  elif [ "$agent" = "opencode" ] || [ "$agent" = "d-claude" ]; then
     echo "  gateway:   http://127.0.0.1:8788 (send inspection, no local LLM)"
   else
     echo "  gateway:   bypassed (AIの応答速度を優先)"
@@ -145,7 +291,23 @@ case "$agent:$profile" in
     bash "$hooks/launch-claude-safe.sh" --assisted "$workspace"
     ;;
   opencode:standard)
-    bash "$hooks/opencode/launch-opencode-deepseek.sh" "$workspace" "$extra" "$extra2"
+    oc_launcher="$hooks/opencode/launch-opencode-deepseek.sh"
+    # --free / --plan（モデル切り替え）は、この作業フォルダの OpenCode ランチャーが
+    # そのフラグに対応している場合だけ渡す。未対応の版に渡すと使い方エラーで
+    # 起動そのものが止まるため、フラグを外して標準設定で起動する（案内は出す）。
+    if [ "$extra" = "--free" ] || [ "$extra" = "--plan" ]; then
+      if ! grep -q -e "$extra" "$oc_launcher" 2>/dev/null; then
+        echo "※ この作業フォルダの OpenCode 起動スクリプトは ${extra} に未対応のため、標準設定で起動します。"
+        extra=""
+      fi
+    fi
+    if [ "$extra2" = "--free" ] || [ "$extra2" = "--plan" ]; then
+      if ! grep -q -e "$extra2" "$oc_launcher" 2>/dev/null; then
+        echo "※ この作業フォルダの OpenCode 起動スクリプトは ${extra2} に未対応のため、標準設定で起動します。"
+        extra2=""
+      fi
+    fi
+    bash "$oc_launcher" "$workspace" "$extra" "$extra2"
     ;;
   d-claude:standard)
     consent="$hooks/launch-deepseek-safe.sh"
@@ -162,7 +324,7 @@ case "$agent:$profile" in
     if command -v node >/dev/null 2>&1 && [ -f "$secret_store" ]; then
       if [ "$(node "$secret_store" --has deepseek 2>/dev/null || true)" != "yes" ]; then
         echo "DeepSeek APIキーが未登録です。" >&2
-        echo "スタート/（上級）1_DeepSeekキーを登録 を先に実行してください。" >&2
+        echo "スタート/キーと金庫/1_DeepSeekキーを登録 を先に実行してください。" >&2
         exit 2
       fi
     fi

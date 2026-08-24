@@ -1,12 +1,13 @@
 // =============================================================
 // conversation-log-read.test.js — 「会話ログは読める／秘密は読めないまま」の回帰テスト
 //
-// なぜこれがあるか（2026-08-21 の裁定）:
-//   「ワークスペース外にある会話ログを見に行けないのが不便」という指摘に対し、
-//   山口さんの裁定は「一つ目をメインに、二つ目も確認付きで実行可能に」だった。
-//     ① 既定でそのまま読める … 各 AI の**会話ログの置き場だけ**
-//     ② 確認付きで読める     … それ以外のホーム配下（ask）
-//     ③ 読めないまま         … .env / .ssh / .aws / ... / ~/.ai-safety / 各 CLI の鍵と設定そのもの
+// なぜこれがあるか（2026-08-21 の裁定 → 2026-08-24 の緩和で更新）:
+//   2026-08-21 は「① 会話ログだけ既定で読める ② 他のホーム配下は確認付き ③ 秘密は読めない」
+//   だったが、2026-08-24 のワークスペース外アクセス緩和（依頼者承認済み設計）で
+//   ①② が統合された。現在の線引きは:
+//     ① 既定でそのまま読める … **ホームを含む PC 全体**（会話ログの置き場を含む）
+//     ② 読めないまま         … .env / .ssh / .aws / ... / ~/.ai-safety / 各 CLI の鍵と設定そのもの
+//   （書き込み側は緩めていない: ワークスペース外への書き込みは確認制のまま）
 //
 // ⚠️ このテストが固定しているのは「開けたこと」だけではない。同じ数だけ「閉じたままである
 // こと」を固定している。会話ログの置き場を開けても、その**隣**にある鍵の実物
@@ -119,8 +120,9 @@ const AGENT_SECRETS = [
   '{HOME}/.local/share/opencode/mcp-auth.json',
 ];
 
-// ② 確認付きで読める（＝ allow でも deny でもない）その他のホーム配下。
-const HOME_ASK = [
+// その他のホーム配下。2026-08-24 の緩和で「確認付き（ask）」から「既定で読める（allow）」へ
+// 変わった（読み取りはホームを含む全体を開放。秘密の deny 床だけが残る）。
+const HOME_OPEN = [
   '{HOME}/Documents/memo.txt',
   '{HOME}/Desktop/todo.md',
   '{HOME}/.zshrc',
@@ -254,18 +256,19 @@ function ocEvaluate(rules, resource, home = HOME) {
 // パスは opencode 側で canonical に解決済みなので、`..` は残らない。
 const externalResource = (file) => `${path.posix.dirname(path.posix.normalize(file))}/*`;
 
-test('OpenCode: 会話ログは external_directory で allow、その他のホーム配下は ask', () => {
+test('OpenCode: external_directory は読み取り開放（会話ログもその他のホーム配下も allow）', () => {
   const ext = OC.enforcedExternalDirectoryRules();
   assert.strictEqual(Object.keys(ext)[0], '*', 'catch-all が先頭にありません');
-  assert.strictEqual(ext['*'], 'deny');
-  assert.strictEqual(ext['~/**'], 'ask', 'ホーム配下が ask になっていません');
-  for (const target of subst(CONVERSATION_LOGS)) {
+  // 2026-08-24: 読み取り開放。external_directory は read/write を区別できない単一の関門
+  // なので catch-all を allow にし、書き込みの確認は edit 表（'*': ask）、秘密の読み取り
+  // 禁止は read 表の deny 床が担う（このテストの後続ケースが固定している）。
+  assert.strictEqual(ext['*'], 'allow');
+  const keys = Object.keys(ext);
+  assert.strictEqual(keys[keys.length - 1], '**/../**', '`..` 封じが末尾にありません');
+  assert.strictEqual(ext['**/../**'], 'deny');
+  for (const target of [...subst(CONVERSATION_LOGS), ...subst(HOME_OPEN)]) {
     assert.strictEqual(ocEvaluate(ext, externalResource(target)), 'allow',
-      `会話ログが確認なしで読めません: ${target}`);
-  }
-  for (const target of subst(HOME_ASK)) {
-    assert.strictEqual(ocEvaluate(ext, externalResource(target)), 'ask',
-      `その他のホーム配下が ask になっていません: ${target}`);
+      `ホーム配下が確認なしで読めません: ${target}`);
   }
   // 道具の置き場（既存の免除）は開いたまま。
   assert.strictEqual(ocEvaluate(ext, `${HOME}/.claude/skills/my-skill/*`), 'allow');
@@ -329,7 +332,6 @@ test('OpenCode: 秘密と各 CLI の鍵・設定そのものは read 表で deny
 
 test('OpenCode: `..` 経由の踏み台は塞がっている（正規化前の形でも deny）', () => {
   const read = OC.enforcedReadRules();
-  const ext = OC.enforcedExternalDirectoryRules();
   for (const target of subst(TRAVERSALS)) {
     // 正規化前の生の形: read 表の `**/../**` が受け止める。
     assert.strictEqual(ocEvaluate(read, target), 'deny',
@@ -337,33 +339,21 @@ test('OpenCode: `..` 経由の踏み台は塞がっている（正規化前の�
     // opencode 自身が canonical へ解決した後の形。
     const normalized = path.posix.normalize(target);
     const dir = path.posix.dirname(normalized);
-    // external_directory は原理的に「ファイル 1 本」を区別できない（1.18.9 実測）。
-    //   Tool.assertExternalDirectory:
-    //     let y = kind==="directory" ? i : path.dirname(i);
-    //     let u = path.join(y,"*").replaceAll("\\","/");
-    //     yield* o.ask({permission:"external_directory", patterns:[u], always:[u], ...})
-    //   read ツールの Location 解決側も同じで、resource は必ず join(canonicalDir,"*")。
-    //   つまり ~/.codex/history.jsonl と ~/.codex/auth.json はどちらも同じ照合対象
-    //   `~/.codex/*` になる。history.jsonl を既定で読めるようにする限り、
-    //   external_directory の層で auth.json だけを閉じることは**できない**。
-    //   （`..` は join/canonical 化で消えるので、`**/../**` の deny もこの層には届かない。）
-    // したがってここで固定するのは「external_directory が allow になるのは
-    // *history.jsonl のために開けたフォルダの直下* に限られる」ことと、
-    // 「そこは read 表と guard の両方が閉じ直している」ことの 2 点。
-    if (ocEvaluate(ext, externalResource(normalized)) === 'allow') {
-      assert.ok(OC.OPENED_DIR_LOCKDOWN.some((d) => dir === `${HOME}/${d}`),
-        `会話ログ用に開けたフォルダ以外が external_directory で allow です: ${target} -> ${normalized}`);
-      // read ツール経路: opencode は external_directory の後に必ず read 権限も assert する
-      //   （1.18.9 実測 ReadTool.execute: J=S.externalDirectory → assert(external) の後に
-      //    assert({action:"read", resources:[S.resource]})）。ここで deny になる。
-      assert.strictEqual(ocEvaluate(read, normalized), 'deny',
-        `external_directory を通した先が read 表で止まっていません: ${normalized}`);
-      // シェル経路（`cat`）: read 表は効かないので、決定的 deny 床が受け止める。
-      assert.ok(POLICY.protectedPathRegex.some((p) => new RegExp(p, 'i').test(normalized)),
-        `external_directory を通した先が protectedPathRegex で止まっていません: ${normalized}`);
-    }
+    // 2026-08-24 の読み取り開放後、external_directory は catch-all allow（素通しの関門）。
+    // つまりこの層は `..` の生の形（'**/../**' deny）しか止めない。正規化後の実体を止める
+    // 責務は read 表の deny 床へ一本化された:
+    //   read ツール経路 … opencode は external_directory の後に必ず read 権限も assert する
+    //   （1.18.9 実測 ReadTool.execute: J=S.externalDirectory → assert(external) の後に
+    //    assert({action:"read", resources:[S.resource]})）。ここで deny になる。
     assert.strictEqual(ocEvaluate(read, normalized), 'deny',
       `正規化後に read 表で止まっていません: ${target} -> ${normalized}`);
+    // シェル経路（`cat`）: read 表は効かないので、決定的 deny 床（protectedPathRegex）が
+    // 受け止める。~/.codex 直下（history.jsonl のために最初に external を開けた場所）の
+    // 鍵・設定・控えは、緩和前から guard 側にも同じ床を敷いてある。
+    if (OC.OPENED_DIR_LOCKDOWN.some((d) => dir === `${HOME}/${d}`)) {
+      assert.ok(POLICY.protectedPathRegex.some((p) => new RegExp(p, 'i').test(normalized)),
+        `~/.codex 直下の鍵・設定が protectedPathRegex で止まっていません: ${normalized}`);
+    }
   }
 });
 
@@ -402,7 +392,7 @@ function claudeVerdict(settings, file, home = HOME, cwd = `${HOME}/workspace`) {
 }
 
 for (const file of ['settings.mac.json', 'settings.windows.json']) {
-  test(`Claude 設定(${file}): 会話ログは allow、秘密は deny、その他のホーム配下は ask`, () => {
+  test(`Claude 設定(${file}): 読み取りはホーム含め開放（allow）、秘密は deny のまま`, () => {
     const settings = JSON.parse(
       fs.readFileSync(path.join(REPO, 'configs', 'claude', file), 'utf8'),
     );
@@ -414,9 +404,10 @@ for (const file of ['settings.mac.json', 'settings.windows.json']) {
       assert.strictEqual(claudeVerdict(settings, target), 'deny',
         `秘密が deny になっていません: ${target}`);
     }
-    for (const target of subst(HOME_ASK)) {
-      assert.strictEqual(claudeVerdict(settings, target), 'ask',
-        `その他のホーム配下が ask になっていません: ${target}`);
+    // 2026-08-24 の緩和: その他のホーム配下も既定で読める（Read(~/**) と Read(//**) を allow に追加）。
+    for (const target of subst(HOME_OPEN)) {
+      assert.strictEqual(claudeVerdict(settings, target), 'allow',
+        `ホーム配下の読み取りが開放されていません: ${target}`);
     }
     for (const target of subst(TRAVERSALS)) {
       // 生の形は Read(**/../**)、解決後の形は個別の deny が受け止める。
@@ -425,15 +416,16 @@ for (const file of ['settings.mac.json', 'settings.windows.json']) {
       assert.strictEqual(claudeVerdict(settings, path.posix.normalize(target)), 'deny',
         `正規化後に deny になっていません: ${target}`);
     }
-    // history.jsonl を開けても、同じフォルダの直下は 1 本も確認なしでは読めない。
-    // 鍵・設定・控えは deny、それ以外（AGENTS.md など）は Claude Code 既定の ask。
+    // history.jsonl の隣にある鍵・設定・控えは deny のまま。それ以外（AGENTS.md ・
+    // installation_id など、秘密ではないもの）は 2026-08-24 の緩和で既定で読める。
     for (const target of subst(CODEX_NEIGHBORS)) {
       const verdict = claudeVerdict(settings, target);
-      assert.notStrictEqual(verdict, 'allow',
-        `~/.codex 直下が確認なしで読めます: ${target}`);
       if (subst(CODEX_NEIGHBOR_SECRETS).includes(target)) {
         assert.strictEqual(verdict, 'deny',
           `~/.codex の鍵・設定が deny になっていません: ${target}`);
+      } else {
+        assert.strictEqual(verdict, 'allow',
+          `~/.codex 直下の非秘密が読めません（読み取り開放と矛盾）: ${target}`);
       }
     }
     // 作業フォルダの中はこれまでどおり確認なしで読める（ask を広く書くと壊れる箇所）。

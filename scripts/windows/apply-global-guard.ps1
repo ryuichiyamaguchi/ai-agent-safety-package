@@ -79,7 +79,7 @@ Write-Host "      確認を挟むコマンド（git push / npm publish / 他エ�
 Write-Host ""
 Write-Host "・既存の設定は壊しません（安全に関係のない項目は 1 つも変えません）。"
 Write-Host "・書き込む前に ~\.ai-safety\backups\ へ自動でバックアップを取ります。"
-Write-Host "・元に戻したいときは「（上級）6_PC全体の安全設定を解除」を実行してください。"
+Write-Host "・元に戻したいときは「キーと金庫\13_PC全体の安全設定を解除」を実行してください。"
 
 $skipConfirm = $DryRun -or $Yes -or ($env:AI_SAFE_ASSUME_YES -eq "1") -or (-not [Environment]::UserInteractive)
 if (-not $skipConfirm) {

@@ -238,35 +238,45 @@ test('OpenCode ランチャーは --resume を受けて opencode --continue を�
 
 test('統合ランチャーは「続きから」を OpenCode へ渡す', () => {
   const mac = read('scripts/macos/launch-integrated.sh');
-  // v1.17.1 で --longrun（長時間おまかせモード）を追加した。
-  assert.match(mac, /--websearch\|--longrun\|--resume\|--project=\*\)/, 'mac: --longrun / --resume / --project= を受け付けること');
-  assert.match(mac, /launch-opencode-deepseek\.sh" "\$workspace" "\$extra" "\$extra2"/);
+  // v1.17.1 で --longrun、v1.18.0 で --free / --plan（モデル切り替え）を追加した。
+  assert.match(mac, /--websearch\|--longrun\|--resume\|--free\|--plan\|--project=\*\)/,
+    'mac: --longrun / --resume / --free / --plan / --project= を受け付けること');
+  assert.match(mac, /oc_launcher="\$hooks\/opencode\/launch-opencode-deepseek\.sh"/);
+  assert.match(mac, /bash "\$oc_launcher" "\$workspace" "\$extra" "\$extra2"/);
 
   const win = read('scripts/windows/launch-integrated.ps1');
   assert.match(win, /\[switch\]\$Resume/);
-  assert.match(win, /-Resume:\$Resume/);
+  assert.match(win, /Resume = \$Resume/, 'Windows: OpenCode 側へ -Resume を引き継ぐこと');
   assert.match(win, /-Resume は OpenCode だけで指定できます/);
 });
 
 test('起動メニューに「続きから」の番号がある（Mac / Windows とも）', () => {
-  const command = read('workspace-template/スタート/1_AIをまとめて起動.command');
-  // v1.17.0 で「最大保護モード」を外し、以降の番号を 1 つずつ繰り上げた（8→7）。
-  // 7 番は作業フォルダを選んでから起動する（choose_project を挟む）。
-  assert.match(command, /7\) choose_project; exec bash "\$LAUNCHER" "\$WORKSPACE" opencode standard --resume/);
-  assert.match(command, /前回の続きから開く/);
-  assert.match(command, /1〜7の番号/, '案内の番号範囲も更新すること');
+  // v1.18.0: メニューの正本はランチャー本体（launch-integrated の menu モード）に集約し、
+  // スタートのボタンは menu モードへ委譲するだけにした（ボタン側の写しが陳腐化して
+  // AntiGravity 等へ到達できなくなったため）。「続きから」はランチャー本体のメニューで見る。
+  const command = read('workspace-template/スタート/4_AIを起動する.command');
+  assert.match(command, /exec bash "\$LAUNCHER" "\$WORKSPACE" menu standard/,
+    'mac ボタンはメニューの正本（menu モード）へ委譲すること');
   assert.doesNotMatch(command, /最大保護/, '廃止した最大保護モードが復活していないこと');
 
+  const macLauncher = read('scripts/macos/launch-integrated.sh');
+  assert.match(macLauncher, /前回の続きから開く/);
+  assert.match(macLauncher, /choose_project; extra="--resume"/,
+    'mac: 続きからは作業フォルダを選んでから --resume で起動すること');
+  assert.doesNotMatch(macLauncher, /最大保護/);
+
   // .bat は教室 PC の PowerShell 5.1 が読めるよう CP932 で配布する（UTF-8 だと文字化けして即閉じ）。
-  const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/1_AIをまとめて起動.bat'));
+  const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/4_AIを起動する.bat'));
   assert.ok(batBytes[0] !== 0xef, '.bat に BOM を付けない');
   const bat = new TextDecoder('shift_jis').decode(batBytes);
-  assert.match(bat, /choice \/c 1234567 \/n \/m "番号を選んでください \[1-7\]: "/);
-  assert.match(bat, /if errorlevel 7 goto opencode_resume/);
+  assert.match(bat, /-Agent menu -Profile standard/, 'Windows ボタンはメニューの正本（menu モード）へ委譲すること');
   assert.doesNotMatch(bat, /最大保護/, '廃止した最大保護モードが復活していないこと');
-  assert.match(bat, /:opencode_resume/);
-  assert.match(bat, /-Agent opencode -Profile standard -Resume/);
-  assert.match(bat, /前回の続きから開く/, 'CP932 のまま日本語が壊れていないこと');
+  assert.match(bat, /安全装置（Bouncer）がまだ準備されていません/, 'CP932 のまま日本語が壊れていないこと');
+
+  const winLauncher = read('scripts/windows/launch-integrated.ps1');
+  assert.match(winLauncher, /前回の続きから開く/);
+  assert.match(winLauncher, /\$Resume = \$true; \$Project = Select-ProjectFolder/,
+    'Windows: 続きからは作業フォルダを選んでから -Resume で起動すること');
 });
 
 // ── 既定ポートが他のプログラムに使われていても起動できる ──────────────────

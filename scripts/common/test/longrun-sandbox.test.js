@@ -210,7 +210,11 @@ test('OpenCode: --longrun でも deny 床は 1 本も減らず、ask は deny �
     assert.strictEqual(longDeny[pattern], 'deny', `ask だった ${pattern} が deny へ倒れていない`);
   }
   assert.ok(Object.values(longDeny).every((v) => v === 'deny'), 'longrun に ask が残っている');
-  assert.strictEqual(mod.buildEnforcedPermissionEnv(true).external_directory['*'], 'deny');
+  // 2026-08-24: external_directory は読み取り開放（catch-all allow）。longrun でも読み取りが
+  // 効くのは設計どおり。`..` 封じの deny 床は残っていること。
+  const extLong = mod.buildEnforcedPermissionEnv(true).external_directory;
+  assert.strictEqual(extLong['*'], 'allow');
+  assert.strictEqual(extLong['**/../**'], 'deny');
 });
 
 test('OpenCode: --longrun でも秘密の読み取り禁止と .ai-safety の書き換え禁止は外さない', () => {

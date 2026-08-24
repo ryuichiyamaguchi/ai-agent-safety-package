@@ -130,15 +130,18 @@ test('OpenCode 床: .. を含むパスは免除しない（免除の踏み台に
 
 // --- OpenCode の設定生成側 -----------------------------------------------------
 
-test('OpenCode 設定: external_directory は既定 deny のまま、置き場だけ allow', () => {
+test('OpenCode 設定: external_directory は読み取り開放（catch-all allow）でも置き場の allow と `..` 封じを保つ', () => {
   const mod = require(path.join(REPO, 'scripts', 'common', 'opencode-config.js'));
   const rules = mod.buildOpenCodeConfig({
     port: 8788, gatewayToken: 'dummy', mcpDir: path.join(os.tmpdir(), 'no-such-mcp-dir'),
   }).permission.external_directory;
   const keys = Object.keys(rules);
-  // 最後に一致したルールが勝つので、catch-all の deny は必ず先頭にあること。
-  assert.strictEqual(keys[0], '*', 'catch-all が先頭にありません（置き場ごと閉じてしまいます）');
-  assert.strictEqual(rules['*'], 'deny');
+  // 最後に一致したルールが勝つので、catch-all は必ず先頭・`..` 封じ deny は必ず末尾にあること。
+  assert.strictEqual(keys[0], '*', 'catch-all が先頭にありません');
+  // 2026-08-24: 読み取り開放。書き込みの確認は edit 表（'*': ask）が担う。
+  assert.strictEqual(rules['*'], 'allow');
+  assert.strictEqual(keys[keys.length - 1], '**/../**', '`..` 封じが末尾にありません');
+  assert.strictEqual(rules['**/../**'], 'deny');
   for (const dir of ['~/.claude/skills/**', '~/.claude/commands/**', '~/.codex/prompts/**',
     '~/.codex/skills/**', '~/.gemini/commands/**', '~/.gemini/skills/**',
     '~/.config/opencode/command/**', '~/.config/opencode/skills/**']) {

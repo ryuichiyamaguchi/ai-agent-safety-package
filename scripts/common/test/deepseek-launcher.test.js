@@ -583,10 +583,15 @@ test('起動-Claude-DeepSeek.command はワークスペースを固定せず鍵�
   assert.match(cmd, /WORKSPACE="\$1"/, '引数で作業フォルダを受け取れない');
   assert.doesNotMatch(cmd, /ANTHROPIC_AUTH_TOKEN="\$\(cat /, '平文キーを直読みしている');
   assert.match(cmd, /--has deepseek/, '鍵の有無を解決結果で見ていない');
-  // ラッパー（スタートのボタン）が作業フォルダを渡すこと
+  // ラッパー（スタートのボタン）が作業フォルダを渡すこと。
+  // v1.18.0: 単独ボタンは廃止され「4_AIを起動する」→ menu モードのメニューに集約された
+  // （ボタンは menu モードへ委譲し、d-claude の分岐はランチャー本体が持つ）。
   const wrapper = fs.readFileSync(
-    path.join(root, 'workspace-template', 'スタート', '（上級）2_DeepSeek-Claudeを起動.command'), 'utf8');
-  assert.match(wrapper, /bash "\$TARGET" "\$WORKSPACE"/);
+    path.join(root, 'workspace-template', 'スタート', '4_AIを起動する.command'), 'utf8');
+  assert.match(wrapper, /exec bash "\$LAUNCHER" "\$WORKSPACE" menu standard/);
+  const launcher = fs.readFileSync(
+    path.join(root, 'scripts', 'macos', 'launch-integrated.sh'), 'utf8');
+  assert.match(launcher, /agent="d-claude"; profile="standard"/, 'メニューに d-claude の分岐が無い');
 });
 
 test('起動-Claude-DeepSeek.command は自分の置き場所の作業フォルダで起動する', () => {
@@ -638,8 +643,14 @@ test('Windows の 起動-Claude-DeepSeek.bat もワークスペース固定を�
   assert.doesNotMatch(bat, /for \/f "usebackq delims=" %%K in \("%AUTH_FILE%"\)/, '平文キーを直読みしている');
   assert.match(bat, /--has deepseek/, '鍵の有無を解決結果で見ていない');
 
+  // v1.18.0: 単独ボタンは廃止され「4_AIを起動する」→ menu モードのメニューに集約された
+  // （ボタンは menu モードへ委譲し、d-claude の分岐はランチャー本体が持つ）。
   const wrapperRaw = fs.readFileSync(
-    path.join(root, 'workspace-template', 'スタート', '（上級）2_DeepSeek-Claudeを起動.bat'));
+    path.join(root, 'workspace-template', 'スタート', '4_AIを起動する.bat'));
   const wrapper = new TextDecoder('shift_jis').decode(wrapperRaw);
-  assert.match(wrapper, /call "%TARGET%" "%WORKSPACE%"/, 'ラッパーが作業フォルダを渡していない');
+  assert.match(wrapper, /-Workspace "%WORKSPACE%" -Agent menu -Profile standard/,
+    'ラッパーが作業フォルダを渡していない');
+  const launcher = fs.readFileSync(
+    path.join(root, 'scripts', 'windows', 'launch-integrated.ps1'), 'utf8');
+  assert.match(launcher, /\$Agent = 'd-claude'; \$SafetyProfile = 'standard'/, 'メニューに d-claude の分岐が無い');
 });

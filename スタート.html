@@ -447,7 +447,7 @@
             <span class="ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 8h.01M11 12h1v4h1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
             <div>
               <b>どれを入れる？　あなたの課金状況で決めてください。</b><br>
-              ・<b>無課金</b> → AntiGravity（無料）。<b>Codex のデスクトップアプリは無料プランでも使えます</b>。Claude のような使い心地が欲しいなら OpenCode + DeepSeek（少額チャージ）も<br>
+              ・<b>無課金</b> → OpenCode（無料モデルを自分で選ぶ）か AntiGravity（どちらも無料）。<b>Codex のデスクトップアプリは無料プランでも使えます</b>。Claude のような使い心地が欲しいなら OpenCode + DeepSeek（少額チャージ・送信検査つき）も<br>
               ・<b>ChatGPT に課金している</b> → Codex（CLI がどのプランで使えるかは変わるので<b>公式で確認</b>してください）<br>
               ・<b>Claude に課金している</b> → Claude Code（<b>無料プランでは使えません</b>）<br>
               くわしい表は docs フォルダの <b>00_はじめに</b> と <b>20_卒業後ガイド</b> にあります。
@@ -603,23 +603,21 @@
           <div class="cmd os-mac"><span class="prompt">📂</span><code>~/Documents/my-ai-workspace/スタート</code><button type="button" class="copy" data-copy="~/Documents/my-ai-workspace/スタート" onclick="copyText(this)">コピー</button></div>
           <p class="muted os-mac" style="font-size:13px;">Finder で Command+Shift+G を押し、貼って Enter で開けます。</p>
 
-	          <ol class="steplist">
-	            <li><span class="fname">1_AIをまとめて起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … <b>推奨</b>。AIと見守り画面を一緒に起動し、Codex（ChatGPT 課金の人）／Claude（Claude 課金の人）／OpenCode + DeepSeek（無課金・少額チャージの人）を選ぶ</li>
-	            <li><span class="fname">2_セーフCodexを起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … Codex を安全モードで動かす（統合版の標準モード＋見守り画面）</li>
-            <li><span class="fname">3_セーフClaudeを起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … Claude Code を安全モードで動かす（統合版の標準モード＋見守り画面）</li>
-            <li><span class="fname">4_セーフAntiGravityを起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … AntiGravity を安全モードで動かす（無課金の人の標準）</li>
-            <li><span class="fname">5_セーフOpenCodeを起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … OpenCode + DeepSeek を安全モードで動かす（統合版の標準モード＋見守り画面＋送信検査）</li>
+          <ol class="steplist">
+            <li><span class="fname">4_AIを起動する<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … <b>ふだんはこれ 1 つ</b>。AIと見守り画面を一緒に起動します。開いたメニューから OpenCode 無料モデル（完全無課金の人）／AntiGravity（無料）／OpenCode + DeepSeek（少額チャージ・送信検査つき）／Codex（ChatGPT 課金の人）／Claude（Claude 課金の人）を選びます</li>
+            <li><span class="fname">3_じぶんに合うAIを選ぶ<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … どれを選べばいいか迷ったら、先にこれを押してください。課金状況別の選び方ガイドがブラウザで開きます</li>
+            <li><span class="fname">5_Codexデスクトップアプリを起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … Codex をアプリで使う人はこちら（無料プランでも使えます。入っていなければ公式サイトを案内します）</li>
           </ol>
 
-          <p class="muted">AGI Cockpit（1 つのアプリで AI を使い分けるアプリ）で Claude を使いたい人は、docs フォルダの <b>11_AGI-Cockpitで使う</b> を読んでください（作業フォルダを my-ai-workspace にすれば保護が効きます。Codex だけは上の 2_ ボタンから）。</p>
+          <p class="muted">AGI Cockpit（1 つのアプリで AI を使い分けるアプリ）で Claude を使いたい人は、docs フォルダの <b>11_AGI-Cockpitで使う</b> を読んでください（作業フォルダを my-ai-workspace にすれば保護が効きます。Codex だけは上の 4_AIを起動する から）。</p>
 
-          <p class="muted">慣れてきたら：<span class="fname">（上級）5_このPC全体に最低限の安全設定を入れる<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … Claude Code・Codex・AntiGravity・OpenCode を<b>どのフォルダから起動しても</b>危険コマンド（再帰削除・.env の読み取り・外部への送信など）を止めます。<b>Codex はデスクトップアプリも同じ設定ファイルを読むので、アプリ側にも同時に効きます。</b>元に戻したいときは <span class="fname">（上級）6_PC全体の安全設定を解除<span class="os-win">.bat</span><span class="os-mac">.command</span></span> を実行してください（適用前のバックアップから元の設定に戻します）。</p>
+          <p class="muted">慣れてきたら：<span class="fname">キーと金庫/12_PC全体に安全設定を入れる<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … Claude Code・Codex・AntiGravity・OpenCode を<b>どのフォルダから起動しても</b>危険コマンド（再帰削除・.env の読み取り・外部への送信など）を止めます。<b>Codex はデスクトップアプリも同じ設定ファイルを読むので、アプリ側にも同時に効きます。</b>元に戻したいときは <span class="fname">キーと金庫/13_PC全体の安全設定を解除<span class="os-win">.bat</span><span class="os-mac">.command</span></span> を実行してください（適用前のバックアップから元の設定に戻します）。</p>
 
-          <p class="muted"><span class="fname">my-ai-workspace</span> 以外のフォルダで作業したくなったら：<span class="fname">（上級）14_新しい作業フォルダを安全にする<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … フォルダを選ぶと、そこに安全ルール・見張り・スタートフォルダをまとめて入れます（案件ごとに 1 つフォルダを作るのがおすすめです）。</p>
+          <p class="muted">案件ごとに作業を分けたいときは、<span class="fname">my-ai-workspace</span> の中にサブフォルダを作ってください。作業フォルダの安全ルールと見張りが、その中でもそのまま効きます。</p>
 
-          <p class="muted">目を離して AI に長く作業させたいとき：<span class="fname">（上級）15_長時間おまかせモードで起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … 確認ダイアログをほとんど出さずに進めます。押すとメニューが出るので、<b>Claude／Codex／OpenCode／AntiGravity</b> から選んでください（<b>Mac でも Windows でも使えます</b>）。このモードは「全部素通し」ではありません。<b>再帰削除・秘密ファイルの読み取り・<span class="fname">sudo</span>・<span class="fname">git push</span> などは止まったまま</b>で、記録もそのまま残ります。<b>「壁」（OS が作業フォルダの外への書き込みを止める仕組み）がある組み合わせ</b>（Mac の Claude／Mac と Windows の Codex）では、壁を立てられなかったときは起動しません。<b>壁が無い組み合わせ</b>（Windows の Claude／OpenCode／AntiGravity）では、起動前に「この環境には壁がありません」という確認が<b>一度だけ</b>出ます。「はい」と入力しないかぎり起動しません。<b>この作業フォルダに大事なファイルを置かないでください。</b>くわしくは docs フォルダの <a class="ext" href="docs/20_卒業後ガイド.md">20_卒業後ガイド</a> へ。</p>
+          <p class="muted">目を離して AI に長く作業させたいとき：<span class="fname">6_長時間おまかせモードで起動<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … 確認ダイアログをほとんど出さずに進めます。押すとメニューが出るので、<b>Claude／Codex／OpenCode／AntiGravity</b> から選んでください（<b>Mac でも Windows でも使えます</b>）。このモードは「全部素通し」ではありません。<b>再帰削除・秘密ファイルの読み取り・<span class="fname">sudo</span>・<span class="fname">git push</span> などは止まったまま</b>で、記録もそのまま残ります。<b>「壁」（OS が作業フォルダの外への書き込みを止める仕組み）がある組み合わせ</b>（Mac の Claude／Mac と Windows の Codex）では、壁を立てられなかったときは起動しません。<b>壁が無い組み合わせ</b>（Windows の Claude／OpenCode／AntiGravity）では、起動前に「この環境には壁がありません」という確認が<b>一度だけ</b>出ます。「はい」と入力しないかぎり起動しません。<b>この作業フォルダに大事なファイルを置かないでください。</b>くわしくは docs フォルダの <a class="ext" href="docs/20_卒業後ガイド.md">20_卒業後ガイド</a> へ。</p>
 
-          <p class="muted">合言葉やトークンを安全にしまいたいとき：<span class="fname">（上級）16_金庫に秘密をしまう<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … 好きな名前を付けて、短い文字列をパソコンの<b>金庫</b>（<span class="os-mac">Mac のキーチェーン</span><span class="os-win">Windows の DPAPI</span>）に入れます。メモ帳のファイルと違って中身は暗号化され、<b>この PC にログインできる本人だけ</b>が取り出せます。取り出すときは <span class="fname">（上級）17_金庫から秘密を取り出す<span class="os-win">.bat</span><span class="os-mac">.command</span></span>（画面には出さず<b>クリップボードに入れて 60 秒後に自動で消します</b>）、いらなくなったら <span class="fname">（上級）18_金庫の秘密を消す<span class="os-win">.bat</span><span class="os-mac">.command</span></span> です。入れられるのは短い文字列だけです（英数字なら約 90 文字、日本語なら約 30 文字まで）。</p>
+          <p class="muted">合言葉やトークンを安全にしまいたいとき：<span class="fname">キーと金庫/7_金庫に秘密をしまう<span class="os-win">.bat</span><span class="os-mac">.command</span></span> … 好きな名前を付けて、短い文字列をパソコンの<b>金庫</b>（<span class="os-mac">Mac のキーチェーン</span><span class="os-win">Windows の DPAPI</span>）に入れます。メモ帳のファイルと違って中身は暗号化され、<b>この PC にログインできる本人だけ</b>が取り出せます。取り出すときは <span class="fname">キーと金庫/8_金庫から秘密を取り出す<span class="os-win">.bat</span><span class="os-mac">.command</span></span>（画面には出さず<b>クリップボードに入れて 60 秒後に自動で消します</b>）、いらなくなったら <span class="fname">キーと金庫/9_金庫の秘密を消す<span class="os-win">.bat</span><span class="os-mac">.command</span></span> です。入れられるのは短い文字列だけです（英数字なら約 90 文字、日本語なら約 30 文字まで）。</p>
 
 
           <div class="info">
@@ -654,7 +652,7 @@
 
           <div class="do">
             <span class="ic" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M9 20h6M12 16v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7 10l2.5 2.5L13 8l2 2 2-2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-	            <div><span class="fname">1_AIをまとめて起動</span>を使った場合は、見守り画面も自動で開きます。個別に開く時だけ<b>別ウィンドウ</b>で <span class="fname">6_見守りモニターを起動</span> を<b>ダブルクリック</b>します。</div>
+	            <div><span class="fname">4_AIを起動する</span>を使った場合は、見守り画面も自動で開きます。個別に開く時だけ<b>別ウィンドウ</b>で <span class="fname">7_見守りモニターを起動</span> を<b>ダブルクリック</b>します。</div>
           </div>
 
           <div class="meta">
@@ -664,7 +662,7 @@
 
           <div class="do" style="background:#fff6e6; border-color:#f0d69a;">
             <span class="ic" aria-hidden="true">🔑</span>
-            <div><b>AIコーチ（相談機能）を使うには、無料キーを一度だけ登録します。</b>モニター画面に出る <b>「🔑 キーを登録／変更する」</b>ボタン、または <span class="fname">7_AIコーチのキーを登録</span> をダブルクリックし、<b>Google AI Studio</b>（無料）で作ったキーを貼り付けるだけです。約1分・キーはこのパソコンの中だけに保存されます。<b>登録しないと、コーチに聞いても答えません。</b></div>
+            <div><b>AIコーチ（相談機能）を使うには、無料キーを一度だけ登録します。</b>モニター画面に出る <b>「🔑 キーを登録／変更する」</b>ボタン、または <span class="fname">キーと金庫/3_AIコーチのキーを登録</span> をダブルクリックし、<b>Google AI Studio</b>（無料）で作ったキーを貼り付けるだけです。約1分・キーはこのパソコンの中だけに保存されます。<b>登録しないと、コーチに聞いても答えません。</b></div>
           </div>
 
           <p class="muted" style="font-size:13px;">※ 見守りモニターは <b>Codex / Claude / OpenCode</b> の統合起動に対応します。<b>AntiGravity</b> は別のしくみ（OS隔離）で守るため、モニターには表示されません。</p>
@@ -675,7 +673,6 @@
               <ul>
                 <li><b>ブラウザが開かない</b>：もう一度ダブルクリックしてみてください。それでも開かない時は、表示されたファイルの場所をブラウザに手で入力しても見られます。</li>
                 <li><b>「待機中」のまま変わらない</b>：これは正常です。検索や会話だけでは表示が変わらないことがあります。危険操作・ファイル書き込み・ブロックなどの安全イベントが出ると切り替わります。AI回答は、取得できる環境でだけ表示されます。</li>
-                <li><b>ブラウザが使えない環境のとき</b>：<span class="fname">（上級）3_モニターをコンソールで見る</span> を使うと、黒い画面（ターミナル）の中で見守れます。</li>
               </ul>
             </div>
           </details>
@@ -692,15 +689,15 @@
 
           <ol class="steplist">
             <li>
-              <b>① <span class="fname">（上級）1_DeepSeekキーを登録</span></b>（初回だけ）<br>
+              <b>① <span class="fname">キーと金庫/1_DeepSeekキーを登録</span></b>（初回だけ）<br>
               <span class="muted">DeepSeek の APIキー（パスワードのようなもの）を貼って登録します。キーの作り方・チャージのやり方は docs フォルダの <b>20_卒業後ガイド</b> にあります。</span>
             </li>
             <li>
-              <b>② <span class="fname">1_AIをまとめて起動</span> から「OpenCode + DeepSeek」を選ぶ</b><br>
+              <b>② <span class="fname">4_AIを起動する</span> から「OpenCode + DeepSeek」を選ぶ</b><br>
               <span class="muted">これで、<b>送信検査 Gateway が自動で立ち上がり</b>、APIキーなどを<b>送る前にマスキング（隠す）</b>した状態で DeepSeek につながります。ふだんは「Web検索OFF」の方を選んでください。</span>
             </li>
             <li>
-              <b>③ <span class="fname">（上級）7_DeepSeekキーを削除</span></b><br>
+              <b>③ <span class="fname">キーと金庫/2_DeepSeekキーを削除</span></b><br>
               <span class="muted">使い終わって、やめる時に押します。登録したキーを消します。</span>
             </li>
           </ol>
@@ -731,17 +728,17 @@
         <div class="card">
           <p class="step-eyebrow">卒業しても、ずっと使える</p>
           <h2 class="step-title">卒業後もずっと使う（更新の習慣）</h2>
-          <p class="muted">講座が終わっても、安全装置とボタンはそのまま使えます。覚えることは「<b>7 → 8 の順に押す</b>」だけです。</p>
+          <p class="muted">講座が終わっても、安全装置とボタンはそのまま使えます。覚えることは「<b>1 → 2 の順に押す</b>」だけです。</p>
 
           <ol class="steplist">
-            <li><b><span class="fname">8_安全パッケージを最新版に更新</span></b> … 安全装置とドキュメントを最新にします（先に押す）</li>
-            <li><b><span class="fname">9_AIツールを最新版に更新</span></b> … Codex／Claude Code／OpenCode の本体を、動作確認済みの版に更新します（後に押す。入れていないツールは自動でスキップ）</li>
+            <li><b><span class="fname">1_安全パッケージを最新版にする</span></b> … 安全装置とドキュメントを最新にします（先に押す）</li>
+            <li><b><span class="fname">2_AIツールをまとめて入れる</span></b> … Codex／Claude Code／OpenCode の本体を、動作確認済みの版に更新します（後に押す。入れていないツールは自動でスキップ）</li>
           </ol>
 
           <div class="meta">
             <div class="row why"><span class="k">なぜ</span><span>AIツールは更新が速く、古いままだと安全装置と噛み合わなくなることがあるからです。月に1回くらい押すのがおすすめです。</span></div>
-            <div class="row"><span class="k">何が起きる</span><span>黒い画面が開いて、いまの版 → 新しい版が表示されます。困ったら <span class="fname">10_困ったとき診断</span> を押してください。</span></div>
-            <div class="row os-win"><span class="k">Windows</span><span>診断や AI コーチのキー登録で「<b>アクセスが拒否されました</b>」と出たら、<span class="fname">14_フォルダのアクセス権を直す</span> を押してください。API キーの金庫フォルダの鍵が壊れているだけで、<b>キーは無事です（作り直し不要）</b>。手で直すときは <b>コマンドプロンプト（cmd）</b> を開いて <code>icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q</code> を貼り付けて実行します（<b>PowerShell では %USERPROFILE% が展開されないため動きません</b>）。コマンドが苦手なときは、<b>%USERPROFILE%</b> を開く → <b>.ai-safety</b> を右クリック → プロパティ → セキュリティ → 詳細設定 → 「継承の有効化」→「子オブジェクトのアクセス許可エントリすべてを…置き換える」にチェック → OK でも直せます。詳しくは <a class="ext" href="docs/99_known_issues.md">99_known_issues</a>。</span></div>
+            <div class="row"><span class="k">何が起きる</span><span>黒い画面が開いて、いまの版 → 新しい版が表示されます。困ったら <span class="fname">9_困ったとき診断</span> を押してください。</span></div>
+            <div class="row os-win"><span class="k">Windows</span><span>診断や AI コーチのキー登録で「<b>アクセスが拒否されました</b>」と出たら、<span class="fname">12_フォルダのアクセス権を直す</span> を押してください。API キーの金庫フォルダの鍵が壊れているだけで、<b>キーは無事です（作り直し不要）</b>。手で直すときは <b>コマンドプロンプト（cmd）</b> を開いて <code>icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q</code> を貼り付けて実行します（<b>PowerShell では %USERPROFILE% が展開されないため動きません</b>）。コマンドが苦手なときは、<b>%USERPROFILE%</b> を開く → <b>.ai-safety</b> を右クリック → プロパティ → セキュリティ → 詳細設定 → 「継承の有効化」→「子オブジェクトのアクセス許可エントリすべてを…置き換える」にチェック → OK でも直せます。詳しくは <a class="ext" href="docs/99_known_issues.md">99_known_issues</a>。</span></div>
           </div>
 
           <div class="info">

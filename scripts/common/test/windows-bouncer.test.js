@@ -17,7 +17,8 @@ function read(rel) {
 // 出ていたため。ここでは「消えたまま戻ってこないこと」も一緒に見る。
 test('Windows integrated launcher has standard and assisted profiles only', () => {
   const script = read('scripts/windows/launch-integrated.ps1');
-  assert.match(script, /ValidateSet\('codex','claude','opencode','d-claude'\)/);
+  // v1.18.0: 対話メニュー（課金プラン順）をランチャー本体へ集約したので 'menu' が増えた。
+  assert.match(script, /ValidateSet\('menu','codex','claude','opencode','d-claude'\)/);
   assert.match(script, /ValidateSet\('standard','assisted'\)/);
   assert.match(script, /standard/);
   assert.doesNotMatch(script, /maximum/);
@@ -44,30 +45,37 @@ test('integrated launchers pin cwd to the workspace before starting any agent', 
   const win = read('scripts/windows/launch-integrated.ps1');
   assert.match(win, /Set-Location -LiteralPath \$Workspace/);
   // Set-Location はエージェント起動(dry-run 分岐含む)より前に置くこと。
+  // v1.18.0: メニュー集約で agy / longrun への委譲分岐（dry-run で exit する）が
+  // Set-Location より前にできたため、本編の dry-run 分岐（最後の出現）と比べる。
   assert.ok(
-    win.indexOf('Set-Location -LiteralPath $Workspace') < win.indexOf('AI_SAFE_DRY_RUN'),
+    win.indexOf('Set-Location -LiteralPath $Workspace') < win.lastIndexOf('AI_SAFE_DRY_RUN'),
     'Set-Location must run before agents launch');
   const mac = read('scripts/macos/launch-integrated.sh');
   assert.match(mac, /^cd "\$workspace"$/m);
 });
 
-test('Windows legacy start buttons route through integrated standard mode', () => {
-  const codex = read('workspace-template/スタート/2_セーフCodexを起動.bat');
-  const claude = read('workspace-template/スタート/3_セーフClaudeを起動.bat');
+// v1.18.0: 個別のセーフ起動ボタン（2_セーフCodex / 3_セーフClaude）は
+// 「4_AIを起動する」に集約された。起動経路が統合ランチャー標準モードを
+// 通ることは変わらず固定する。
+test('Windows start button routes through integrated standard mode', () => {
+  // v1.18.0: ボタンはメニューの正本（launch-integrated.ps1 の menu モード）へ委譲する。
+  // 選択肢の写しをボタン側に持つと陳腐化する（AntiGravity 無しの旧メニューが残った実績）。
+  const menu = read('workspace-template/スタート/4_AIを起動する.bat');
+  assert.match(menu, /launch-integrated\.ps1/i);
+  assert.match(menu, /-Agent menu -Profile standard/i);
 
-  assert.match(codex, /launch-integrated\.ps1/i);
-  assert.match(codex, /-Agent codex -Profile standard/i);
-  assert.match(claude, /launch-integrated\.ps1/i);
-  assert.match(claude, /-Agent claude -Profile standard/i);
+  const script = read('scripts/windows/launch-integrated.ps1');
+  assert.match(script, /\$Agent = 'codex'; \$SafetyProfile = 'standard'/);
+  assert.match(script, /\$Agent = 'claude'; \$SafetyProfile = 'standard'/);
 });
 
 test('Mac and Windows integrated menus expose d-claude as a monitored option', () => {
-  const mac = read('workspace-template/スタート/1_AIをまとめて起動.command');
-  const win = read('workspace-template/スタート/1_AIをまとめて起動.bat');
+  const mac = read('scripts/macos/launch-integrated.sh');
+  const win = read('scripts/windows/launch-integrated.ps1');
   assert.match(mac, /d-claude.*DeepSeek/i);
-  assert.match(mac, /d-claude standard/);
+  assert.match(mac, /agent="d-claude"; profile="standard"/);
   assert.match(win, /d-claude.*DeepSeek/i);
-  assert.match(win, /-Agent d-claude -Profile standard/i);
+  assert.match(win, /\$Agent = 'd-claude'; \$SafetyProfile = 'standard'/);
 });
 
 test('Windows integrated d-claude dry-run reports monitor and send inspection', (t) => {

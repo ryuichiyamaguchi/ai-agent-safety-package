@@ -38,7 +38,7 @@ const INSTALL_SH = path.join(PKG, 'scripts', 'macos', 'install.sh');
 const SHINDAN = path.join(PKG, 'scripts', 'windows', '診断.ps1');
 const DOCTOR = path.join(PKG, 'scripts', 'windows', 'doctor.ps1');
 const SAFETY_LIB = path.join(PKG, 'scripts', 'windows', 'lib', 'SafetyPolicy.ps1');
-const BUTTON = path.join(PKG, 'workspace-template', 'スタート', '14_フォルダのアクセス権を直す.bat');
+const BUTTON = path.join(PKG, 'workspace-template', 'スタート', '12_フォルダのアクセス権を直す.bat');
 const VERSIONS = path.join(PKG, 'docs', 'tested_versions.md');
 const KNOWN_ISSUES = path.join(PKG, 'docs', '99_known_issues.md');
 const DOC13 = path.join(PKG, 'docs', '13_秘密の入れ物-APIキーの安全な持ち方.md');
@@ -274,7 +274,7 @@ test('受講者に見せる回復コマンドが、実機で成功した形と�
     ['診断.ps1', read(SHINDAN)],
     ['doctor.ps1', read(DOCTOR)],
     ['install.ps1', read(INSTALL_PS1)],
-    ['14_フォルダのアクセス権を直す.bat', batOut.stdout.replace(/%%/g, '%')],
+    ['12_フォルダのアクセス権を直す.bat', batOut.stdout.replace(/%%/g, '%')],
     ['docs/99_known_issues.md', read(KNOWN_ISSUES)],
     ['docs/13_秘密の入れ物…', read(DOC13)],
     ['スタート.html', read(START_HTML)],
@@ -296,7 +296,7 @@ test('コマンドが苦手な受講者向けに、エクスプローラーで�
     ['repair-permissions.ps1', read(REPAIR)],
     ['診断.ps1', read(SHINDAN)],
     ['doctor.ps1', read(DOCTOR)],
-    ['14_フォルダのアクセス権を直す.bat', batOut.stdout],
+    ['12_フォルダのアクセス権を直す.bat', batOut.stdout],
     ['docs/99_known_issues.md', read(KNOWN_ISSUES)],
     ['docs/13_秘密の入れ物…', read(DOC13)],
     ['スタート.html', read(START_HTML)],
@@ -347,7 +347,7 @@ test('診断はアクセス拒否と復号失敗を区別する（誤診の修�
 test('診断は修復手段をコピペできる形で表示する', () => {
   const s = read(SHINDAN);
   assert.match(s, /function Show-PermissionRepairHint/, '修復案内が無い');
-  assert.match(s, /14_フォルダのアクセス権を直す/, '修復ボタンの案内が無い');
+  assert.match(s, /12_フォルダのアクセス権を直す/, '修復ボタンの案内が無い');
   // ★ 実機で成功した形（cmd で icacls /reset）だけを出す。SID を使う形・takeown を
   //   案内に書き戻さないこと（どちらも実機で失敗した。理由は下の失敗リストのテスト参照）。
   //   判定対象は「受講者の画面に出る本文」= Show-PermissionRepairHint の中身だけ。
@@ -372,7 +372,7 @@ test('doctor も金庫フォルダのアクセス権を見る', () => {
   const s = read(DOCTOR);
   assert.match(s, /secretDirAccessible/, 'アクセス権の判定が無い');
   assert.match(s, /金庫フォルダのアクセス権/, '結果行が無い');
-  assert.match(s, /14_フォルダのアクセス権を直す/, '直し方の案内が無い');
+  assert.match(s, /12_フォルダのアクセス権を直す/, '直し方の案内が無い');
 });
 
 test('mac 側も chmod のあとに読み書きを検証し、失敗したら戻す', () => {
@@ -396,7 +396,7 @@ test('修復スクリプトが改ざん検知の表に載っていて、ハッ�
 test('既に壊れた受講者向けの回復手順が docs に書いてある', () => {
   const s = read(KNOWN_ISSUES);
   assert.match(s, /アクセスが拒否/, '症状が書かれていない');
-  assert.match(s, /14_フォルダのアクセス権を直す/, '回復手段が書かれていない');
+  assert.match(s, /12_フォルダのアクセス権を直す/, '回復手段が書かれていない');
   assert.match(s, /実機確認が必要/, '未検証事項が明示されていない');
   // 実機で失敗した 4 つの方法が理由つきで残っていること（同じ轍を踏ませないため）。
   assert.match(s, /実機で失敗した方法/, '失敗した方法の一覧が無い');

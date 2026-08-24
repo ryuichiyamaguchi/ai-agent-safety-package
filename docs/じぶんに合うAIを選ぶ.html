@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>じぶんに合うAIを選ぶ｜AIエージェント安全パッケージ</title>
+<style>
+  :root{
+    --bg:#f4f1ea;
+    --bg-2:#efe9dd;
+    --ink:#1f2733;
+    --ink-soft:#566173;
+    --line:#e4ddcd;
+    --brand:#1f6f5c;
+    --brand-deep:#155244;
+    --brand-soft:#e6f0ec;
+    --accent:#e0762d;
+    --accent-deep:#b85a1a;
+    --warn-bg:#fcebe7;
+    --warn-ink:#9b2616;
+    --warn-line:#f0bdb1;
+    --radius:16px;
+    --radius-sm:10px;
+    --shadow:0 6px 24px rgba(31,39,51,.08), 0 1px 0 rgba(31,39,51,.04);
+    --maxw:860px;
+    --font:-apple-system,"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic","Meiryo","BIZ UDPGothic",sans-serif;
+    --mono:"SFMono-Regular","Menlo","Consolas","BIZ UDGothic",monospace;
+  }
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    margin:0; font-family:var(--font); color:var(--ink);
+    background:linear-gradient(180deg,var(--bg) 0%,var(--bg-2) 100%);
+    line-height:1.85; font-size:16.5px; -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3{word-break:keep-all; overflow-wrap:anywhere; line-break:strict; line-height:1.4;}
+  p,li,td,th,figcaption{overflow-wrap:anywhere; line-break:strict;}
+  .nb{display:inline-block;}
+
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:28px 18px 80px;}
+
+  header.hero{text-align:center; padding:16px 8px 6px;}
+  .hero .badge{
+    display:inline-block; background:var(--brand-soft); color:var(--brand-deep);
+    border:1px solid #cfe2db; padding:5px 14px; border-radius:999px;
+    font-weight:800; font-size:13px;
+  }
+  .hero h1{font-size:clamp(26px,5.8vw,38px); font-weight:900; margin:16px 0 8px;}
+  .hero h1 .hl{color:var(--brand-deep);}
+  .hero p.lead{color:var(--ink-soft); max-width:620px; margin:0 auto; font-size:clamp(14.5px,3.4vw,17px);}
+
+  figure{margin:24px 0;}
+  figure img{
+    width:100%; height:auto; display:block;
+    border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); background:#fff;
+  }
+  figcaption{font-size:13.5px; color:var(--ink-soft); margin-top:8px; text-align:center;}
+
+  section{margin-top:40px;}
+  h2{
+    font-size:clamp(21px,4.6vw,26px); font-weight:900; margin:0 0 6px;
+    padding-left:14px; border-left:6px solid var(--brand); border-radius:2px;
+  }
+  .sec-lead{color:var(--ink-soft); margin:0 0 16px; font-size:15.5px;}
+
+  /* 選択肢カード */
+  .choice{
+    background:#fff; border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); margin:16px 0; overflow:hidden;
+  }
+  .choice .head{
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+    padding:14px 18px; color:#fff;
+  }
+  .choice .head .q{font-weight:900; font-size:16.5px;}
+  .choice .head .arrow{opacity:.85; font-weight:900;}
+  .choice .head .a{
+    background:rgba(255,255,255,.92); color:var(--ink);
+    font-weight:900; font-size:15px; padding:3px 14px; border-radius:999px;
+  }
+  .choice.c-free .head{background:#2e8b57;}
+  .choice.c-codexapp .head{background:#0f766e;}
+  .choice.c-deepseek .head{background:#d97324;}
+  .choice.c-chatgpt .head{background:#1d5aa8;}
+  .choice.c-opencode .head{background:#527060;}
+  .choice.c-claude .head{background:#6d4fa3;}
+  .choice .body{padding:14px 18px 16px;}
+  .choice .body p{margin:6px 0; font-size:14.8px;}
+  .choice .body p.dim{color:var(--ink-soft); font-size:14px;}
+  .howto{
+    display:flex; gap:10px; align-items:flex-start;
+    background:var(--brand-soft); border:1px solid #cfe2db;
+    border-radius:var(--radius-sm); padding:10px 14px; margin:10px 0 4px;
+    font-size:14.3px;
+  }
+  .howto .k{
+    flex:0 0 auto; font-weight:900; font-size:12px; color:var(--brand-deep);
+    background:#fff; border:1px solid #cfe2db; border-radius:7px; padding:2px 9px; margin-top:3px;
+  }
+  .fname{
+    font-family:var(--mono); font-size:13.5px; font-weight:700;
+    background:#f4f7f5; border:1px solid #d8e4de; border-radius:7px;
+    padding:1px 7px; color:var(--brand-deep);
+  }
+  a.ext{
+    color:var(--brand-deep); font-weight:800; text-decoration:none;
+    border-bottom:2px solid #bcdcd1; padding-bottom:1px;
+  }
+  a.ext:hover{border-color:var(--brand);}
+
+  .warn{
+    background:var(--warn-bg); border:1.5px solid var(--warn-line);
+    border-left:6px solid var(--warn-ink); border-radius:var(--radius-sm);
+    padding:13px 16px; margin:14px 0; color:var(--warn-ink); font-size:14.3px;
+  }
+  .info{
+    background:#eef4fb; border:1px solid #d3e2f3; border-radius:var(--radius-sm);
+    padding:12px 15px; margin:12px 0; font-size:14px; color:#2a4868;
+  }
+
+  .table-wrap{overflow-x:auto; background:#fff; border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow);}
+  table{width:100%; border-collapse:collapse; min-width:600px;}
+  th,td{padding:11px 13px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; font-size:14.3px;}
+  th{background:#f2efe6; font-size:13.5px;}
+  tr:last-child td{border-bottom:0;}
+
+  footer{
+    margin-top:56px; padding-top:20px; border-top:1px solid var(--line);
+    color:var(--ink-soft); font-size:13px; text-align:center;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">AIエージェント安全パッケージ</span>
+    <h1><span class="nb">じぶんに合う AI を、</span><span class="nb">課金状況で選ぶ</span></h1>
+    <p class="lead">AI エージェントはたくさんありますが、選び方はシンプルです。<b>「いま何に課金しているか」</b>で決めてください。お金をかけなくても始められます。</p>
+  </header>
+
+  <figure>
+    <img src="assets/ai-choice-flowchart.png" alt="じぶんに合うAIはどれ？課金状況で決めるフローチャート。完全無課金はOpenCode（無料モデルを自分で選ぶ）が第一候補でAntiGravity（agy）も無料、Codexを試したい人はCodexデスクトップアプリ、DeepSeekキーがある人（少額チャージ）はOpenCode+DeepSeekかd-claude、ChatGPT課金はCodex CLI、Claude課金はClaude Code">
+    <figcaption>迷ったらこの図。下に、それぞれのくわしい説明があります。</figcaption>
+  </figure>
+
+  <section>
+    <h2>あなたはどれ？　上から順に見てください</h2>
+    <p class="sec-lead">あてはまるものが複数あるときは、上にあるほうが「お金がかからない」順です。どれを選んでも、起動はスタートフォルダのボタンからです。</p>
+
+    <div class="choice c-free">
+      <div class="head"><span class="q">完全無課金で始めたい</span><span class="arrow">→</span><span class="a">OpenCode（無料モデルを自分で選ぶ）</span></div>
+      <div class="body">
+        <p>OpenCode には<b>無料で使えるモデル</b>がいくつも用意されています。起動後のモデル一覧から自分で選べば、<b>お金をかけずに</b>そのまま使えます（キーの登録は不要です）。</p>
+        <div class="howto"><span class="k">起動</span><span><span class="fname">4_AIを起動する</span> を押して、メニューの 1 番「OpenCode（無料モデルを自分で選ぶ）」を選びます。</span></div>
+        <p class="dim">守られ方：危険なコマンドを止める仕組み・秘密ファイルの読み取り禁止・見張り＋記録係は、DeepSeek 版とまったく同じものが効きます。ただし<b>無料モデルの会話は送信検査ゲートウェイ（キーを伏せる仕組み）を通らず、選んだモデルの提供元へ直接送信されます</b>。</p>
+      </div>
+    </div>
+
+    <div class="choice c-free">
+      <div class="head"><span class="q">無料の CLI も試したい</span><span class="arrow">→</span><span class="a">AntiGravity（agy）</span></div>
+      <div class="body">
+        <p>AntiGravity は Google の無料 CLI です。こちらも<b>お金をかけずに</b> AI エージェントを体験できます。</p>
+        <div class="howto"><span class="k">起動</span><span><span class="fname">4_AIを起動する</span> を押して、メニューから AntiGravity を選びます。</span></div>
+        <p class="dim">守られ方：AntiGravity 自身の隔離機能（--sandbox）を付けて起動し、記録係が残ります（この隔離は独立に検証したものではないので「壁あり」とは数えていません）。利用条件は <a class="ext" href="https://antigravity.google" target="_blank" rel="noopener">AntiGravity 公式ページ</a>で確認してください。</p>
+      </div>
+    </div>
+
+    <div class="choice c-codexapp">
+      <div class="head"><span class="q">Codex を無料で試したい</span><span class="arrow">→</span><span class="a">Codex デスクトップアプリ</span></div>
+      <div class="body">
+        <p>Codex のデスクトップアプリは、<b>ChatGPT の無料プランでも使えます</b>。黒い画面が苦手な人にもおすすめです。</p>
+        <div class="howto"><span class="k">起動</span><span><span class="fname">5_Codexデスクトップアプリを起動</span> を押します。アプリが入っていなければ公式サイトの案内が出ます。</span></div>
+        <div class="howto"><span class="k">守り</span><span>「キーと金庫」フォルダの <span class="fname">12_PC全体に安全設定を入れる</span> を 1 度押しておくと、アプリにもこのパッケージの安全設定が効きます。</span></div>
+        <p class="dim">利用できる範囲はプランによって変わります。<a class="ext" href="https://openai.com/codex/" target="_blank" rel="noopener">Codex 公式ページ</a>で確認してください。</p>
+      </div>
+    </div>
+
+    <div class="choice c-deepseek">
+      <div class="head"><span class="q">DeepSeek の API キーがある（少額チャージ）</span><span class="arrow">→</span><span class="a">DeepSeek-Claude（d-claude）か OpenCode + DeepSeek</span></div>
+      <div class="body">
+        <p>DeepSeek のキーを持っている人は、<b>OpenCode + DeepSeek</b>（標準）か、Claude Code の操作感で使える <b>d-claude</b> を選べます。どちらも送信前にキーや秘密情報を検査する<b>送信検査ゲートウェイ</b>つきです。</p>
+        <div class="howto"><span class="k">準備</span><span>「キーと金庫」フォルダの <span class="fname">1_DeepSeekキーを登録</span> でキーを 1 回登録します。</span></div>
+        <div class="howto"><span class="k">起動</span><span><span class="fname">4_AIを起動する</span> のメニューから「OpenCode + DeepSeek」か「d-claude + DeepSeek」を選びます。</span></div>
+        <p class="dim">DeepSeek には無料利用枠もあります（条件は変わります）。キーの作り方・チャージは <a class="ext" href="https://platform.deepseek.com" target="_blank" rel="noopener">DeepSeek 公式</a>と docs の「20_卒業後ガイド」へ。</p>
+        <div class="warn">会話の内容は DeepSeek（中国管轄のサーバー）に送信されます。マスキングは既知のパターンに限られます。本当に困る情報（個人情報・機密・パスワード等）は入力しないでください。</div>
+      </div>
+    </div>
+
+    <div class="choice c-chatgpt">
+      <div class="head"><span class="q">ChatGPT に課金している</span><span class="arrow">→</span><span class="a">Codex CLI</span></div>
+      <div class="body">
+        <p>ChatGPT の有料プランに入っているなら、Codex CLI が使えます。<b>Mac でも Windows でも「壁＋見張り＋記録係」の全部が効く</b>、このパッケージでいちばん守りの厚い組み合わせです。</p>
+        <div class="howto"><span class="k">起動</span><span><span class="fname">4_AIを起動する</span> を押して、メニューから Codex を選びます。</span></div>
+        <p class="dim">CLI がどのプランで使えるかは変わることがあります。<a class="ext" href="https://openai.com/chatgpt/pricing/" target="_blank" rel="noopener">ChatGPT のプラン一覧（公式）</a>で確認してください。</p>
+      </div>
+    </div>
+
+    <div class="choice c-claude">
+      <div class="head"><span class="q">Claude に課金している</span><span class="arrow">→</span><span class="a">Claude Code</span></div>
+      <div class="body">
+        <p>Claude の有料プランに入っているなら、Claude Code が使えます（<b>無料プランでは使えません</b>）。</p>
+        <div class="howto"><span class="k">起動</span><span><span class="fname">4_AIを起動する</span> を押して、メニューから Claude を選びます。</span></div>
+        <p class="dim">注意：Claude Code の「壁」は Mac では効きますが、<b>Windows では使えません</b>（Claude Code 自体が未対応のため）。Windows では見張り＋記録係が守ります。プランは <a class="ext" href="https://claude.com/pricing" target="_blank" rel="noopener">Claude のプラン一覧（公式）</a>で確認してください。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>1 枚のまとめ表</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>あなたの状況</th><th>使う AI</th><th>起動のしかた</th><th>守られ方</th></tr></thead>
+        <tbody>
+          <tr><td>完全無課金</td><td>OpenCode（無料モデルを自分で選ぶ）</td><td>「4_AIを起動する」→ 1 番</td><td>見張り＋記録係＋deny 床（<b>送信検査は無し</b>＝会話は選んだモデルの提供元へ直接送信）</td></tr>
+          <tr><td>完全無課金（無料 CLI も試したい）</td><td>AntiGravity（agy）</td><td>「4_AIを起動する」→ AntiGravity</td><td>AntiGravity 自身の隔離（--sandbox）＋記録係</td></tr>
+          <tr><td>無課金で Codex を試したい</td><td>Codex デスクトップアプリ</td><td>「5_Codexデスクトップアプリを起動」</td><td>壁（アプリ自身）＋見張り＋記録係（キーと金庫の 12 を押した場合）</td></tr>
+          <tr><td>DeepSeek キーあり（少額チャージ）</td><td>OpenCode + DeepSeek ／ d-claude</td><td>キーと金庫の 1 で登録 → 「4_AIを起動する」</td><td>見張り＋記録係＋送信検査</td></tr>
+          <tr><td>ChatGPT 課金</td><td>Codex CLI</td><td>「4_AIを起動する」→ Codex</td><td>壁＋見張り＋記録係（Mac／Windows とも）</td></tr>
+          <tr><td>Claude 課金</td><td>Claude Code</td><td>「4_AIを起動する」→ Claude</td><td>Mac は壁＋見張り＋記録係／Windows は見張り＋記録係</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="info"><b>料金・プラン・無料枠の条件は、ここには書きません。</b>変わるからです。決める前に、かならず各リンク先の公式サイトで最新の内容を確認してください。</div>
+    <p class="sec-lead" style="margin-top:14px;">「壁・見張り・記録係」の意味は、スタートの <span class="fname">8_使い方ガイドを開く</span>（<a class="ext" href="ai-agent-safety-package-explained.html">使い方ガイド</a>）にあります。もっとくわしい比較は docs の「00_はじめに」と「20_卒業後ガイド」へ。</p>
+  </section>
+
+  <footer>
+    <p>じぶんに合うAIを選ぶ｜AIエージェント安全パッケージ（リンク先の閲覧以外はオフラインでも表示できます）</p>
+  </footer>
+
+</div>
+</body>
+</html>

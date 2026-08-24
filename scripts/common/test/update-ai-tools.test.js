@@ -22,54 +22,43 @@ const readSjis = (rel) =>
   new TextDecoder('shift_jis').decode(fs.readFileSync(path.join(root, rel)));
 
 // ── 1. スタートフォルダの新番号体系 ─────────────────────────────────────
+// v1.18.0 再編: スタート直下は「よく使う順の基本 9 個 +（Windows のみ）3 個」に絞り、
+// キー・金庫系はサブフォルダ「キーと金庫」へ移した。個別のセーフ起動ボタンは
+// 「4_AIを起動する」（統合ランチャー）へ集約し、「（上級）」プレフィックスは全廃。
+// 野良 d-claude 退治は診断（9_困ったとき診断）へ統合した。
 const EXPECTED_BOTH = [
-  '1_AIをまとめて起動',
-  '2_セーフCodexを起動',
-  '3_セーフClaudeを起動',
-  '4_セーフAntiGravityを起動',
-  // v1.17.1 新設: OpenCode だけ単独ボタンが無く「1_AIをまとめて起動」のメニュー経由でしか
-  // 起動できなかった。無課金の受講生にとって OpenCode + DeepSeek は主経路なので、基本枠へ
-  // 入れて AI 4 種を 2〜5 に並べた（旧 5〜12 は 1 つずつ繰り下げ）。
-  '5_セーフOpenCodeを起動',
-  '6_見守りモニターを起動',
-  '7_AIコーチのキーを登録',
-  '8_安全パッケージを最新版に更新',
-  '9_AIツールを最新版に更新',
-  '10_困ったとき診断',
-  '11_野良d-claudeを退治',
-  '（上級）1_DeepSeekキーを登録',
-  '（上級）2_DeepSeek-Claudeを起動', // 山口さん判断 (2026-08-18): d-claude は廃止しない
-  '（上級）3_モニターをコンソールで見る',
-  '（上級）4_ステータスラインを入れる',
-  '（上級）5_このPC全体に最低限の安全設定を入れる',
-  '（上級）6_PC全体の安全設定を解除',
-  '（上級）7_DeepSeekキーを削除',
-  '（上級）8_Bufferのキーを登録',
-  '（上級）9_プラグインの置き場を開く',
-  // v1.17.0 で追加した上級枠。10/11 はマスキングの対（伏せる↔戻す）を隣り合わせに置く。
-  '（上級）10_コピーした文章から秘密を伏せる',
-  '（上級）11_伏せた文章を元に戻す',
-  // 12/13 は「登録」ボタン（6・8）に対する削除ボタン。DeepSeek だけ削除があって
-  // Gemini・Buffer に無い非対称を解消したもの。
-  '（上級）12_AIコーチのキーを削除',
-  '（上級）13_Bufferのキーを削除',
-  // 14 は卒業後用。任意のフォルダに保護一式を入れて「安全な作業フォルダ」にする。
-  '（上級）14_新しい作業フォルダを安全にする',
-  // 15 は長時間おまかせモード。v1.17.1 で Claude / Codex / OpenCode / agy の 4 エンジン ×
-  // mac / Windows に対応した。壁（OS サンドボックス）が無い環境では一度だけ確認を取ってから
-  // 進む（旧仕様の「Windows では起動しない」は撤廃）。
-  '（上級）15_長時間おまかせモードで起動',
-  // v1.17.2 新設の汎用の金庫（自由枠）。固定枠（AIコーチ・Buffer・DeepSeek）とは別で、
-  // 受講者が自分で名前を付けた任意の文字列を OS の金庫にしまう / 取り出す / 消す。
-  '（上級）16_金庫に秘密をしまう',
-  '（上級）17_金庫から秘密を取り出す',
-  '（上級）18_金庫の秘密を消す',
+  '1_安全パッケージを最新版にする',
+  '2_AIツールをまとめて入れる',
+  '3_じぶんに合うAIを選ぶ',
+  '4_AIを起動する',
+  '5_Codexデスクトップアプリを起動',
+  '6_長時間おまかせモードで起動',
+  '7_見守りモニターを起動',
+  '8_使い方ガイドを開く',
+  '9_困ったとき診断',
 ];
-// Windows 専用ボタン。14 は v1.17.2 新設のアクセス権修復口で、Windows の ACL 固有の
+// Windows 専用ボタン。12 は v1.17.2 新設のアクセス権修復口で、Windows の ACL 固有の
 // 事故（v1.17.1 までの install が `USERDOMAIN\USERNAME` という解決できない名前へ権限を
 // 与え、`/inheritance:r` と合わさって受講者本人まで締め出していた）からの回復に使う。
 // mac は chmod なので同型の事故が起きず、対になる .command は作らない。
-const EXPECTED_WIN_ONLY = ['12_PowerShellを開く', '13_作業フォルダを開く', '14_フォルダのアクセス権を直す'];
+const EXPECTED_WIN_ONLY = ['10_PowerShellを開く', '11_作業フォルダを開く', '12_フォルダのアクセス権を直す'];
+// サブフォルダ「キーと金庫」（キーの登録・削除と OS 金庫の自由枠）。
+const VAULT_DIR = 'キーと金庫';
+const EXPECTED_VAULT_BOTH = [
+  '1_DeepSeekキーを登録',
+  '2_DeepSeekキーを削除',
+  '3_AIコーチのキーを登録',
+  '4_AIコーチのキーを削除',
+  '5_Bufferのキーを登録',
+  '6_Bufferのキーを削除',
+  '7_金庫に秘密をしまう',
+  '8_金庫から秘密を取り出す',
+  '9_金庫の秘密を消す',
+  '10_コピーした文章から秘密を伏せる',
+  '11_伏せた文章を元に戻す',
+  '12_PC全体に安全設定を入れる',
+  '13_PC全体の安全設定を解除',
+];
 
 test('スタートフォルダは新番号体系どおりで、重複・欠番・旧名がない', () => {
   const files = fs.readdirSync(startDir).filter((f) => !f.startsWith('.')).sort();
@@ -77,19 +66,29 @@ test('スタートフォルダは新番号体系どおりで、重複・欠番�
     ...EXPECTED_BOTH.map((b) => `${b}.command`),
     ...EXPECTED_BOTH.map((b) => `${b}.bat`),
     ...EXPECTED_WIN_ONLY.map((b) => `${b}.bat`),
+    VAULT_DIR,
   ].sort();
   assert.deepStrictEqual(files, expected);
 
-  // 番号の重複がないこと（基本・上級それぞれで先頭番号が一意）。
-  for (const ext of ['command', 'bat']) {
-    const nums = files
-      .filter((f) => f.endsWith(`.${ext}`))
-      .map((f) => {
-        const m = f.match(/^(（上級）)?(\d+)_/);
-        return m ? `${m[1] || ''}${m[2]}` : null;
-      })
-      .filter(Boolean);
-    assert.strictEqual(new Set(nums).size, nums.length, `${ext}: 番号が重複している`);
+  const vaultFiles = fs.readdirSync(path.join(startDir, VAULT_DIR)).filter((f) => !f.startsWith('.')).sort();
+  const vaultExpected = [
+    ...EXPECTED_VAULT_BOTH.map((b) => `${b}.command`),
+    ...EXPECTED_VAULT_BOTH.map((b) => `${b}.bat`),
+  ].sort();
+  assert.deepStrictEqual(vaultFiles, vaultExpected);
+
+  // 番号の重複がないこと（直下・キーと金庫それぞれで先頭番号が一意）。
+  for (const [label, list] of [['スタート', files], ['キーと金庫', vaultFiles]]) {
+    for (const ext of ['command', 'bat']) {
+      const nums = list
+        .filter((f) => f.endsWith(`.${ext}`))
+        .map((f) => {
+          const m = f.match(/^(\d+)_/);
+          return m ? m[1] : null;
+        })
+        .filter(Boolean);
+      assert.strictEqual(new Set(nums).size, nums.length, `${label}/${ext}: 番号が重複している`);
+    }
   }
 });
 
@@ -147,7 +146,7 @@ test('update-ai-tools.sh: Codex/Claude/OpenCode は latest・agy は対象外', 
   assert.ok(!/npm install -g\s+(agy|antigravity)/i.test(sh), 'agy をボタンから入れ直さないこと');
   assert.match(sh, /agy \(AntiGravity\) はこのボタンでは更新しません/);
   assert.match(sh, /結果まとめ/, '最後にまとめを表示すること');
-  assert.match(sh, /10_困ったとき診断/, '失敗時の案内が診断ボタンへ誘導すること');
+  assert.match(sh, /9_困ったとき診断/, '失敗時の案内が診断ボタンへ誘導すること');
   assert.match(sh, /スタート\.html の Step 0/, 'npm 不在時は Step 0 へ案内すること');
   assert.ok(!/sudo\s+npm/.test(sh), 'sudo で npm を実行しないこと（案内文で言及するのは可）');
 });
@@ -166,20 +165,20 @@ test('update-ai-tools.ps1: 内容が mac 版と対称で、PowerShell 5.1 の作
   assert.ok(!/npm install -g\s+(agy|antigravity)/i.test(ps), 'agy をボタンから入れ直さないこと');
   assert.match(ps, /agy \(AntiGravity\) はこのボタンでは更新しません/);
   assert.match(ps, /結果まとめ/, '最後にまとめを表示すること');
-  assert.match(ps, /10_困ったとき診断/);
+  assert.match(ps, /9_困ったとき診断/);
   assert.match(ps, /スタート\.html の Step 0/);
 });
 
 // ── 4. ボタン（薄いラッパー）────────────────────────────────────────────
-test('9_AIツールを最新版に更新 ボタンが両 OS にあり、実体スクリプトを呼ぶ', () => {
-  const cmd = read('workspace-template/スタート/9_AIツールを最新版に更新.command');
+test('2_AIツールをまとめて入れる ボタンが両 OS にあり、実体スクリプトを呼ぶ', () => {
+  const cmd = read('workspace-template/スタート/2_AIツールをまとめて入れる.command');
   assert.match(cmd, /\.ai-safety\/hooks\/macos\/update-ai-tools\.sh/);
   assert.match(cmd, /HERE\/\.\./, '自分の場所からワークスペースを解決すること');
   assert.match(cmd, /キーを押すと閉じます/, '終了時にキー入力待ちで閉じること');
 
-  const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/9_AIツールを最新版に更新.bat'));
+  const batBytes = fs.readFileSync(path.join(root, 'workspace-template/スタート/2_AIツールをまとめて入れる.bat'));
   assert.ok(batBytes[0] !== 0xef, '.bat に BOM を付けない');
-  const bat = readSjis('workspace-template/スタート/9_AIツールを最新版に更新.bat');
+  const bat = readSjis('workspace-template/スタート/2_AIツールをまとめて入れる.bat');
   assert.match(bat, /chcp 932/, '教室 PC 向けに CP932 で動かすこと');
   assert.match(bat, /\.ai-safety\\hooks\\windows\\update-ai-tools\.ps1/);
   assert.match(bat, /pause/);
@@ -187,7 +186,7 @@ test('9_AIツールを最新版に更新 ボタンが両 OS にあり、実体�
 });
 
 test('mac にも診断ボタンがあり、doctor.sh を呼んで結果を平易に伝える', () => {
-  const cmd = read('workspace-template/スタート/10_困ったとき診断.command');
+  const cmd = read('workspace-template/スタート/9_困ったとき診断.command');
   assert.match(cmd, /\.ai-safety\/hooks\/macos\/doctor\.sh/);
   assert.match(cmd, /読み取り専用/, '何も変更しないことを伝えること');
   assert.match(cmd, /PASS = 正常/, 'PASS/FAIL の見かたを日本語で示すこと');
@@ -208,12 +207,20 @@ test('install は既知の旧名ボタンだけを掃除リストに持つ（両
     '（上級）10_ccmuxを入れる.command',
     '（上級）11_Bufferのキーを登録.command',
     '（上級）12_プラグインの置き場を開く.command',
+    // v1.18.0 再編で旧名になった v1.16〜v1.17 世代のボタン。
+    '1_AIをまとめて起動.command',
+    '9_AIツールを最新版に更新.command',
+    '10_困ったとき診断.command',
+    '14_フォルダのアクセス権を直す.bat',
+    '（上級）15_長時間おまかせモードで起動.command',
+    '（上級）16_金庫に秘密をしまう.command',
+    '（上級）18_金庫の秘密を消す.command',
   ]) {
     assert.ok(sh.includes(legacy), `install.sh の掃除リストに無い: ${legacy}`);
     assert.ok(ps.includes(legacy.replace('.command', '.command')), `install.ps1 の掃除リストに無い: ${legacy}`);
   }
   // 現行の名前を誤って掃除対象にしていないこと。
-  for (const current of ['1_AIをまとめて起動', '9_AIツールを最新版に更新', '10_困ったとき診断.command']) {
+  for (const current of ['4_AIを起動する', '2_AIツールをまとめて入れる', '9_困ったとき診断.command']) {
     assert.ok(!sh.match(new RegExp(`^${current}`, 'm')), `install.sh が現行ボタンを掃除しようとしている: ${current}`);
   }
 });
@@ -232,41 +239,63 @@ test('install 再実行で旧名ボタンは消え、受講者の自作ファイ
   // 旧版が配布していた旧名ボタンと、受講者の自作ファイルを混在させる。
   const ws = path.join(workspace, 'スタート');
   fs.writeFileSync(path.join(ws, '0_Bouncer統合版を起動.command'), '#!/bin/bash\n');
-  fs.writeFileSync(path.join(ws, '（上級）10_ccmuxを入れる.command'), '#!/bin/bash\n');
+  fs.writeFileSync(path.join(ws, '1_AIをまとめて起動.command'), '#!/bin/bash\n');
+  fs.writeFileSync(path.join(ws, '（上級）16_金庫に秘密をしまう.command'), '#!/bin/bash\n');
   fs.writeFileSync(path.join(ws, '自分のメモ.txt'), 'これは受講者の自作ファイル\n');
 
   const second = spawnSync('bash', [INSTALL_SH, workspace], { env, encoding: 'utf8' });
   assert.strictEqual(second.status, 0, `install(2回目) が失敗: ${second.stdout}\n${second.stderr}`);
 
   assert.ok(!fs.existsSync(path.join(ws, '0_Bouncer統合版を起動.command')), '旧名ボタンが残っている');
-  assert.ok(!fs.existsSync(path.join(ws, '（上級）10_ccmuxを入れる.command')), '廃止ボタンが残っている');
-  assert.ok(fs.existsSync(path.join(ws, '1_AIをまとめて起動.command')), '新名ボタンが配置されていない');
-  assert.ok(fs.existsSync(path.join(ws, '9_AIツールを最新版に更新.command')), '新ボタンが配置されていない');
-  assert.ok(fs.existsSync(path.join(ws, '10_困ったとき診断.command')), 'mac 診断ボタンが配置されていない');
+  assert.ok(!fs.existsSync(path.join(ws, '1_AIをまとめて起動.command')), 'v1.17 世代の旧名ボタンが残っている');
+  assert.ok(!fs.existsSync(path.join(ws, '（上級）16_金庫に秘密をしまう.command')), '旧金庫ボタンが残っている');
+  assert.ok(fs.existsSync(path.join(ws, '4_AIを起動する.command')), '新名ボタンが配置されていない');
+  assert.ok(fs.existsSync(path.join(ws, '2_AIツールをまとめて入れる.command')), '新ボタンが配置されていない');
+  assert.ok(fs.existsSync(path.join(ws, '9_困ったとき診断.command')), 'mac 診断ボタンが配置されていない');
+  assert.ok(fs.existsSync(path.join(ws, 'キーと金庫', '7_金庫に秘密をしまう.command')), '金庫サブフォルダが配置されていない');
   assert.ok(fs.existsSync(path.join(ws, '自分のメモ.txt')), '受講者の自作ファイルを消してはいけない');
   assert.ok(fs.existsSync(path.join(workspace, '.ai-safety', 'tested-tool-versions.json')),
     '動作確認済みバージョン表が workspace に配置されること');
 });
 
 // ── 6. 統合版メニューの課金条件併記 ──────────────────────────────────
-// v1.17.0: ローカル Gemma が要る「最大保護モード」(旧 4 番) を削除し、以降を 1 つ
-// 繰り上げた（旧 5-8 → 新 4-7）。番号を検査するのはここと opencode-launcher.test.js。
+// v1.18.0: メニューの正本はランチャー本体（launch-integrated の menu モード）に集約し、
+// スタートのボタンは委譲だけにした（ボタン側の写しが陳腐化した実績があるため）。
+// 課金条件の併記と番号→起動先の対応は、ランチャー本体側で検査する。
 test('統合版メニューは課金条件を併記し、番号と起動先が一致する', () => {
-  const cmd = read('workspace-template/スタート/1_AIをまとめて起動.command');
-  assert.match(cmd, /1\) Codex.*ChatGPT 課金/);
-  assert.match(cmd, /2\) Claude.*Claude 課金/);
-  assert.match(cmd, /4\) OpenCode.*無課金/);
-  // 番号→起動先の対応。
-  assert.match(cmd, /1\) exec bash "\$LAUNCHER" "\$WORKSPACE" codex standard/);
-  assert.match(cmd, /2\) exec bash "\$LAUNCHER" "\$WORKSPACE" claude standard/);
-  assert.match(cmd, /6\) exec bash "\$LAUNCHER" "\$WORKSPACE" d-claude standard/, 'd-claude（6 番）は維持すること');
+  const cmd = read('workspace-template/スタート/4_AIを起動する.command');
+  assert.match(cmd, /exec bash "\$LAUNCHER" "\$WORKSPACE" menu standard/,
+    'mac ボタンはメニューの正本（menu モード）へ委譲すること');
   assert.doesNotMatch(cmd, /最大保護/, '廃止した最大保護モードが復活していないこと');
 
-  const bat = readSjis('workspace-template/スタート/1_AIをまとめて起動.bat');
-  assert.match(bat, /1 Codex.*ChatGPT 課金/);
-  assert.match(bat, /2 Claude.*Claude 課金/);
-  assert.match(bat, /4 OpenCode.*無課金/);
-  assert.match(bat, /choice \/c 1234567/, '選択肢は 7 つ');
-  assert.match(bat, /-Agent d-claude -Profile standard/, 'd-claude（6 番）は維持すること');
+  const mac = read('scripts/macos/launch-integrated.sh');
+  // v1.18.0（2026-08-24 依頼者裁定）: 完全無課金の第一候補は「OpenCode の無料モデル自由選択
+  // （--free・送信検査なし）」。AntiGravity は 2 番（こちらも無料）。
+  assert.match(mac, /1\) OpenCode（無料モデルを自分で選ぶ）.*完全無課金/, '無課金の入口（OpenCode 無料モデル）があること');
+  assert.match(mac, /2\) セーフ AntiGravity.*無料/, 'AntiGravity（2 番・無料）があること');
+  assert.match(mac, /3\) OpenCode \+ DeepSeek.*少額チャージ/);
+  assert.match(mac, /5\) Claude Code.*課金契約/);
+  assert.match(mac, /6\) セーフ Codex.*ChatGPT/);
+  // 番号→起動先の対応。
+  assert.match(mac, /1\) agent="opencode"; profile="standard"; choose_project; extra="--free"/,
+    '無料モデル（1 番）は --free で起動すること');
+  assert.match(mac, /4\) agent="d-claude"; profile="standard"/, 'd-claude（4 番）は維持すること');
+  assert.match(mac, /5\) agent="claude"; profile="standard"/);
+  assert.match(mac, /6\) agent="codex"; profile="standard"/);
+  assert.doesNotMatch(mac, /最大保護/, '廃止した最大保護モードが復活していないこと');
+
+  const bat = readSjis('workspace-template/スタート/4_AIを起動する.bat');
+  assert.match(bat, /-Agent menu -Profile standard/, 'Windows ボタンはメニューの正本（menu モード）へ委譲すること');
   assert.doesNotMatch(bat, /最大保護/, '廃止した最大保護モードが復活していないこと');
+
+  const win = read('scripts/windows/launch-integrated.ps1');
+  assert.match(win, /1\) OpenCode（無料モデルを自分で選ぶ）.*完全無課金/);
+  assert.match(win, /2\) セーフ AntiGravity.*無料/);
+  assert.match(win, /3\) OpenCode \+ DeepSeek.*少額チャージ/);
+  assert.match(win, /'1'  \{ \$Agent = 'opencode'; \$SafetyProfile = 'standard'; \$Free = \$true; \$Project = Select-ProjectFolder \}/,
+    '無料モデル（1 番）は -Free で起動すること');
+  assert.match(win, /'4'  \{ \$Agent = 'd-claude'; \$SafetyProfile = 'standard' \}/, 'd-claude（4 番）は維持すること');
+  assert.match(win, /'5'  \{ \$Agent = 'claude'; \$SafetyProfile = 'standard' \}/);
+  assert.match(win, /'6'  \{ \$Agent = 'codex'; \$SafetyProfile = 'standard' \}/);
+  assert.doesNotMatch(win, /最大保護/, '廃止した最大保護モードが復活していないこと');
 });

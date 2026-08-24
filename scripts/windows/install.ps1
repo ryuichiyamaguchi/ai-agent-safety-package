@@ -325,9 +325,9 @@ if (-not (Test-Path -LiteralPath $pluginsReadme)) {
 
 Copy-Item -LiteralPath (Join-Path $packageRoot "policy\safety-policy.json") -Destination (Join-Path $Workspace ".ai-safety\policy\safety-policy.json") -Force
 
-# コピー元パッケージの場所を残す。「新しい作業フォルダを安全にする」ボタンは、
-# ワークスペース側から実行されたときにこれを辿ってパッケージ本体 (configs / policy /
-# workspace-template) を見つける。見つからなければボタン側が案内して止まる。
+# コピー元パッケージの場所を残す。作業フォルダを安全にする仕組み (protect-folder /
+# oc-safe) は、ワークスペース側から実行されたときにこれを辿ってパッケージ本体
+# (configs / policy / workspace-template) を見つける。見つからなければ案内して止まる。
 Set-Content -LiteralPath (Join-Path $Workspace ".ai-safety\package-source.txt") -Value $packageRoot -Encoding UTF8 -Force
 
 # agent-monitor 解説カード一式を .ai-safety\cards\ に配置する。
@@ -553,7 +553,10 @@ $startSrc = Join-Path $packageRoot "workspace-template\スタート"
 if (Test-Path -LiteralPath $startSrc) {
     $startDest = Join-Path $Workspace "スタート"
     New-Item -ItemType Directory -Force -Path $startDest | Out-Null
-    # v1.16.0 / v1.17.1 の番号再編で名前が変わった旧ボタンを掃除する（旧新併存による番号重複の防止）。
+    # v1.16.0 / v1.17.1 / v1.18.0 の番号再編で名前が変わった旧ボタンを掃除する（旧新併存による番号重複の防止）。
+    # v1.18.0: スタートを基本 9 個 + Windows のみ 3 個へ再編し、キー・金庫系はサブフォルダ
+    #          「キーと金庫」へ移した。個別のセーフ起動ボタンは「4_AIを起動する」（統合ランチャー）へ
+    #          集約し、「（上級）」プレフィックスは全廃。野良 d-claude 退治ボタンは診断へ統合した。
     # 消すのは「パッケージが過去に配布した既知の旧名」だけに限定し、受講者の自作ファイルには触らない。
     $legacyStartNames = @(
         "0_Bouncer統合版を起動.command", "0_Bouncer統合版を起動.bat",
@@ -577,10 +580,42 @@ if (Test-Path -LiteralPath $startSrc) {
         "6_AIコーチのキーを登録.command", "6_AIコーチのキーを登録.bat",
         "7_安全パッケージを最新版に更新.command", "7_安全パッケージを最新版に更新.bat",
         "8_AIツールを最新版に更新.command", "8_AIツールを最新版に更新.bat",
-        "9_困ったとき診断.command", "9_困ったとき診断.bat",
         "10_野良d-claudeを退治.command", "10_野良d-claudeを退治.bat",
         "11_PowerShellを開く.bat",
-        "12_作業フォルダを開く.bat"
+        "12_作業フォルダを開く.bat",
+        # v1.18.0: スタート再編（基本 9 個 + Windows 3 個、キー・金庫系は「キーと金庫」へ）。
+        "1_AIをまとめて起動.command", "1_AIをまとめて起動.bat",
+        "2_セーフCodexを起動.command", "2_セーフCodexを起動.bat",
+        "3_セーフClaudeを起動.command", "3_セーフClaudeを起動.bat",
+        "4_セーフAntiGravityを起動.command", "4_セーフAntiGravityを起動.bat",
+        "5_セーフOpenCodeを起動.command", "5_セーフOpenCodeを起動.bat",
+        "6_見守りモニターを起動.command", "6_見守りモニターを起動.bat",
+        "7_AIコーチのキーを登録.command", "7_AIコーチのキーを登録.bat",
+        "8_安全パッケージを最新版に更新.command", "8_安全パッケージを最新版に更新.bat",
+        "9_AIツールを最新版に更新.command", "9_AIツールを最新版に更新.bat",
+        "10_困ったとき診断.command", "10_困ったとき診断.bat",
+        "11_野良d-claudeを退治.command", "11_野良d-claudeを退治.bat",
+        "12_PowerShellを開く.bat",
+        "13_作業フォルダを開く.bat",
+        "14_フォルダのアクセス権を直す.bat",
+        "（上級）1_DeepSeekキーを登録.command", "（上級）1_DeepSeekキーを登録.bat",
+        "（上級）2_DeepSeek-Claudeを起動.command", "（上級）2_DeepSeek-Claudeを起動.bat",
+        "（上級）3_モニターをコンソールで見る.command", "（上級）3_モニターをコンソールで見る.bat",
+        "（上級）4_ステータスラインを入れる.command", "（上級）4_ステータスラインを入れる.bat",
+        "（上級）5_このPC全体に最低限の安全設定を入れる.command", "（上級）5_このPC全体に最低限の安全設定を入れる.bat",
+        "（上級）6_PC全体の安全設定を解除.command", "（上級）6_PC全体の安全設定を解除.bat",
+        "（上級）7_DeepSeekキーを削除.command", "（上級）7_DeepSeekキーを削除.bat",
+        "（上級）8_Bufferのキーを登録.command", "（上級）8_Bufferのキーを登録.bat",
+        "（上級）9_プラグインの置き場を開く.command", "（上級）9_プラグインの置き場を開く.bat",
+        "（上級）10_コピーした文章から秘密を伏せる.command", "（上級）10_コピーした文章から秘密を伏せる.bat",
+        "（上級）11_伏せた文章を元に戻す.command", "（上級）11_伏せた文章を元に戻す.bat",
+        "（上級）12_AIコーチのキーを削除.command", "（上級）12_AIコーチのキーを削除.bat",
+        "（上級）13_Bufferのキーを削除.command", "（上級）13_Bufferのキーを削除.bat",
+        "（上級）14_新しい作業フォルダを安全にする.command", "（上級）14_新しい作業フォルダを安全にする.bat",
+        "（上級）15_長時間おまかせモードで起動.command", "（上級）15_長時間おまかせモードで起動.bat",
+        "（上級）16_金庫に秘密をしまう.command", "（上級）16_金庫に秘密をしまう.bat",
+        "（上級）17_金庫から秘密を取り出す.command", "（上級）17_金庫から秘密を取り出す.bat",
+        "（上級）18_金庫の秘密を消す.command", "（上級）18_金庫の秘密を消す.bat"
     )
     foreach ($legacyName in $legacyStartNames) {
         $legacyPath = Join-Path $startDest $legacyName
@@ -600,10 +635,11 @@ if (Test-Path -LiteralPath $startSrc) {
         [System.IO.File]::WriteAllText($htmlDest, $htmlText, (New-Object System.Text.UTF8Encoding($false)))
     }
     # 受講者が同名ファイル（.command と .bat）で迷わないよう、当該 OS 用だけ残す。
+    # v1.18.0: サブフォルダ「キーと金庫」の中も対象にするため -Recurse で掃除する。
     if ($Platform -eq 'win') {
-        Get-ChildItem -LiteralPath $startDest -Filter *.command -ErrorAction SilentlyContinue | Remove-Item -Force
+        Get-ChildItem -LiteralPath $startDest -Filter *.command -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force
     } elseif ($Platform -eq 'mac') {
-        Get-ChildItem -LiteralPath $startDest -Filter *.bat -ErrorAction SilentlyContinue | Remove-Item -Force
+        Get-ChildItem -LiteralPath $startDest -Filter *.bat -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force
     }
     Write-Host "スタートフォルダを配置しました: $startDest"
 }
@@ -657,7 +693,7 @@ if (Test-Path -LiteralPath $docsSrc) {
     Write-Host "説明書を配置しました: $docsDest"
 }
 
-# 動作確認済みツール版の表 (SSOT)。「9_AIツールを最新版に更新」が参照する。
+# 動作確認済みツール版の表 (SSOT)。「2_AIツールをまとめて入れる」が参照する。
 $toolVersionsSrc = Join-Path $packageRoot "configs\tested-tool-versions.json"
 if (Test-Path -LiteralPath $toolVersionsSrc) {
     Copy-Item -LiteralPath $toolVersionsSrc -Destination (Join-Path $Workspace ".ai-safety\tested-tool-versions.json") -Force
@@ -703,7 +739,7 @@ if ($Platform -eq 'win') {
                 & $cleanupDClaude -Workspace $Workspace -Yes
             } catch {
                 Write-Warning ("野良 d-claude の自動退避に失敗しました(スキップ): " + $_.Exception.Message)
-                Write-Host "  必要なら後で スタート\11_野良d-claudeを退治.bat を実行してください。"
+                Write-Host "  必要なら後で「スタート\9_困ったとき診断.bat」を実行してください（野良 d-claude を検出して案内します）。"
             }
         }
     } else {
@@ -771,14 +807,14 @@ if ((Test-Path -LiteralPath $aiSafeHome) -and ($IsWindows -ne $false)) {
                 Write-Host ("権限の調整はスキップしました（対象がまだありません）: " + $aiSafeHome)
             } else {
                 Write-Warning ("権限を確認できませんでした（変更は元に戻してあります）: " + $aiSafeHome)
-                Write-Warning "  スタート\14_フォルダのアクセス権を直す.bat を実行してください。"
+                Write-Warning "  スタート\12_フォルダのアクセス権を直す.bat を実行してください。"
                 # 実機で成功が確認された形だけを案内する。cmd 指定は必須
                 # （PowerShell では %USERPROFILE% が展開されないため動かない）。
                 Write-Warning '  または コマンドプロンプト(cmd) で: icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q'
             }
         } catch {
             Write-Warning ("権限の調整に失敗しました(スキップ): " + $_.Exception.Message)
-            Write-Warning ("  必要なら スタート\14_フォルダのアクセス権を直す.bat を実行してください。")
+            Write-Warning ("  必要なら スタート\12_フォルダのアクセス権を直す.bat を実行してください。")
             Write-Warning '  または コマンドプロンプト(cmd) で: icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q'
         }
     } else {

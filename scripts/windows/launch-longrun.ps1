@@ -44,7 +44,7 @@ $hooks = Join-Path $root 'hooks\windows'
 $policy = Join-Path $root 'policy\safety-policy.json'
 if (-not (Test-Path -LiteralPath $policy -PathType Leaf)) {
     Write-Host "このフォルダには安全パッケージが入っていません: $Workspace"
-    Write-Host "「（上級）14_新しい作業フォルダを安全にする」でこのフォルダを安全にしてから、もう一度実行してください。"
+    Write-Host "インストーラー（install-one-click）で安全パッケージを入れた作業フォルダから、もう一度実行してください。"
     exit 2
 }
 $env:AI_SAFE_ROOT = $root
@@ -171,7 +171,7 @@ if (-not $wall) {
     Write-Host '    ・作業フォルダの外への書き込み（OS では止められません）'
 }
 Write-Host '    → この作業フォルダに大事なファイルを置かないでください。'
-Write-Host '    → 終わったら「6_見守りモニターを起動」や記録で、何をしたか必ず確認してください。'
+Write-Host '    → 終わったら「7_見守りモニターを起動」や記録で、何をしたか必ず確認してください。'
 Write-Host ''
 
 if ($wall) {
@@ -219,7 +219,7 @@ if ($Engine -eq 'opencode') {
 # 書き出し、`claude --settings <一時ファイル>` で渡す。終了時に必ず消す。
 if (-not (Test-Path -LiteralPath $claudeSettings -PathType Leaf)) {
     Write-Host "この作業フォルダに Claude の安全設定がありません: $claudeSettings"
-    Write-Host '「8_安全パッケージを最新版に更新」を実行して設定を入れ直してください。'
+    Write-Host '「1_安全パッケージを最新版にする」を実行して設定を入れ直してください。'
     exit 2
 }
 $node = Get-Command node -ErrorAction SilentlyContinue

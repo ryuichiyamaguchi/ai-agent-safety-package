@@ -34,11 +34,14 @@ const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 
 const PKG = path.resolve(__dirname, '..', '..', '..');
-const START_DIR = path.join(PKG, 'workspace-template', 'スタート');
+// v1.18.0 再編でマスキング・金庫ボタンはサブフォルダ「キーと金庫」へ移った。
+// 旧: （上級）10/11（マスキング）・（上級）16/17/18（金庫）
+// 新: キーと金庫/10・11（マスキング）・7（しまう）/8（取り出す）/9（消す）
+const START_DIR = path.join(PKG, 'workspace-template', 'スタート', 'キーと金庫');
 
 // 今回の不具合で報告された 6 本（マスキング 2 本 + 金庫 3 本 = .bat 5 本、
 // 10/11 は .command も見る）。番号で拾うので、名前が変わっても追従する。
-const BUTTON_RE = /^（上級）(10|11|16|17|18)_/;
+const BUTTON_RE = /^(7|8|9|10|11)_/;
 
 function buttons(ext) {
   return fs.readdirSync(START_DIR).filter((n) => BUTTON_RE.test(n) && n.endsWith(ext));
@@ -54,12 +57,12 @@ test('報告された 6 本のボタンが揃っている', () => {
   const cmds = buttons('.command');
   assert.deepStrictEqual(
     bats.map((n) => n.match(BUTTON_RE)[1]).sort(),
-    ['10', '11', '16', '17', '18'],
+    ['10', '11', '7', '8', '9'],
     `.bat が欠けている: ${bats.join(', ')}`);
   // mac 側も同じ 5 本あること（依頼者がどちらで踏んだか未確定なので両方を見張る）。
   assert.deepStrictEqual(
     cmds.map((n) => n.match(BUTTON_RE)[1]).sort(),
-    ['10', '11', '16', '17', '18'],
+    ['10', '11', '7', '8', '9'],
     `.command が欠けている: ${cmds.join(', ')}`);
 });
 
@@ -88,7 +91,7 @@ test('.command（mac）は UTF-8 のまま壊れていない', () => {
 
 // --- 本題: 画面用と node 受け渡し用の文字コードを混同していないか -------------------
 test('金庫の .bat は画面表示を CP932 のままにしている（UTF-8 を強制しない）', () => {
-  for (const n of buttons('.bat').filter((x) => /^（上級）1[678]_/.test(x))) {
+  for (const n of buttons('.bat').filter((x) => /^[789]_/.test(x))) {
     const line = batText(n).split(/\r?\n/).find((l) => l.startsWith('powershell '));
     assert.ok(line, `${n}: powershell 行が見つからない`);
 
@@ -117,8 +120,8 @@ test('金庫の .bat は画面表示を CP932 のままにしている（UTF-8 �
   }
 });
 
-test('（上級）17 / 18 は node の日本語の名前を UTF-8 で受け取っている', () => {
-  for (const n of buttons('.bat').filter((x) => /^（上級）1[78]_/.test(x))) {
+test('取り出す（8）/ 消す（9）は node の日本語の名前を UTF-8 で受け取っている', () => {
+  for (const n of buttons('.bat').filter((x) => /^[89]_/.test(x))) {
     const line = batText(n).split(/\r?\n/).find((l) => l.startsWith('powershell '));
     // 一覧の取得は必ず UTF-8 の区間の中で行う（ここを CP932 で読むと名前が化ける）。
     const first = line.indexOf('[Console]::OutputEncoding=[Text.Encoding]::UTF8');
@@ -169,7 +172,7 @@ function probeFrom(line, fakeNodeJs) {
   return out.join('\n');
 }
 
-test('実測(CP932 模擬): （上級）17 の案内文と日本語の名前が CP932 のバイト列で出る',
+test('実測(CP932 模擬): 取り出す（8）の案内文と日本語の名前が CP932 のバイト列で出る',
   { skip: hasPwsh ? false : 'pwsh が無いため skip' }, (t) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-safe-bat-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -178,7 +181,7 @@ test('実測(CP932 模擬): （上級）17 の案内文と日本語の名前が 
     const fake = path.join(dir, 'fake-node.js');
     fs.writeFileSync(fake, `process.stdout.write(${JSON.stringify(NAMES.join('\n') + '\n')});\n`, 'utf8');
 
-    const name = buttons('.bat').find((x) => /^（上級）17_/.test(x));
+    const name = buttons('.bat').find((x) => /^8_/.test(x));
     const line = batText(name).split(/\r?\n/).find((l) => l.startsWith('powershell '));
     const probe = path.join(dir, 'probe.ps1');
     fs.writeFileSync(probe, cp932Preamble() + '\n' + probeFrom(line, fake) + '\n', 'utf8');
