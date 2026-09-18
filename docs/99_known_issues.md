@@ -2,6 +2,55 @@
 
 本パッケージで把握している既知の問題と回避策。
 
+## Windows: タスクのたびに「AI 判定の起動に失敗しました」と止まる（v1.18.1 で修正）
+
+**症状**: d-claude で Bash を使うたびに、次の確認が出て作業が止まる。
+
+```
+Hook PreToolUse:Bash requires confirmation
+AI 判定の起動に失敗しました（安全側で確認します）
+```
+
+**原因**: 2 鍵判定を起動する Windows hook が、PowerShell 5.1 に存在しない `StandardInputEncoding` を触っていた。触った瞬間に失敗し、安全側で毎回人間確認に倒していた。
+
+**回避（修正版が届くまで）**: 確認画面で「Yes」を選べばそのコマンドは進みます。危険なコマンドまで自動では通りません。
+
+**修正**: `scripts/windows/guard-bash.ps1` でそのプロパティを触らないようにし、`node.exe` を優先して探すようにした。
+
+## Windows: d-claude の gemini-vision（画像読取）が使えない（v1.18.1 で修正）
+
+**症状**: d-claude に画像やスクリーンショットを見せても、中身を読めない。
+
+**原因（重なる）**:
+
+1. Windows PowerShell 5.1 の `ConvertTo-Json` が、要素 1 個の `args` 配列を文字列に潰す。Claude Code が MCP を起動できず、gemini-vision を含む補助ツールが全部落ちる
+2. `Set-Content -Encoding UTF8` が JSON に BOM を付け、設定ファイルとして読めないことがある
+3. 会話に添付した画像は送信検査 Gateway がテキストに差し替えていたが、`describe_image` に渡すファイルパスが無かった
+
+**回避（修正版が届くまで）**: 画像ファイルを作業フォルダに保存し、そのパスをチャットに書いて「このファイルを describe_image で見て」と頼む。MCP 自体が起動していない場合は、この回避も使えません。
+
+**修正**: MCP 設定を node で BOM なし JSON として書き、Gateway が添付画像を一時ファイルに落としてパスを案内するようにした。
+
+## 「7_金庫に秘密をしまう」のあとに `.env` へ何を書けばよいか
+
+DeepSeek / Gemini / Buffer は専用ボタン（1 / 3 / 5 番）でしまい、`.env` は不要です。
+
+それ以外の API キーは、7 番で付けた名前を使って次を `.env` に書きます。
+
+```
+（プログラムが探す名前）=aisafety://user/付けた名前
+```
+
+例: 名前を `openai` にした場合は `OPENAI_API_KEY=aisafety://user/openai`。
+この住所のまま起動しても本物にはなりません。次で差し替えます。
+
+```
+node .ai-safety/hooks/common/secret-store.js --run --env-file .env -- node app.js
+```
+
+しまい終わった画面にも、同じ文字列が出ます。くわしくは `docs/13_秘密の入れ物-APIキーの安全な持ち方.md`。
+
+
 ## d-claude で「選択したモデルに問題があります（deepseek-v4-flash）」と出る（原因は**モデル名ではない**）
 
 **症状**:
@@ -42,7 +91,7 @@ node.exe : gateway-token: not reusable (fingerprint-mismatch)
 問題が起きました。
 ```
 
-**誰が当たるか**: **v1.18.0 に更新する前から送信検査 Gateway が動いていた Windows の人全員**。
+**誰が当たるか**: **v1.18.0 時点で既に送信検査 Gateway が動いていた Windows の人全員**。
 更新前に一度も起動していない、またはパソコンを再起動した直後なら症状は出ません。
 
 **原因**: 更新で送信検査 Gateway（`ds-gateway.js`）の中身が変わったため、動いたままの古い Gateway が

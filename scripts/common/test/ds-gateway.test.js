@@ -12,7 +12,11 @@ const { spawn } = require('node:child_process');
 const TEST_TOKEN = 'test-gateway-token-0123456789abcdef';
 process.env.DS_GATEWAY_TOKEN = TEST_TOKEN;
 
-const { createGateway } = require('../ds-gateway.js');
+const VISION_CACHE = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-vision-cache-'));
+process.env.AI_SAFE_VISION_CACHE_DIR = VISION_CACHE;
+after(() => { try { fs.rmSync(VISION_CACHE, { recursive: true, force: true }); } catch { /* ignore */ } });
+
+const { createGateway, materializeVisionImage } = require('../ds-gateway.js');
 const { createTokenMap } = require('../token-map.js');
 const { loadDenylistResult } = require('../denylist.js');
 
@@ -760,9 +764,27 @@ test('D: base64 image block is replaced by a JP placeholder text block (not forw
   assert.ok(!('source' in block), 'no source/data must be forwarded');
   assert.ok(block.text.includes('画像データは送信していません'), 'JP placeholder text present');
   assert.ok(block.text.includes('describe_image'), 'placeholder points to describe_image');
+  assert.ok(block.text.includes('image_path'), 'placeholder tells DeepSeek the tool argument name');
+  assert.ok(block.text.includes(VISION_CACHE), 'placeholder includes the saved file path');
   assert.ok(block.text.includes('image/png'), 'sanitized media_type surfaced in placeholder');
+  const saved = block.text.match(/(\S+\.png)/);
+  assert.ok(saved && fs.existsSync(saved[1]), 'saved image file must exist for describe_image');
   assert.ok(!cap.body.includes(imageData), 'raw base64 image data must NOT reach upstream (token waste avoided)');
   assert.ok(!cap.body.includes('[MASKED:google]'), 'image stripped whole, not scanned/masked as a secret');
+});
+
+test('D: materializeVisionImage は同じ画像を同じパスに再利用する', () => {
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const b64 = png.toString('base64');
+  const a = materializeVisionImage('image/png', b64);
+  const b = materializeVisionImage('image/png', b64);
+  assert.ok(a && a.startsWith(VISION_CACHE));
+  assert.strictEqual(a, b, '同一バイトは同一ファイル名');
+  assert.ok(fs.existsSync(a));
+  assert.ok(fs.readFileSync(a).equals(png));
 });
 
 test('F-7: base64 document source.data is also preserved', async () => {

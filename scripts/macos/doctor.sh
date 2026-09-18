@@ -128,7 +128,7 @@ find_delete="fin""d . -delete"
 run_case "5d find recursive delete (find . -delete)" "guard-bash.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"cwd\":\"$workspace\",\"tool_input\":{\"command\":\"$find_delete\"}}"
 script_content="print(open('$target_name').read())"
 run_case "6 generated script protected read" "guard-write.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Write\",\"cwd\":\"$workspace\",\"tool_input\":{\"file_path\":\"script.py\",\"content\":\"$script_content\"}}"
-run_case "7 WebFetch unauthorized domain" "guard-webfetch.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"WebFetch\",\"cwd\":\"$workspace\",\"tool_input\":{\"url\":\"https://example.com\",\"prompt\":\"summarize\"}}"
+run_case "7 WebFetch unauthorized domain" "guard-webfetch.sh" "block" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"WebFetch\",\"cwd\":\"$workspace\",\"tool_input\":{\"url\":\"https://pastebin.com\",\"prompt\":\"summarize\"}}"
 run_case "control allowed docs domain" "guard-webfetch.sh" "allow" "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"WebFetch\",\"cwd\":\"$workspace\",\"tool_input\":{\"url\":\"https://docs.anthropic.com/en/docs/claude-code/hooks\",\"prompt\":\"summarize\"}}"
 # 8 系: v1.12.0 教室プロファイルでは「秘密読取を伴わない純粋な外部通信」は許可（curl を通す
 #   のと同じ方針。インタプリタの生送信も塞がない）。ただし .env 等の秘密に触れる送信は別防御

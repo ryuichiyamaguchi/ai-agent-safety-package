@@ -64,6 +64,13 @@ MSG
   touch "$HINT_FLAG" 2>/dev/null || true
 fi
 
+# 使うモデル（既定 = Gemini 3.8 Flash (High)）。
+# agy models で 3.8 Flash は High / Medium / Low の 3 つが提供されていることを実測。
+# 接尾辞なしの "gemini-3.8-flash" は --effort 必須でエラーになるため、-high まで
+# 含めた ID を渡す。上書きしたい場合は AI_SAFE_AGY_MODEL に別の ID を入れる
+# （モデル名は安全床ではないので、上書きされても deny 床・--sandbox は残る）。
+AGY_MODEL="${AI_SAFE_AGY_MODEL:-gemini-3.8-flash-high}"
+
 # Safe Auto Mode 分岐(宣言ベース・option B): doctor green のとき
 # --dangerously-skip-permissions を付与(--sandbox は維持)。実証はしていない旨を必ず表示。
 auto_args=()
@@ -100,7 +107,7 @@ fi
 
 # bash 3.2 + set -u では空配列の "${arr[@]}" 展開が unbound variable でクラッシュするため、
 # ${arr[@]+"${arr[@]}"}(空配列でも安全な展開)を使う。
-cmd=("$AGY" --sandbox --add-dir "$workspace" ${auto_args[@]+"${auto_args[@]}"})
+cmd=("$AGY" --sandbox --model "$AGY_MODEL" --add-dir "$workspace" ${auto_args[@]+"${auto_args[@]}"})
 
 if [ "${AI_SAFE_DRY_RUN:-}" = "1" ]; then
   printf '%s ' "${cmd[@]}"; [ -n "$prompt" ] && printf -- '--prompt %q' "$prompt"; printf '\n'

@@ -153,7 +153,13 @@ if ($LongRun) {
     [Console]::Error.WriteLine("  --sandbox は維持していますが、agy の隔離は独立検証されていません。")
 }
 
-$argsList = @("--sandbox", "--add-dir", $Workspace) + $autoArgs
+# 使うモデル（既定 = Gemini 3.8 Flash (High)）。agy models で 3.8 Flash は
+# High / Medium / Low の 3 つが提供されていることを実測。接尾辞なしの
+# "gemini-3.8-flash" は --effort 必須でエラーになるため -high まで含めた ID を渡す。
+# 上書きは AI_SAFE_AGY_MODEL（モデル名は安全床ではないので deny 床・--sandbox は残る）。
+$agyModel = if ($env:AI_SAFE_AGY_MODEL) { $env:AI_SAFE_AGY_MODEL } else { "gemini-3.8-flash-high" }
+
+$argsList = @("--sandbox", "--model", $agyModel, "--add-dir", $Workspace) + $autoArgs
 
 if ($env:AI_SAFE_DRY_RUN -eq '1') {
     Write-Output ("$Agy " + ($argsList -join ' '))

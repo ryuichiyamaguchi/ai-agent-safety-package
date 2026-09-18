@@ -722,8 +722,8 @@ function buildOpenCodeConfig({
     // free モードではモデルを固定しない（未指定だと OpenCode がモデル選択画面を出し、
     // 無料モデルを含む一覧から利用者が選ぶ）。
     ...(free ? {} : {
-      model: 'bouncer-deepseek/deepseek-v4-flash',
-      small_model: 'bouncer-deepseek/deepseek-v4-flash',
+      model: 'bouncer-deepseek/deepseek-flash',
+      small_model: 'bouncer-deepseek/deepseek-flash',
     }),
     default_agent: 'bouncer',
     share: 'disabled',
@@ -741,7 +741,7 @@ function buildOpenCodeConfig({
         description: 'Bouncer-protected primary coding agent',
         mode: 'primary',
         // free モードではエージェント側でもモデルを固定しない（利用者の選択に従う）。
-        ...(free ? {} : { model: 'bouncer-deepseek/deepseek-v4-flash' }),
+        ...(free ? {} : { model: 'bouncer-deepseek/deepseek-flash' }),
         permission: {
           task: {
             '*': 'deny',
@@ -752,7 +752,7 @@ function buildOpenCodeConfig({
       'bouncer-helper': {
         description: 'Fast Bouncer-protected helper for focused research and analysis',
         mode: 'subagent',
-        ...(free ? {} : { model: 'bouncer-deepseek/deepseek-v4-flash' }),
+        ...(free ? {} : { model: 'bouncer-deepseek/deepseek-flash' }),
         // OpenCode の権限評価は「最後に一致したルールが勝つ」。エージェント個別 permission は
         // グローバル permission の後ろに連結されるため、ここに bash / edit / external_directory /
         // webfetch / websearch を書くとグローバルの deny 床を上書きして無効化してしまう。
@@ -783,8 +783,8 @@ function buildOpenCodeConfig({
               name: 'DeepSeek V4 Pro (Bouncer protected)',
               limit: { context: 1048576, output: 393216 },
             },
-            'deepseek-v4-flash': {
-              name: 'DeepSeek V4 Flash (Bouncer protected)',
+            'deepseek-flash': {
+              name: 'DeepSeek V4.1 Flash (Bouncer protected)',
               limit: { context: 1048576, output: 393216 },
             },
           },

@@ -91,26 +91,28 @@ unset ANTHROPIC_AUTH_TOKEN
 # -- DeepSeek backend 環境変数（BASE_URL は Gateway 側で設定） ------
 # モデル名に [1m]（1M コンテキスト指定）を付けると、Claude Code 2.1.226 以降は
 # それを名前の一部として扱い「そんなモデルは無い」で起動できなくなる（実機で再現）。
-# DeepSeek が公開しているのは deepseek-v4-flash / deepseek-v4-pro の 2 つだけ。
+# DeepSeek が公開しているのは deepseek-flash（= V4.1 Flash）/ deepseek-v4-pro の 2 つ。
+# 旧名 deepseek-v4-flash は公式が「一時的に V4.1 Flash へ転送する」と明記している
+# だけの互換名なので、転送が止まっても動くように正式名 deepseek-flash を使う。
 # 1M コンテキストは CLAUDE_CODE_MAX_CONTEXT_TOKENS で伝える。
-export ANTHROPIC_MODEL="deepseek-v4-flash"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-flash"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-flash"
+export ANTHROPIC_MODEL="deepseek-flash"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-flash"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-flash"
 export CLAUDE_CODE_MAX_CONTEXT_TOKENS="1048576"
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"
-export CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-flash"
+export CLAUDE_CODE_SUBAGENT_MODEL="deepseek-flash"
 export CLAUDE_CODE_EFFORT_LEVEL="max"
 # 既定は Flash のまま。かしこい deepseek-v4-pro を /model の一覧にも出しておき、
 # 受講者が `/model deepseek-v4-pro` でその場かぎり切り替えられるようにする
 # （実測: `/model <名前>` は "for this session only"。設定ファイルは書き換わらない）。
 export ANTHROPIC_CUSTOM_MODEL_OPTION="deepseek-v4-pro"
 export ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="DeepSeek V4 Pro"
-export ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="むずかしい作業向け。V4 Flash より料金が高くなります"
+export ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="むずかしい作業向け。V4.1 Flash より料金が高くなります"
 
 # ↑ もし起動時に「モデル名が無効」エラーが出る環境では（GitHub Issue #56990）、
 #   上の ANTHROPIC_MODEL を次のどちらかに差し替えてください:
 #   A案（表示も deepseek にしたい・検証スキップ）:
-#     export ANTHROPIC_CUSTOM_MODEL_OPTION="deepseek-v4-flash"
+#     export ANTHROPIC_CUSTOM_MODEL_OPTION="deepseek-flash"
 #   B案（動けばよい・表示は Opus）: ANTHROPIC_MODEL 行を消し、
 #     起動後に /model で opus を選ぶ（サーバ側で v4 に振り分け）。
 

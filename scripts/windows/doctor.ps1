@@ -200,7 +200,7 @@ Expect-Allow "5f Remove-Item single file allowed (no over-block)" "guard-bash.ps
 $scriptContent = "from pathlib import Path`nprint(open('" + $targetName + "').read())`n"
 Expect-Block "6 generated script reads protected file" "guard-write.ps1" (New-HookJson "Write" @{ file_path = "script.py"; content = $scriptContent })
 
-Expect-Block "7 WebFetch unauthorized domain" "guard-webfetch.ps1" (New-HookJson "WebFetch" @{ url = "https://example.com"; prompt = "summarize" })
+Expect-Block "7 WebFetch unauthorized domain" "guard-webfetch.ps1" (New-HookJson "WebFetch" @{ url = "https://pastebin.com"; prompt = "summarize" })
 Expect-Allow "control WebFetch allowed docs domain" "guard-webfetch.ps1" (New-HookJson "WebFetch" @{ url = "https://docs.anthropic.com/en/docs/claude-code/hooks"; prompt = "summarize" })
 
 # 8 系: v1.12.0 教室プロファイルでは秘密読取を伴わない純粋な外部通信は許可（curl と同方針）。

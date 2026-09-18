@@ -1,13 +1,15 @@
 // secret-store.js — OS 標準の金庫（macOS キーチェーン / Windows DPAPI）への最小ラッパ。
 //
 // 設計方針（secrets-encryption-design.md 第3版 B-0 に準拠）:
-//   - 参照 URI 体系（secret:// 等）は作らない。バックエンド抽象化レイヤも作らない。
-//     ここにあるのは get / set / remove / exists の4関数と、process.platform の分岐だけ。
-//   - 項目名は下の ITEMS 固定表だけ。動的にバックエンドを増やせる作りにはしない。
+//   - バックエンド抽象化レイヤは作らない。process.platform の分岐だけ。
+//   - 固定枠の項目名は下の ITEMS 表だけ。動的にバックエンドを増やせる作りにはしない。
 //   - 読み取りの優先順位は全箇所で「環境変数 → 金庫 → 旧平文」に統一する。
 //     この順序を14箇所に複製しないために resolve() を1つだけ置く（分岐ではなく順序の SSOT）。
 //     第1段の環境変数があるおかげで、1Password の `op run` 利用者には
 //     パッケージ側の分岐がゼロで対応できる。これが 1Password 対応の実体。
+//   - 自由枠だけ、.env に書ける住所 `aisafety://user/<名前>` を持つ。
+//     1Password の `op://` の無料版。バックエンド切替ではなく、この金庫の自由枠専用。
+//     住所は --run で本物に差し替えて子プロセスへ渡す。標準出力には本物を出さない。
 //
 // 保存形式（両 OS 共通）:
 //   金庫に入れる文字列は "v1:" + base64(UTF-8) の封筒に包む。
@@ -17,7 +19,7 @@
 //   シェル / PowerShell 側の登録スクリプトも同じ封筒を使う。
 'use strict';
 
-const { execFileSync, spawnSync } = require('node:child_process');
+const { execFileSync, spawnSync, spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -666,6 +668,103 @@ function userCopy(name) {
   return copyToClipboard(v);
 }
 
+// ---- 自由枠の住所（.env に書く文字列）------------------------------------
+// 1Password の `op://vault/item/field` に相当する、この金庫の自由枠専用の住所。
+// 値そのものではない。--run が金庫から取り出して、子プロセスの環境変数にだけ渡す。
+const USER_REF_PREFIX = 'aisafety://user/';
+const MAX_ENV_FILE_BYTES = 1 << 20;
+
+function userRef(name) {
+  return USER_REF_PREFIX + assertValidUserName(name);
+}
+
+function parseUserRef(value) {
+  const v = String(value == null ? '' : value).trim();
+  if (!v.startsWith(USER_REF_PREFIX)) return null;
+  const name = v.slice(USER_REF_PREFIX.length);
+  if (!isValidUserName(name)) return null;
+  return name;
+}
+
+function parseEnvFile(text) {
+  const out = {};
+  const src = String(text == null ? '' : text).replace(/^\uFEFF/, '');
+  for (const raw of src.split(/\r?\n/)) {
+    let line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    if (/^export\s+/.test(line)) line = line.replace(/^export\s+/, '');
+    const eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    let val = line.slice(eq + 1);
+    if (
+      (val.startsWith('"') && val.endsWith('"') && val.length >= 2) ||
+      (val.startsWith("'") && val.endsWith("'") && val.length >= 2)
+    ) {
+      val = val.slice(1, -1);
+    }
+    out[key] = val;
+  }
+  return out;
+}
+
+function applyEnvRefs(map) {
+  const resolved = {};
+  const missing = [];
+  const keys = Object.keys(map || {});
+  for (const key of keys) {
+    const raw = map[key];
+    const trimmed = String(raw == null ? '' : raw).trim();
+    if (trimmed.startsWith('aisafety://')) {
+      const name = parseUserRef(trimmed);
+      if (!name) {
+        missing.push({ key, reason: 'invalid-ref' });
+        continue;
+      }
+      const secret = userGet(name);
+      if (!secret) {
+        missing.push({ key, name, reason: 'missing' });
+        continue;
+      }
+      resolved[key] = secret;
+      continue;
+    }
+    resolved[key] = raw;
+  }
+  return { resolved, missing };
+}
+
+function readEnvFile(filePath) {
+  const abs = path.resolve(filePath);
+  let st;
+  try { st = fs.statSync(abs); } catch (e) {
+    const err = new Error('env ファイルが見つかりません: ' + abs);
+    err.code = 'ENV_MISSING';
+    throw err;
+  }
+  if (!st.isFile()) {
+    const err = new Error('env ファイルではありません: ' + abs);
+    err.code = 'ENV_NOT_FILE';
+    throw err;
+  }
+  if (st.size > MAX_ENV_FILE_BYTES) {
+    const err = new Error('env ファイルが大きすぎます（上限 1MB）: ' + abs);
+    err.code = 'ENV_TOO_LARGE';
+    throw err;
+  }
+  return parseEnvFile(fs.readFileSync(abs, 'utf8'));
+}
+
+function formatMissingRefs(missing) {
+  return missing.map((m) => {
+    if (m.reason === 'invalid-ref') {
+      return `  ${m.key} … aisafety:// の形が正しくありません（aisafety://user/名前 にしてください）`;
+    }
+    return `  ${m.key} … 金庫に「${m.name}」が見つかりません。「7_金庫に秘密をしまう」でこの名前でしまってください`;
+  }).join('\n');
+}
+
 module.exports = {
   get, set, remove, exists,
   resolve, resolvedExists, available,
@@ -673,6 +772,7 @@ module.exports = {
   // 自由枠（受講生が名前を付けてしまう秘密）
   isValidUserName, userSet, userGet, userRemove, userList, userExists, userCopy,
   userIndexPath, USER_PREFIX, USER_NAME_MAX, MAC_KEYCHAIN_MAX,
+  USER_REF_PREFIX, userRef, parseUserRef, parseEnvFile, applyEnvRefs, readEnvFile,
   // クリップボードの文字コード（SSOT）。clipboard-mask.js と
   // test/clipboard-encoding.test.js がここを使う。
   clipboardRead, clipboardWrite, utf8Env, PS_READ_B64, PS_WRITE_B64,
@@ -699,6 +799,8 @@ function usage() {
     '  secret-store.js --user-list            # 名前だけを1行1件',
     '  secret-store.js --user-remove <名前>',
     '  secret-store.js --user-copy <名前>     # 値はクリップボードへ',
+    '  secret-store.js --user-ref <名前>      # .env に書く住所だけを出す',
+    '  secret-store.js --run [--env-file f] -- <コマンド>   # 住所を本物に差し替えて起動',
     '',
   ].join('\n');
 }
@@ -720,8 +822,65 @@ if (require.main === module) {
     const value = readAllStdin().replace(/\r?\n$/, '');
     if (!value) die('値が空です。中止しました。');
     try { userSet(arg, value); } catch (e) { die(String((e && e.message) || e)); }
+    const ref = userRef(arg);
     process.stdout.write(`金庫にしまいました: ${arg}\n`);
+    process.stdout.write('API キーの代わりに .env へ書く文字列:\n');
+    process.stdout.write(`  ${ref}\n`);
+    process.stdout.write('例:\n');
+    process.stdout.write(`  OPENAI_API_KEY=${ref}\n`);
+    process.stdout.write('左の名前は、プログラムが探す環境変数名に合わせて変えてください。\n');
+    process.stdout.write('DeepSeek / AIコーチ(Gemini) / Buffer のキーは、この住所ではなく\n');
+    process.stdout.write('「キーと金庫」の 1 / 3 / 5 番の専用ボタンで登録してください。\n');
+    process.stdout.write('住所のまま node や python を起動しても本物のキーにはなりません。起動するときは:\n');
+    process.stdout.write('  node secret-store.js --run --env-file .env -- node app.js\n');
     process.exit(0);
+  }
+
+  if (flag === '--user-ref') {
+    if (!arg) die(usage());
+    try { process.stdout.write(userRef(arg) + '\n'); } catch (e) { die(String((e && e.message) || e)); }
+    process.exit(0);
+  }
+
+  if (flag === '--run') {
+    const envFiles = [];
+    const rest = [];
+    let seenSep = false;
+    for (let i = 1; i < argv.length; i += 1) {
+      if (seenSep) { rest.push(argv[i]); continue; }
+      if (argv[i] === '--') { seenSep = true; continue; }
+      if (argv[i] === '--env-file') {
+        const p = argv[i + 1];
+        if (!p) die('--env-file のあとにファイルパスが必要です');
+        envFiles.push(p);
+        i += 1;
+        continue;
+      }
+      rest.push(argv[i]);
+    }
+    if (rest.length === 0) die(usage());
+    if (envFiles.length === 0) {
+      if (fs.existsSync(path.resolve('.env'))) envFiles.push(path.resolve('.env'));
+      else die('.env ファイルがありません。--env-file で場所を指定するか、カレントに .env を置いてください。');
+    }
+    let merged = {};
+    try {
+      for (const f of envFiles) {
+        merged = Object.assign(merged, readEnvFile(f));
+      }
+    } catch (e) { die(String((e && e.message) || e)); }
+    const { resolved, missing } = applyEnvRefs(merged);
+    if (missing.length) {
+      die('金庫の住所を本物に差し替えられませんでした:\n' + formatMissingRefs(missing));
+    }
+    const childEnv = Object.assign({}, process.env, resolved);
+    const child = spawn(rest[0], rest.slice(1), { env: childEnv, stdio: 'inherit', windowsHide: true });
+    child.on('error', (e) => die('コマンドを起動できませんでした: ' + (e && e.message ? e.message : e)));
+    child.on('exit', (code, signal) => {
+      if (signal) process.kill(process.pid, signal);
+      process.exit(code == null ? 1 : code);
+    });
+    return;
   }
 
   if (flag === '--user-list') {

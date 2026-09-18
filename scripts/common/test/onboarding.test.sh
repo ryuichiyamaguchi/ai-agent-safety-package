@@ -196,6 +196,9 @@ grep -q -- '--user-copy' "$VAULT_DIR/8_金庫から秘密を取り出す.command
 grep -q -- '--user-remove' "$VAULT_DIR/9_金庫の秘密を消す.command" || { note "FAIL: 金庫9 .command が --user-remove を呼ばない"; fail=1; }
 # 値を画面に出さない（7 は read -s、8 はクリップボード経由）ことを固定する。
 grep -q 'read -r -s' "$VAULT_DIR/7_金庫に秘密をしまう.command" || { note "FAIL: 金庫7 .command が中身をエコーしない入力になっていない"; fail=1; }
+grep -q '1_DeepSeekキーを登録' "$VAULT_DIR/7_金庫に秘密をしまう.command" || { note "FAIL: 金庫7 .command が DeepSeek 専用ボタンへの案内を出さない"; fail=1; }
+grep -Fq 'aisafety://user/' "$HTML" || { note "FAIL: スタート.html に金庫7の住所 aisafety://user/ が無い"; fail=1; }
+grep -Fq 'aisafety://user/' "$ROOT/docs/13_秘密の入れ物-APIキーの安全な持ち方.md" || { note "FAIL: docs/13 に aisafety://user/ が無い"; fail=1; }
 grep -q 'AsSecureString' "$VAULT_DIR/7_金庫に秘密をしまう.bat" || { note "FAIL: 金庫7 .bat が中身をエコーしない入力になっていない"; fail=1; }
 # .bat 側も同じ CLI を呼ぶ（CP932 なので grep は復号してから）。
 for _n in 7 8 9; do
@@ -213,6 +216,9 @@ for _n in 7 8 9; do
   rm -f "$_tmp"
 done
 grep -Fq 'キーと金庫/7_金庫に秘密をしまう' "$HTML" || { note "FAIL: スタート.html に 金庫7 の案内がない"; fail=1; }
+if grep -q 'GEMINI_KEY_ITEM' "$ROOT/docs/13_秘密の入れ物-APIキーの安全な持ち方.md"; then
+  note "FAIL: docs/13 が無料金庫で存在しない GEMINI_KEY_ITEM を案内している"; fail=1
+fi
 grep -Fq 'キーと金庫/8_金庫から秘密を取り出す' "$HTML" || { note "FAIL: スタート.html に 金庫8 の案内がない"; fail=1; }
 grep -Fq 'キーと金庫/9_金庫の秘密を消す' "$HTML" || { note "FAIL: スタート.html に 金庫9 の案内がない"; fail=1; }
 for _need in 'sandbox-exec' 'sandbox.enabled' 'disableBypassPermissionsMode' 'p.ask = \[\]' 'mktemp -d'; do

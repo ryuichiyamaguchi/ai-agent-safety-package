@@ -155,12 +155,19 @@ function callGemini(model, question, mime, b64) {
   });
 }
 
-// 429/RESOURCE_EXHAUSTED は fallback モデルへ 1 回だけ切替。
+// 429/RESOURCE_EXHAUSTED と 404/NOT_FOUND（モデル未提供）は fallback モデルへ 1 回だけ切替。
+// gemini-client.runAI と同じ多段。既定モデルが引退したとき画像読取だけ沈黙するのを防ぐ。
+function shouldFallback(r) {
+  return r && !r.ok && (
+    r.status === 429 || r.status === 404 ||
+    r.gstatus === 'RESOURCE_EXHAUSTED' || r.gstatus === 'NOT_FOUND'
+  );
+}
 async function describeImage(imagePath, question) {
   const img = readImage(imagePath);
   if (!img.ok) return { text: img.message, isError: true };
   let r = await callGemini(VISION_MODEL, question, img.mime, img.b64);
-  if (!r.ok && (r.status === 429 || r.gstatus === 'RESOURCE_EXHAUSTED') && FALLBACK_MODEL && FALLBACK_MODEL !== VISION_MODEL) {
+  if (shouldFallback(r) && FALLBACK_MODEL && FALLBACK_MODEL !== VISION_MODEL) {
     r = await callGemini(FALLBACK_MODEL, question, img.mime, img.b64);
   }
   if (!r.ok) {
@@ -251,4 +258,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { detectImageMime, readImage, describeImage, handle, TOOL };
+module.exports = { detectImageMime, readImage, describeImage, handle, TOOL, shouldFallback };

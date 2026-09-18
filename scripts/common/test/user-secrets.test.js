@@ -32,6 +32,13 @@ function cleanupUser() {
 }
 
 // ---- 名前のバリデーション（金庫に触らないのでどの OS でも走る） -------------
+test('自由枠の保存後メッセージは aisafety://user/ の住所と専用ボタンを案内する', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'secret-store.js'), 'utf8');
+  assert.match(src, /aisafety:\/\/user\//);
+  assert.match(src, /1 \/ 3 \/ 5 番の専用ボタン/);
+  assert.match(src, /--run --env-file/);
+});
+
 test('正しい名前は通る（英数字・かな・カタカナ・漢字・長音符・ハイフン・アンダースコア）', () => {
   const ok = [
     'note-token',

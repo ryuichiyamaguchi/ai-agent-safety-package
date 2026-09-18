@@ -13,7 +13,7 @@
 // このファイルが固定するのは次の 3 点:
 //   (1) gateway が /v1/messages のパス・クエリ・ステータスを素通しすること
 //   (2) 上流 4xx/5xx を upstream_error としてイベントログに残すこと
-//   (3) 既定は deepseek-v4-flash のまま、/model から deepseek-v4-pro を選べる形になっていること
+//   (3) 既定は deepseek-flash（= V4.1 Flash）のまま、/model から deepseek-v4-pro を選べる形になっていること
 
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -80,7 +80,7 @@ test('gateway は /v1/messages のパス・クエリ・ステータスをその�
   const server = await gw.listen();
   const port = server.address().port;
   try {
-    const r = await postJson(port, '/v1/messages?beta=true', { model: 'deepseek-v4-flash', messages: [] });
+    const r = await postJson(port, '/v1/messages?beta=true', { model: 'deepseek-flash', messages: [] });
     assert.strictEqual(r.status, 200);
     // Claude Code が実際に叩く形（実測）。ここが崩れると上流が 404 を返し、
     // 画面には「モデルが存在しない」という無関係なメッセージだけが出る。
@@ -103,7 +103,7 @@ test('上流の 404 はステータスを保ったまま返り、upstream_error 
   const server = await gw.listen();
   const port = server.address().port;
   try {
-    const r = await postJson(port, '/v1/messages?beta=true', { model: 'deepseek-v4-flash', messages: [] });
+    const r = await postJson(port, '/v1/messages?beta=true', { model: 'deepseek-flash', messages: [] });
     assert.strictEqual(r.status, 404, '上流のステータスを握りつぶしてはいけない');
     const errs = eventLogLines().filter((e) => e.event === 'upstream_error');
     const hit = errs.find((e) => e.status === 404 && e.path === '/anthropic/v1/messages');
@@ -122,8 +122,8 @@ test('d-claude の既定は V4 Flash のまま、/model の一覧に V4 Pro が�
   ];
   for (const rel of targets) {
     const src = read(rel);
-    assert.match(src, /ANTHROPIC_MODEL\s*=?\s*["']?deepseek-v4-flash/,
-      `${rel}: 既定モデルが deepseek-v4-flash でない`);
+    assert.match(src, /ANTHROPIC_MODEL\s*=?\s*["']?deepseek-flash["']/,
+      `${rel}: 既定モデルが deepseek-flash（V4.1 Flash）でない`);
     assert.match(src, /ANTHROPIC_CUSTOM_MODEL_OPTION\s*=\s*["']deepseek-v4-pro["']/,
       `${rel}: /model の一覧に deepseek-v4-pro が出ない`);
   }
@@ -150,7 +150,7 @@ test('/モデル コマンドが配布物にあり、必要な案内をすべて
   const src = read(rel);
   assert.match(src, /^---\r?\ndescription:/, 'frontmatter の description が無い');
   assert.ok(src.includes('/model deepseek-v4-pro'), 'Pro への切り替え方が書かれていない');
-  assert.ok(src.includes('/model deepseek-v4-flash'), 'Flash へ戻す方法が書かれていない');
+  assert.ok(src.includes('/model deepseek-flash'), 'Flash へ戻す方法が書かれていない');
   assert.ok(src.includes('この会話のあいだだけ'), 'その場かぎりである説明が無い');
   assert.ok(/料金が高く/.test(src), '料金が変わる旨の一言が無い');
   assert.ok(!/[0-9０-９]+\s*(円|ドル|\$|USD)/.test(src), '金額を書いてはいけない');

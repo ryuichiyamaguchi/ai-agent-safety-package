@@ -172,7 +172,7 @@ function modelId(value) {
 
 function modelLimit(value) {
   const id = modelId(value);
-  if (/^deepseek-v4-(?:pro|flash)$/i.test(id)) return { ...DEEPSEEK_V4_LIMIT };
+  if (/^deepseek-(?:flash|v4-(?:pro|flash))$/i.test(id)) return { ...DEEPSEEK_V4_LIMIT };
   return { ...DEEPSEEK_V4_LIMIT };
 }
 
@@ -240,7 +240,7 @@ function thinkingLabel(json, model) {
     '',
   ).trim();
   if (effort) return effort;
-  return /^deepseek-v4-/i.test(modelId(model)) ? 'auto(max)' : 'unknown';
+  return /^deepseek-(?:flash$|v4-)/i.test(modelId(model)) ? 'auto(max)' : 'unknown';
 }
 
 function updateDerivedStatus(status) {
@@ -490,6 +490,54 @@ function addCounts(acc, c) {
 const BINARY_MIME = new Set([
   'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf',
 ]);
+const VISION_MIME_EXT = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+};
+
+function visionCacheDir() {
+  const d = process.env.AI_SAFE_VISION_CACHE_DIR;
+  if (d && String(d).trim()) return String(d).trim();
+  return path.join(os.homedir(), '.ai-safety', 'tmp', 'vision');
+}
+
+function sweepVisionCache(dir) {
+  const maxAgeMs = 48 * 3600 * 1000;
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return; }
+  const now = Date.now();
+  for (const name of names) {
+    const p = path.join(dir, name);
+    try {
+      const st = fs.statSync(p);
+      if (st.isFile() && (now - st.mtimeMs) > maxAgeMs) fs.unlinkSync(p);
+    } catch { /* 掃除は best-effort */ }
+  }
+}
+
+// 会話に添付された画像をディスクへ落とし、describe_image が読めるパスを返す。
+// DeepSeek は画像ブロックを見られないので、gateway がパス付きの案内に差し替える。
+// 同じ画像は sha256 先頭で同じファイル名にし、履歴再送のたびに増殖しない。
+function materializeVisionImage(mediaType, b64) {
+  const ext = VISION_MIME_EXT[mediaType];
+  if (!ext) return null;
+  if (typeof b64 !== 'string' || !b64) return null;
+  let buf;
+  try { buf = Buffer.from(b64.replace(/\s/g, ''), 'base64'); } catch { return null; }
+  if (!buf || buf.length < 12) return null;
+  const dir = visionCacheDir();
+  fs.mkdirSync(dir, { recursive: true });
+  try { fs.chmodSync(dir, 0o700); } catch { /* Windows 等では無視 */ }
+  const hash = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 16);
+  const file = path.join(dir, hash + ext);
+  if (!fs.existsSync(file)) {
+    fs.writeFileSync(file, buf, { mode: 0o600 });
+    sweepVisionCache(dir);
+  }
+  return file;
+}
 
 function maskValue(v, counts, ctx) {
   // Generic deep-walk: mask EVERY string leaf in any string/array/object.
@@ -519,11 +567,21 @@ function maskValue(v, counts, ctx) {
         if (BINARY_MIME.has(mt)) mime = mt;
       }
       let approxBytes = 0;
+      let saved = null;
       if (typeof v.source.data === 'string') {
         const b = v.source.data.replace(/[^A-Za-z0-9+/]/g, '');
         approxBytes = Math.floor(b.length * 3 / 4);
+        if (mime !== '不明') {
+          try { saved = materializeVisionImage(mime, v.source.data); } catch { saved = null; }
+        }
       }
-      return { type: 'text', text: '[画像データは送信していません: ' + mime + ' 約' + approxBytes + 'bytes。DeepSeek は画像を見られません。内容確認は describe_image ツールを使ってください]' };
+      let text = '[画像データは送信していません: ' + mime + ' 約' + approxBytes + 'bytes。DeepSeek は画像を見られません。';
+      if (saved) {
+        text += '内容確認は describe_image ツールに image_path として次のパスを渡してください: ' + saved + ']';
+      } else {
+        text += '内容確認は describe_image ツールを使ってください]';
+      }
+      return { type: 'text', text };
     }
     // F-7/F-9/F-9fin: Anthropic content block の base64 メディアデータ（image/document 等の source.data）は
     // バイナリを base64 エンコードした文字列であり、secret パターンに偶然一致し得るが
@@ -951,7 +1009,10 @@ function forward(req, res, upstreamUrl, body, session, allocated, outUrl, reques
   upReq.end(body);
 }
 
-module.exports = { createGateway, DEFAULT_PORT, DEFAULT_UPSTREAM, DEFAULT_AUTH_FILE };
+module.exports = {
+  createGateway, DEFAULT_PORT, DEFAULT_UPSTREAM, DEFAULT_AUTH_FILE,
+  materializeVisionImage, visionCacheDir,
+};
 
 if (require.main === module) {
   let gateway;

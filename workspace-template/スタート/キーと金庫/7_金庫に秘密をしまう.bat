@@ -58,7 +58,7 @@ REM   ・$OutputEncoding は「ネイティブコマンド（node）へ渡す文字コード」。
 REM     node は UTF-8 前提なので、こちらは UTF-8 のままにしておく必要がある。
 REM   ・node の標準出力を受け取る箇所だけは [Console]::OutputEncoding を一時的に
 REM     UTF-8 にして読み、直後に元へ戻す（日本語の名前を正しく受け取るため）。
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$OutputEncoding=[Text.Encoding]::UTF8; $t=$env:AI_SAFE_TARGET; $n=$env:AI_SAFE_NAME; $s=Read-Host $env:AI_SAFE_MSG_VALUE -AsSecureString; $p=[Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)); if($p.Length -eq 0){ exit 3 }; $p | & node $t --user-set $n | Out-Null; exit $LASTEXITCODE"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$OutputEncoding=[Text.Encoding]::UTF8; $t=$env:AI_SAFE_TARGET; $n=$env:AI_SAFE_NAME; $s=Read-Host $env:AI_SAFE_MSG_VALUE -AsSecureString; $p=[Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)); if($p.Length -eq 0){ exit 3 }; $p | & node $t --user-set $n; exit $LASTEXITCODE"
 set "AI_SAFE_RC=%errorlevel%"
 set "AI_SAFE_MSG_VALUE="
 

@@ -148,13 +148,13 @@ test('macOS integrated launcher includes monitored d-claude through the existing
   assert.match(script, /ANTHROPIC_AUTH_TOKEN/);
   // モデル名に [1m] を付けると Claude Code 2.1.226 以降は「そんなモデルは無い」で
   // 起動できなくなる（実機で再現）。1M コンテキストは env で伝える。
-  assert.match(script, /ANTHROPIC_MODEL="deepseek-v4-flash"/);
-  assert.match(script, /ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-flash"/);
-  assert.match(script, /ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-flash"/);
+  assert.match(script, /ANTHROPIC_MODEL="deepseek-flash"/);
+  assert.match(script, /ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-flash"/);
+  assert.match(script, /ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-flash"/);
   assert.match(script, /CLAUDE_CODE_MAX_CONTEXT_TOKENS="1048576"/);
-  assert.doesNotMatch(script, /deepseek-v4-flash\[1m\]/, 'モデル名に [1m] を残さないこと');
-  assert.match(script, /ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"/);
-  assert.match(script, /CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash"/);
+  assert.doesNotMatch(script, /deepseek[a-z0-9.-]*\[1m\]/, 'モデル名に [1m] を残さないこと');
+  assert.match(script, /ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-flash"/);
+  assert.match(script, /CLAUDE_CODE_SUBAGENT_MODEL="deepseek-flash"/);
   assert.match(script, /CLAUDE_CODE_EFFORT_LEVEL="max"/);
   assert.doesNotMatch(script, /d-claude:standard[\s\S]{0,500}\bclaude\b(?:\s|$)/, '統合経路から素のclaudeを直接起動しない');
 });
@@ -211,12 +211,12 @@ test('macOS integrated d-claude starts monitor, consent gate, and safe gateway t
       // ANTHROPIC_AUTH_TOKEN は gateway が「起動限りの合言葉」で上書きするので、
       // ここへ来た時点では空でなければならない。
       '[ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] || exit 8',
-      '[ "$ANTHROPIC_MODEL" = "deepseek-v4-flash" ] || exit 7',
-      '[ "$ANTHROPIC_DEFAULT_OPUS_MODEL" = "deepseek-v4-flash" ] || exit 10',
-      '[ "$ANTHROPIC_DEFAULT_SONNET_MODEL" = "deepseek-v4-flash" ] || exit 11',
+      '[ "$ANTHROPIC_MODEL" = "deepseek-flash" ] || exit 7',
+      '[ "$ANTHROPIC_DEFAULT_OPUS_MODEL" = "deepseek-flash" ] || exit 10',
+      '[ "$ANTHROPIC_DEFAULT_SONNET_MODEL" = "deepseek-flash" ] || exit 11',
       '[ "$CLAUDE_CODE_MAX_CONTEXT_TOKENS" = "1048576" ] || exit 12',
-      '[ "$ANTHROPIC_DEFAULT_HAIKU_MODEL" = "deepseek-v4-flash" ] || exit 12',
-      '[ "$CLAUDE_CODE_SUBAGENT_MODEL" = "deepseek-v4-flash" ] || exit 13',
+      '[ "$ANTHROPIC_DEFAULT_HAIKU_MODEL" = "deepseek-flash" ] || exit 12',
+      '[ "$CLAUDE_CODE_SUBAGENT_MODEL" = "deepseek-flash" ] || exit 13',
       '[ "$CLAUDE_CODE_EFFORT_LEVEL" = "max" ] || exit 14',
       `printf gateway > "${path.join(workspace, 'gateway-called')}"`,
     ].join('\n') + '\n', { mode: 0o755 });

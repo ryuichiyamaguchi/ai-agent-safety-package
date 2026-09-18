@@ -30,11 +30,11 @@ test('Windows integrated launcher has standard and assisted profiles only', () =
   assert.match(script, /launch-deepseek-safe[.]ps1/);
   assert.match(script, /deepseek\\launch-deepseek-gateway[.]ps1/);
   assert.match(script, /ANTHROPIC_AUTH_TOKEN/);
-  assert.match(script, /ANTHROPIC_MODEL = 'deepseek-v4-flash'/);
-  assert.match(script, /ANTHROPIC_DEFAULT_OPUS_MODEL = 'deepseek-v4-flash'/);
-  assert.match(script, /ANTHROPIC_DEFAULT_SONNET_MODEL = 'deepseek-v4-flash'/);
-  assert.match(script, /ANTHROPIC_DEFAULT_HAIKU_MODEL = 'deepseek-v4-flash'/);
-  assert.match(script, /CLAUDE_CODE_SUBAGENT_MODEL = 'deepseek-v4-flash'/);
+  assert.match(script, /ANTHROPIC_MODEL = 'deepseek-flash'/);
+  assert.match(script, /ANTHROPIC_DEFAULT_OPUS_MODEL = 'deepseek-flash'/);
+  assert.match(script, /ANTHROPIC_DEFAULT_SONNET_MODEL = 'deepseek-flash'/);
+  assert.match(script, /ANTHROPIC_DEFAULT_HAIKU_MODEL = 'deepseek-flash'/);
+  assert.match(script, /CLAUDE_CODE_SUBAGENT_MODEL = 'deepseek-flash'/);
   assert.match(script, /CLAUDE_CODE_EFFORT_LEVEL = 'max'/);
 });
 

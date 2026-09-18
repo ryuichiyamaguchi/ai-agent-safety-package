@@ -63,18 +63,15 @@ fi
 
 echo ""
 echo " 金庫にしまっています..."
-if printf '%s' "$VALUE" | node "$TARGET" --user-set "$NAME" >/dev/null; then
+if printf '%s' "$VALUE" | node "$TARGET" --user-set "$NAME"; then
   VALUE=""
   echo ""
-  # 変数名の直後に日本語が続く形（"$NAME」"）は bash 3.2 が変数名を取り違えるので printf を使う。
-  printf ' しまえました。名前は「%s」です。\n' "$NAME"
+  echo " DeepSeek / AIコーチ(Gemini) / Buffer のキーは、この住所ではなく"
+  echo " 「1_DeepSeekキーを登録」「3_AIコーチのキーを登録」「5_Bufferのキーを登録」"
+  echo " でしまってください。"
   echo ""
-  echo " 取り出したいときは:"
-  echo "   「8_金庫から秘密を取り出す」をダブルクリック"
-  echo "   → 一覧から番号で選ぶと、中身がクリップボードに入ります。"
-  echo "     （画面には出しません。貼り付けたい場所で ⌘+V を押してください）"
-  echo ""
-  echo " いらなくなったら「9_金庫の秘密を消す」で消せます。"
+  echo " 取り出したいときは「8_金庫から秘密を取り出す」、"
+  echo " いらなくなったら「9_金庫の秘密を消す」です。"
 else
   VALUE=""
   echo ""

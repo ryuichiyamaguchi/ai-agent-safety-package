@@ -25,16 +25,31 @@ function Emit-AssistedDecision([string]$Decision, [string]$Reason) {
     exit 0
 }
 
-# node を多層解決（launch-claude-safe.ps1 の claude 解決と同方針）。
+# node を多層解決。Process.Start(UseShellExecute=false) は .cmd シムを起動できないので
+# node.exe を優先する（node.cmd を渡すと毎回 catch →「AI 判定の起動に失敗しました」になる）。
 function Resolve-NodeBin {
-    if ($env:NODE_BIN -and (Test-Path -LiteralPath $env:NODE_BIN)) { return $env:NODE_BIN }
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if ($env:NODE_BIN) { [void]$candidates.Add($env:NODE_BIN) }
     $cmd = Get-Command node -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
+    if ($cmd -and $cmd.Source) {
+        [void]$candidates.Add([string]$cmd.Source)
+        try {
+            $sibling = Join-Path (Split-Path -Parent $cmd.Source) "node.exe"
+            if ($sibling) { [void]$candidates.Add($sibling) }
+        } catch { }
+    }
     foreach ($c in @(
-        (Join-Path $env:APPDATA "npm\node.exe"),
         (Join-Path $env:ProgramFiles "nodejs\node.exe"),
+        $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} "nodejs\node.exe" } else { $null }),
+        (Join-Path $env:APPDATA "npm\node.exe"),
         (Join-Path $env:USERPROFILE ".local\bin\node.exe")
-    )) { if ($c -and (Test-Path -LiteralPath $c)) { return $c } }
+    )) { if ($c) { [void]$candidates.Add($c) } }
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path -LiteralPath $c) -and ($c -match '\.exe$')) { return $c }
+    }
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path -LiteralPath $c)) { return $c }
+    }
     return $null
 }
 
@@ -90,7 +105,7 @@ function Invoke-AssistedApproval([object]$HookInput, [string]$Command, [object]$
         Emit-AssistedDecision "ask" "AI 判定に必要な node が見つかりません（安全側で確認します）"
     }
 
-    $judge = Join-Path $PSScriptRoot "..\common\two-key-judge.js"
+    $judge = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\two-key-judge.js"))
     if (-not (Test-Path -LiteralPath $judge)) {
         Emit-AssistedDecision "ask" "AI 判定スクリプトが見つかりません（安全側で確認します）"
     }
@@ -102,7 +117,10 @@ function Invoke-AssistedApproval([object]$HookInput, [string]$Command, [object]$
     $stdout = ""
     try {
         # 全体 30s タイムアウト（proposer 8s / verifier 12s+フォールバック再試行 が並列 + 余裕）。
-        # stdin へ payload を流して judge を実行。
+        # stdin へ payload を UTF-8（BOM なし）のバイトで流す。
+        # ★ PS 5.1（.NET Framework）には ProcessStartInfo.StandardInputEncoding が無い。
+        #   触ると毎回 catch に落ち、グレーな Bash のたびに
+        #   「AI 判定の起動に失敗しました」と確認ダイアログが出て作業が止まる。
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $node
         $psi.Arguments = "`"$judge`""
@@ -110,17 +128,24 @@ function Invoke-AssistedApproval([object]$HookInput, [string]$Command, [object]$
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
         $psi.UseShellExecute = $false
-        $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
-        $psi.StandardInputEncoding = [System.Text.Encoding]::UTF8
+        $psi.CreateNoWindow = $true
+        $utf8 = New-Object System.Text.UTF8Encoding $false
+        if ($psi.PSObject.Properties['StandardOutputEncoding']) {
+            $psi.StandardOutputEncoding = $utf8
+        }
         $proc = [System.Diagnostics.Process]::Start($psi)
-        $proc.StandardInput.Write($payload)
+        $bytes = $utf8.GetBytes($payload)
+        $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+        $proc.StandardInput.BaseStream.Flush()
         $proc.StandardInput.Close()
         if (-not $proc.WaitForExit(30000)) {
             try { $proc.Kill() } catch { }
             Emit-AssistedDecision "ask" "AI 判定がタイムアウトしました（安全側で確認します）"
         }
         $stdout = $proc.StandardOutput.ReadToEnd()
+        try { $null = $proc.StandardError.ReadToEnd() } catch { }
     } catch {
+        try { Write-AuditLog $HookInput "bash" "assist-error" ("judge spawn failed: " + $_.Exception.Message) $Command $Policy } catch { }
         Emit-AssistedDecision "ask" "AI 判定の起動に失敗しました（安全側で確認します）"
     }
 

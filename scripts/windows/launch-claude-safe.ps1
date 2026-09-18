@@ -200,17 +200,63 @@ if ($env:DS_CLAUDE_MODE -eq '1') {
         try {
             New-Item -ItemType Directory -Force -Path $logDir | Out-Null
             $mcpCfgPath = Join-Path $logDir "d-claude-mcp.json"
-            $servers = @{}
-            if ($useSearch)     { $servers["gemini-search"]      = @{ command = "node"; args = @($searchMcp) } }
-            if ($useImage)      { $servers["pollinations-image"] = @{ command = "node"; args = @($imageMcp) } }
-            if ($useAgy)        { $servers["agy-image"]          = @{ command = "node"; args = @($agyMcp) } }
-            if ($useCodexImg)   { $servers["codex-image"]        = @{ command = "node"; args = @($codexImgMcp) } }
-            if ($useVision)     { $servers["gemini-vision"]      = @{ command = "node"; args = @($visionMcp) } }
-            if ($usePlaywright) { $servers["playwright"]         = @{ command = "node"; args = @($playwrightMcp) } }
-            $mcpObj = @{ mcpServers = $servers }
-            ($mcpObj | ConvertTo-Json -Depth 6 -Compress) | Set-Content -LiteralPath $mcpCfgPath -Encoding UTF8
-            $argsList = $argsList + @("--mcp-config", $mcpCfgPath)
-        } catch { }
+            # PS 5.1 の ConvertTo-Json は要素 1 個の配列をスカラーに潰す
+            # （"args":["path.js"] → "args":"path.js"）。Claude Code の spawn は
+            # args に配列を要求するので、gemini-vision を含む MCP が全部起動に失敗する。
+            # 加えて Set-Content -Encoding UTF8 は BOM 付きになり、JSON パーサが拒否する。
+            # node で書けば配列も BOM も正しい（mac の launch-claude-safe.sh と同じ）。
+            $nodeCmd = "node"
+            $nodeCmdCandidate = $env:NODE_BIN
+            if (-not $nodeCmdCandidate) {
+                $nodeWhich = Get-Command node -ErrorAction SilentlyContinue
+                if ($nodeWhich) { $nodeCmdCandidate = [string]$nodeWhich.Source }
+            }
+            foreach ($c in @(
+                $nodeCmdCandidate,
+                $(if ($nodeCmdCandidate) { Join-Path (Split-Path -Parent $nodeCmdCandidate) "node.exe" } else { $null }),
+                (Join-Path $env:ProgramFiles "nodejs\node.exe")
+            )) {
+                if ($c -and (Test-Path -LiteralPath $c) -and ($c -match '\.exe$')) { $nodeCmd = $c; break }
+            }
+            $writer = @'
+const fs = require("fs");
+const servers = {};
+const nodeCmd = process.argv[3];
+function add(name, p) { if (p && p !== "--none--") servers[name] = { command: nodeCmd, args: [p] }; }
+add("gemini-search", process.argv[4]);
+add("pollinations-image", process.argv[5]);
+add("agy-image", process.argv[6]);
+add("codex-image", process.argv[7]);
+add("gemini-vision", process.argv[8]);
+add("playwright", process.argv[9]);
+fs.writeFileSync(process.argv[2], JSON.stringify({ mcpServers: servers }));
+'@
+            $writerPath = Join-Path $logDir "d-claude-mcp-write.js"
+            $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+            [System.IO.File]::WriteAllText($writerPath, $writer, $utf8NoBom)
+            # PS 5.1 はネイティブコマンドへ空文字引数を渡すと省略するので、番兵を使う。
+            $none = "--none--"
+            $argSearch = $(if ($useSearch) { $searchMcp } else { $none })
+            $argImage  = $(if ($useImage) { $imageMcp } else { $none })
+            $argAgy    = $(if ($useAgy) { $agyMcp } else { $none })
+            $argCodex  = $(if ($useCodexImg) { $codexImgMcp } else { $none })
+            $argVision = $(if ($useVision) { $visionMcp } else { $none })
+            $argPw     = $(if ($usePlaywright) { $playwrightMcp } else { $none })
+            $writeOk = $false
+            try {
+                & $nodeCmd $writerPath $mcpCfgPath $nodeCmd $argSearch $argImage $argAgy $argCodex $argVision $argPw
+                if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $mcpCfgPath)) { $writeOk = $true }
+            } finally {
+                Remove-Item -LiteralPath $writerPath -Force -ErrorAction SilentlyContinue
+            }
+            if ($writeOk) {
+                $argsList = $argsList + @("--mcp-config", $mcpCfgPath)
+            } else {
+                Write-Warning "d-claude の補助ツール設定（検索/画像読取）を書けませんでした。"
+            }
+        } catch {
+            Write-Warning ("d-claude の補助ツール設定を書けませんでした: " + $_.Exception.Message)
+        }
     }
 }
 
