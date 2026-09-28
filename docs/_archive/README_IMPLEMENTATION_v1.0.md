@@ -1,3 +1,5 @@
+> **過去の設計書（v1.0 時点）です。** 現在の仕組みとは大きく違います（例: 教室 13 名・3 日での実現可否を前提にしていた）。いまの守りの全体像は [../90_守れる-守れない.md](../90_守れる-守れない.md)、設定の置き場は [../12_設定ファイルの置き場マップ.md](../12_設定ファイルの置き場マップ.md) を見てください。
+
 # AI Agent Safety Package v1.0
 
 Target: 13 learners can use Codex CLI, Claude Code, and Gemini CLI on real projects for three months with local detection, control, and logging.
