@@ -1,0 +1,89 @@
+# Windows の自動テスト（Windows PowerShell 5.1）
+#
+# 過去の重大事故（文字化け・BOM 欠落・PowerShell 5.1 だけの挙動・アクセス権の締め出し）は
+# ほぼ Windows 固有で、mac の pwsh では見つけられなかった。ここでは GitHub の windows-latest に
+# 標準で入っている Windows PowerShell 5.1 で、Windows 用の見張りとテストを毎回動かす。
+#
+# ジョブ:
+#   ps51             : scripts\windows\test の必須テスト（落ちたら赤）
+#   ps51-machine     : Windows 実機向けのテスト（auto-mode）。様子見のため赤にしない
+#   install-doctor   : 日本語名の作業フォルダへ導入 → 診断（出荷条件 C の足がかり）。様子見のため赤にしない
+#
+# 様子見の 2 本は、初回の結果を見て通るようになったら continue-on-error を外す。
+#
+# 改行: Windows の git は既定で LF を CRLF に変換して取り出すため、導入時のハッシュ照合が
+# 配布 ZIP（git archive = コミットしたバイト列そのまま）と食い違う。checkout 前に変換を止める。
+name: windows-tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ps51:
+    name: PowerShell 5.1 tests (required)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Keep committed line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Versions
+        run: |
+          $PSVersionTable.PSVersion
+          node --version
+      - name: Run Windows tests on PowerShell 5.1
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\test\run-all.ps1 -Exclude auto-mode.test.ps1
+          exit $LASTEXITCODE
+
+  ps51-machine:
+    name: Windows machine tests (observing)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Keep committed line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Run auto-mode tests on PowerShell 5.1
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\test\run-all.ps1 -Only auto-mode.test.ps1
+          exit $LASTEXITCODE
+
+  install-doctor:
+    name: Install into a Japanese-named folder, then doctor (observing)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Keep committed line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install and doctor on PowerShell 5.1
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\test\ci-install-doctor.ps1
+          exit $LASTEXITCODE

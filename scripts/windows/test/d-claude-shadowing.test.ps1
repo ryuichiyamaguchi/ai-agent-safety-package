@@ -20,9 +20,10 @@ if ($diagText -match 'WARN\s+\("プロファイルに d-claude の記述あり' 
     Ng 'diagnostic reports stale profile d-claude as warning, not problem'
 }
 
+# v1.18.0 で「11_野良d-claudeを退治」ボタンは「9_困ったとき診断」に統合された。警告の案内先も診断になっている。
 $setupText = Get-Content -LiteralPath $setupCommands -Raw -Encoding UTF8
 if ($setupText -match 'Get-DClaudeProfileDefinitionHits' -and
-    $setupText -match '11_野良d-claudeを退治') {
+    $setupText -match '9_困ったとき診断') {
     Ok 'setup command warning uses active d-claude definitions and points to cleanup tool'
 } else {
     Ng 'setup command warning uses active d-claude definitions and points to cleanup tool'
