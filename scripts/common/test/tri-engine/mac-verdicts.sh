@@ -23,7 +23,7 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 が必要です" >&2; exit
 TD="$(mktemp -d)"
 trap 'rm -rf "$TD"' EXIT INT TERM
 
-# 2 鍵 assisted approval はグレー確定後の層。床の判定には関係しないが、
+# AI assisted approval はグレー確定後の層。床の判定には関係しないが、
 # 呼び出し元の環境変数で ask に化けると判定が揺れるので明示的に切る。
 unset AI_SAFE_ASSISTED_APPROVAL DS_CLAUDE_MODE AI_SAFE_POLICY AI_SAFE_ROOT 2>/dev/null || true
 

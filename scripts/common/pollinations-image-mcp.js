@@ -14,7 +14,7 @@
 //   （gpt-image-2 等）に回す運用にする。判断はモデルに委ね、ツール説明でそれを促す。
 //
 // 設計方針:
-//   - 依存ゼロ（本パッケージの gemini-search-mcp / two-key-judge と同じ純 Node）。
+//   - 依存ゼロ（本パッケージの gemini-search-mcp / command-judge と同じ純 Node）。
 //   - API キー不要（Pollinations は無認証 GET）。受講者は新規登録・キー登録の手間ゼロ。
 //   - 生成画像はワークスペース配下 generated-images/ に保存し、保存先パスを返す。
 //   - 教室向けに safe=true（NSFW フィルタ）と private=true（公開フィードに出さない）を付与。

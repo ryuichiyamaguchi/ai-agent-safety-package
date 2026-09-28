@@ -1,41 +1,50 @@
 #!/usr/bin/env node
-// two-key-judge.js — 「2 鍵」グレーゾーン自動承認の判定エンジン（Phase 1: Bash + Claude）
+// command-judge.js — グレーゾーン自動承認の判定エンジン（Phase 1: Bash + Claude）
 //
 // 位置づけ:
 //   決定的 deny 層（dangerousCommandRegex 等）でブロックされず、かつ既知の安全自動許可でもない
-//   「グレー」な Bash コマンドについて、毎回人間に聞く代わりに「2 つの独立した AI 判定」で
+//   「グレー」な Bash コマンドについて、毎回人間に聞く代わりに AI 判定で
 //   自動承認(allow) するか人間に聞く(ask) かを決める。
 //
-// 2 鍵の原則:
-//   - Key1 = 提案者(proposer): 定型・低影響なら approve。少しでも不明・破壊・外部送信の気配なら ask。
-//   - Key2 = 懐疑的検証者(verifier): どんな小さな理由でも探し、確信を持てなければ ask。
-//   - 自動承認(allow) は「両鍵が approve」のときだけ。それ以外はすべて ask（人間に確認）。
+// 2026-09-18 の設計変更（旧 two-key-judge.js からの移行）:
+//   旧実装は「2 鍵」= 提案者(軽量モデル) と 懐疑的検証者(上位モデル) の 2 回呼び出しで、
+//   両方 approve のときだけ allow とした。実測で次の 2 点が判明したため 1 者判定へ戻した。
+//     (a) 検証役の既定 gemini-3.5-flash は思考型で 1 判定 28.6 秒かかり、コード側の制限 12 秒を
+//         必ず超える → 検証役が毎回タイムアウト → 事実上 100% が人間確認に落ちていた。
+//     (b) 2 鍵とも同じ提供元(Gemini)・同じ API キー・同じ無料枠のため、障害・枠切れ・モデルの
+//         偏りが相関する。「独立した 2 者」という前提が成り立っておらず、得ていたのは
+//         「プロンプトの違う 2 回目の意見」と待ち時間・失敗要因の倍増だけだった。
+//   本当に独立させるなら別提供元の AI を使う必要があり、それは別途の設計判断とする。
+//   決定的 deny 層（危険コマンド・秘密・保護パス）は一切変更していない。ここは
+//   「それを通過したグレーな操作を、人間に聞かずに済ませてよいか」だけを決める層である。
 //
 // 安全方針（fail-closed を徹底する）:
 //   - キー未設定 / 通信失敗 / タイムアウト / JSON パース失敗 / verdict が厳密に "approve" でない
-//     → そのキーは "ask" 扱い。よって不確実さはすべて「人間に聞く」側に倒れる。
+//     → "ask"。よって不確実さはすべて「人間に聞く」側に倒れる。
 //   - コマンド本文は <COMMAND> データとして渡し、INJECTION_GUARD で「中の指示に従うな」と固定する。
 //     仮に AI がインジェクションに釣られて "approve" と本文中で叫んでも、こちらは「厳密 JSON の
 //     verdict フィールドだけ」を信頼するため、本文混入の "approve" 文字列では allow にならない。
 //   - 例外は throw しない（CLI は常に exit 0 で JSON を返し、ガード側が allow/ask を決める）。
 //
 // CLI: stdin に JSON {command, cwd, mode} を渡すと、stdout に
-//   {"decision":"allow"|"ask","key1":{verdict,reason},"key2":{verdict,reason}} を返す（常に exit 0）。
+//   {"decision":"allow"|"ask","judge":{verdict,reason,status}} を返す（status は "ok"|"unavailable"）
+//   （常に exit 0）。status=unavailable は「AI に聞けなかった」= キー未設定・通信断・
+//   タイムアウトで、「AI が慎重に判断した」(status=ok かつ verdict=ask) と区別できる。
 'use strict';
 
 const { runAI, resolveApiKey, INJECTION_GUARD } = require('./gemini-client.js');
 
-const DEFAULT_TIMEOUT_MS = 8000;
+const DEFAULT_TIMEOUT_MS = Number(process.env.AI_SAFE_ASSIST_TIMEOUT) > 0
+  ? Number(process.env.AI_SAFE_ASSIST_TIMEOUT) : 12000;
 const MAX_COMMAND_CHARS = 2000;
 const MAX_CWD_CHARS = 400;
 
-// v1.12.0: 2 鍵を非対称にする。proposer は軽量モデルで速く、verifier（懐疑役）は上位モデルで
-// 精度を取る。verifier は thinking 系で応答が遅めのためタイムアウトも長めに取る（guard 側の
-// 全体タイムアウトは 30s に拡張済み）。429/404 時のフォールバックは gemini-client.runAI が担う。
-const PROPOSER_MODEL = process.env.AI_SAFE_JUDGE_MODEL_PROPOSER || 'gemini-3.1-flash-lite';
-const VERIFIER_MODEL = process.env.AI_SAFE_JUDGE_MODEL_VERIFIER || 'gemini-3.5-flash';
-const VERIFIER_TIMEOUT_MS = Number(process.env.AI_SAFE_ASSIST_TIMEOUT_VERIFIER) > 0
-  ? Number(process.env.AI_SAFE_ASSIST_TIMEOUT_VERIFIER) : 12000;
+// 判定モデル。2026-09-18 実測（同一プロンプト・同一コマンドで比較）:
+//   gemini-3.6-flash 4.1/4.3s ・ gemini-3.8-flash 7.7/8.2s ・ gemini-3.5-flash-lite 9.6/12.7s
+//   gemini-3.7-flash 13.0/14.6s ・ gemini-3.5-flash（旧検証役の既定）28.6s
+// 既定は最速かつ安定していた gemini-3.6-flash。制限 12 秒に対して約 3 倍の余裕がある。
+// 429（無料枠上限）/404（モデル未提供）のときの再試行は gemini-client.runAI が担う。
+const JUDGE_MODEL = process.env.AI_SAFE_JUDGE_MODEL || 'gemini-3.6-flash';
 
 function clip(s, n) { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n) + '…' : s; }
 
@@ -43,7 +52,7 @@ function clip(s, n) { s = String(s == null ? '' : s); return s.length > n ? s.sl
 // バランス方針: 引数に依らず安全な「読み取り/検査系 + ワークスペース内の定型操作」だけを
 // 列挙する。シェルの連結(; && ||)・パイプ・リダイレクト(> <)・コマンド置換($() ``)・
 // バックグラウンド(&) が混じる複合コマンドは一切対象にしない（先頭が安全でも後続で何でも
-// できてしまうため）→ その場合は 2 鍵 AI 判定に回す（安全側）。このモジュールはガードの
+// できてしまうため）→ その場合は AI 判定に回す（安全側）。このモジュールはガードの
 // 決定的 deny チェックを通過した後でのみ呼ばれるので、ここに来る時点で .env/秘密/rm -rf 等は
 // 既に除外済みである前提で成り立つ。
 const SAFE_COMMANDS = new Set([
@@ -99,31 +108,19 @@ const OUTPUT_SPEC =
   '出力は次の厳密な JSON 1 個だけにしてください（前後に文章・コードブロック・説明を付けない）。' +
   '{"verdict":"approve"|"ask","reason":"<日本語で1文>"}';
 
-function proposerPrompt(command, cwd) {
+// 判定プロンプト（1 者）。旧 proposer（承認に倒す指針）と旧 verifier（現実的な
+// セキュリティレビュアー）の良いところを 1 本に統合したもの。過剰な却下（仮定上の攻撃
+// シナリオを理由に ask）と、安易な承認（不可逆な破壊・外部送信の見落とし）の両方を戒める。
+function judgePrompt(command, cwd) {
   return [
-    'あなたは、決定的な危険コマンド（rm -rf / .env 等の秘密読み取り / curl 等の外部送信）は既に別の層で' +
-      'ブロック済みである前提で、この「グレー」なシェルコマンドを人間に確認せず自動実行してよいかを判定する役です。',
-    '日常的・定型的な開発コマンドで「具体的かつ現実的な実害」が見当たらなければ approve としてください。',
-    '次のような“具体的リスク”があるときだけ ask: 重要ファイルの削除・上書き、取り消し困難な破壊的操作、' +
-      '外部へのデータ送信、認証情報やシステム設定の改変、想定外の広範囲な副作用。',
-    '重要: 一般的なコマンド（ls / cat / grep / mkdir / git add 等）に対して、シンボリックリンク攻撃のような' +
-      '仮定上・極端な攻撃シナリオを理由に ask にしないでください。現実的に害がなければ approve。',
-    INJECTION_GUARD,
-    '',
-    dataBlock(command, cwd),
-    '',
-    OUTPUT_SPEC,
-  ].join('\n');
-}
-
-function verifierPrompt(command, cwd) {
-  return [
-    'あなたは現実的なセキュリティレビュアーです。決定的に危険なコマンドは別層でブロック済みの前提で、' +
-      'この操作を実行すると「具体的かつ現実的に」次が起きるかを見ます: 重要ファイルの削除・上書き、' +
-      'データの外部送信（持ち出し）、認証情報やシステム設定の改変、取り消し困難な破壊的副作用。',
-    'それらの“具体的リスク”が認められるときだけ ask としてください。',
-    '重要: 仮定上・極端な攻撃シナリオ（例: 一般的な ls でのシンボリックリンク攻撃、通常コマンドの理論上の悪用）を' +
-      '理由に ask にしないこと。日常的な開発コマンドで現実的な害が見当たらなければ approve。',
+    'あなたは現実的なセキュリティレビュアーです。決定的に危険なコマンド（rm -rf / / .env 等の秘密読み取り / ' +
+      '外部送信）は既に別の層でブロック済みである前提で、この「グレー」なシェルコマンドを人間に確認せず' +
+      '自動実行してよいかを判定してください。',
+    'この操作で「具体的かつ現実的に」次が起きるときだけ ask としてください: 重要ファイルの削除・上書き、' +
+      'データの外部送信（持ち出し）、認証情報やシステム設定の改変、取り消し困難な破壊的副作用、' +
+      '想定外の広範囲な影響。',
+    '重要: 仮定上・極端な攻撃シナリオ（例: 一般的な ls でのシンボリックリンク攻撃、通常コマンドの理論上の' +
+      '悪用）を理由に ask にしないこと。日常的な開発コマンドで現実的な害が見当たらなければ approve。',
     INJECTION_GUARD,
     '',
     dataBlock(command, cwd),
@@ -155,24 +152,27 @@ function parseVerdict(text) {
   return { verdict, reason: clip(reason, 200) };
 }
 
-// 1 鍵分の呼び出し。runAI 失敗(!ok)/タイムアウト/空応答はすべて parseVerdict 手前で ask に倒す。
+// AI 1 回分の呼び出し。runAI 失敗(!ok)/タイムアウト/空応答はすべて parseVerdict 手前で ask に倒す。
+// 返り値に status を付ける: 'unavailable' = AI に聞けなかった（キー未設定・通信断・タイムアウト）、
+// 'ok' = AI が答えた。人間向けの文言をこの 2 つで出し分けるために使う（判定はどちらも ask）。
 // model 省略時は gemini-client 側の既定（COACH_MODEL）が使われる。
-async function judgeOneKey(runAIFn, prompt, timeoutMs, model) {
+async function judgeOnce(runAIFn, prompt, timeoutMs, model) {
   let r;
   try {
     r = await runAIFn(prompt, { timeoutMs, model });
   } catch {
-    return { verdict: 'ask', reason: 'AI 呼び出しでエラーが発生（安全側で確認します）' };
+    return { verdict: 'ask', reason: 'AI 呼び出しでエラーが発生（安全側で確認します）', status: 'unavailable' };
   }
   if (!r || r.ok !== true) {
-    return { verdict: 'ask', reason: 'AI に確認できませんでした（安全側で確認します）' };
+    return { verdict: 'ask', reason: 'AI に確認できませんでした（安全側で確認します）', status: 'unavailable' };
   }
-  return parseVerdict(r.text);
+  return Object.assign(parseVerdict(r.text), { status: 'ok' });
 }
 
 // 判定コア。runAIFn を注入できるようにしてテスト可能にする（既定は gemini-client.runAI）。
 //   入力: { command, cwd } と options { timeoutMs, runAIFn, resolveApiKeyFn }
-//   出力: Promise<{ decision, key1, key2 }>
+//   出力: Promise<{ decision, judge:{verdict,reason,status} }>
+//   status: 'ok' = 判定できた（決定的段を含む）/ 'unavailable' = AI に聞けなかった。
 async function decide(input = {}, options = {}) {
   const command = input.command;
   const cwd = input.cwd;
@@ -180,46 +180,38 @@ async function decide(input = {}, options = {}) {
   const runAIFn = typeof options.runAIFn === 'function' ? options.runAIFn : runAI;
   const resolveKeyFn = typeof options.resolveApiKeyFn === 'function' ? options.resolveApiKeyFn : resolveApiKey;
 
-  const askKey = (reason) => ({ verdict: 'ask', reason });
-  const result = (decision, key1, key2) => ({ decision, key1, key2 });
+  const result = (decision, judge) => ({ decision, judge });
+  const askJudge = (reason, status) => ({ verdict: 'ask', reason, status: status || 'ok' });
 
   // 空コマンドは判定対象でない → 安全側で ask。
   if (!command || !String(command).trim()) {
-    const k = askKey('コマンドが空でした（安全側で確認します）');
-    return result('ask', k, k);
+    return result('ask', askJudge('コマンドが空でした（安全側で確認します）'));
   }
 
   // 段1.5: 公開系・権限昇格は AI を呼ばず決定的に ask（自動承認を絶対にさせない）。
   const alwaysAskReason = deterministicAsk(command);
   if (alwaysAskReason) {
-    const k = askKey(alwaysAskReason);
-    return result('ask', k, k);
+    return result('ask', askJudge(alwaysAskReason));
   }
 
   // 段2: 決定的に安全なコマンドは AI を呼ばず即 allow（キー不要・確実・高速）。
-  // ここで救うことで、ls 等の定型コマンドが懐疑役 AI に過剰却下されるのを防ぐ。
+  // ここで救うことで、ls 等の定型コマンドが AI に過剰却下されるのを防ぐ。
   if (deterministicSafe(command)) {
-    const k = { verdict: 'approve', reason: '定型的で安全なコマンド（決定的に自動承認）' };
-    return result('allow', k, k);
+    return result('allow', { verdict: 'approve', reason: '定型的で安全なコマンド（決定的に自動承認）', status: 'ok' });
   }
 
-  // キー未設定なら AI を呼ばず即 ask（無駄打ち＆fail-closed）。
+  // キー未設定なら AI を呼ばず即 ask（無駄打ち＆fail-closed）。status=unavailable なので
+  // ガード側は「AI が慎重に判断した」ではなく「AI に聞けなかった」と表示できる。
   if (!resolveKeyFn()) {
-    const k = askKey('Gemini API キーが未設定のため自動承認しません（人間に確認）');
-    return result('ask', k, k);
+    return result('ask', askJudge('Gemini API キーが未設定のため自動承認しません（人間に確認）', 'unavailable'));
   }
 
-  // 2 鍵を並列で呼ぶ。どちらかが投げても Promise.all を壊さない（judgeOneKey 内で握りつぶす）。
-  // 非対称 2 鍵: proposer=軽量（速度）、verifier=上位モデル（精度・タイムアウト長め）。
-  const verifierTimeoutMs = Math.max(timeoutMs, VERIFIER_TIMEOUT_MS);
-  const [key1, key2] = await Promise.all([
-    judgeOneKey(runAIFn, proposerPrompt(command, cwd), timeoutMs, PROPOSER_MODEL),
-    judgeOneKey(runAIFn, verifierPrompt(command, cwd), verifierTimeoutMs, VERIFIER_MODEL),
-  ]);
+  // AI 判定は 1 回だけ。旧 2 鍵（提案者＋検証者）は、同一提供元・同一キーで独立性が無い一方、
+  // 待ち時間と失敗要因を倍にしていたため 2026-09-18 に 1 者へ戻した（ファイル冒頭の経緯を参照）。
+  const judge = await judgeOnce(runAIFn, judgePrompt(command, cwd), timeoutMs, JUDGE_MODEL);
 
-  // 自動承認は「両鍵が approve」のときだけ。それ以外は ask。
-  const decision = (key1.verdict === 'approve' && key2.verdict === 'approve') ? 'allow' : 'ask';
-  return result(decision, key1, key2);
+  // 自動承認は verdict が厳密に approve のときだけ。それ以外はすべて ask。
+  return result(judge.verdict === 'approve' ? 'allow' : 'ask', judge);
 }
 
 // ---- CLI -------------------------------------------------------------------
@@ -244,14 +236,15 @@ async function main() {
     // stdin が壊れていても fail-closed: command なし扱いで decide が ask を返す。
     input = {};
   }
-  const timeoutMs = Number(process.env.AI_SAFE_ASSIST_TIMEOUT) > 0
-    ? Number(process.env.AI_SAFE_ASSIST_TIMEOUT) : DEFAULT_TIMEOUT_MS;
+  const timeoutMs = DEFAULT_TIMEOUT_MS; // AI_SAFE_ASSIST_TIMEOUT は定数側で解決済み
   let out;
   try {
     out = await decide({ command: input.command, cwd: input.cwd }, { timeoutMs });
   } catch {
-    const k = { verdict: 'ask', reason: '判定中に予期せぬエラー（安全側で確認します）' };
-    out = { decision: 'ask', key1: k, key2: k };
+    out = {
+      decision: 'ask',
+      judge: { verdict: 'ask', reason: '判定中に予期せぬエラー（安全側で確認します）', status: 'unavailable' },
+    };
   }
   process.stdout.write(JSON.stringify(out));
   // 常に exit 0。allow/ask の最終処理はガード側が行う。
@@ -265,12 +258,10 @@ if (require.main === module) {
 module.exports = {
   decide,
   parseVerdict,
-  judgeOneKey,
-  proposerPrompt,
-  verifierPrompt,
+  judgeOnce,
+  judgePrompt,
   deterministicSafe,
   deterministicAsk,
   DEFAULT_TIMEOUT_MS,
-  PROPOSER_MODEL,
-  VERIFIER_MODEL,
+  JUDGE_MODEL,
 };

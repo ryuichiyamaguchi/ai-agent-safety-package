@@ -55,7 +55,7 @@ function Start-GuardProcess([object]$Case, [int]$Slot) {
     $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
     $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
     $psi.EnvironmentVariables["AI_SAFE_LOG_DIR"] = $logDir
-    # 2 鍵 assisted approval はグレー確定後の層。床の判定には関係しないが、
+    # AI assisted approval はグレー確定後の層。床の判定には関係しないが、
     # 呼び出し元の環境変数で ask に化けると判定が揺れるので明示的に切る。
     foreach ($k in @("AI_SAFE_ASSISTED_APPROVAL", "DS_CLAUDE_MODE", "AI_SAFE_POLICY", "AI_SAFE_ROOT")) {
         if ($psi.EnvironmentVariables.ContainsKey($k)) { $psi.EnvironmentVariables.Remove($k) | Out-Null }

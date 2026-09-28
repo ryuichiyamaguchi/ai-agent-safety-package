@@ -600,6 +600,8 @@ if (Test-Path -LiteralPath $startSrc) {
         "14_フォルダのアクセス権を直す.bat",
         "（上級）1_DeepSeekキーを登録.command", "（上級）1_DeepSeekキーを登録.bat",
         "（上級）2_DeepSeek-Claudeを起動.command", "（上級）2_DeepSeek-Claudeを起動.bat",
+        "（上級）3_セーフCodexをオートで起動.command", "（上級）3_セーフCodexをオートで起動.bat",
+        "（上級）4_AIアシスト承認でClaude起動.command", "（上級）4_AIアシスト承認でClaude起動.bat",
         "（上級）3_モニターをコンソールで見る.command", "（上級）3_モニターをコンソールで見る.bat",
         "（上級）4_ステータスラインを入れる.command", "（上級）4_ステータスラインを入れる.bat",
         "（上級）5_このPC全体に最低限の安全設定を入れる.command", "（上級）5_このPC全体に最低限の安全設定を入れる.bat",

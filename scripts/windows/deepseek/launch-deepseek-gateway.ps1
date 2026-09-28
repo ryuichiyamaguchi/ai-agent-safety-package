@@ -287,7 +287,7 @@ try {
   # d-claude 経路の目印。launch-claude-safe.ps1 はこのフラグがあるとき
   # DeepSeek ルーティング env の Remove をスキップする (消すと not logged in になる)。
   $env:DS_CLAUDE_MODE = "1"
-  # d-claude ではグレーコマンドの危険判定を独立した Gemini(2鍵)に任せて自律的に回す（自己審査回避）。
+  # d-claude ではグレーコマンドの危険判定を独立した Gemini に任せて自律的に回す（自己審査回避）。
   # 両鍵 approve のときだけ自動許可、怪しければ人間に確認(fail-closed)。決定的 deny の底は不変。
   # judge は無条件で ON。PowerShell では [bool]"0"=True のため以前の弱いガード `if (-not $env:...)`
   # は残存 setx の "0" を上書きできず judge が黙って OFF になり得た（opt-out 撤廃）。

@@ -8,7 +8,7 @@
 //   DeepSeek がツール呼び出しで検索結果（要約＋出典 URL）を受け取れるようにする。
 //
 // 設計方針:
-//   - 依存ゼロ（本パッケージの ds-gateway / two-key-judge / gemini-client と同じ純 Node）。
+//   - 依存ゼロ（本パッケージの ds-gateway / command-judge / gemini-client と同じ純 Node）。
 //   - キーは既存の安全パッケージ Gemini キーを使い回す（gemini-client.resolveApiKey）。
 //     受講者は新しいアカウントを作らなくてよい（コーチ用キーをそのまま利用）。
 //   - 検索モデルは gemini-2.5-flash 固定（無料枠で Google 検索 grounding が実際に返る

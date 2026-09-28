@@ -12,7 +12,7 @@ unset AI_SAFE_POLICY AI_SAFE_ROOT
 # 同等の効果（PreToolUse hook による fail-closed 判定 + 危険コマンド deny）を出している。
 # 追加の保険として --permission-mode default を渡し、Claude Code 側のデフォルト
 # 承認モードを明示する。古い CLI でフラグ非対応の場合はフォールバックする。
-# --assisted opt-in: 2 鍵グレーゾーン自動承認を有効化（既定 OFF）。フラグを引数列から
+# --assisted opt-in: AI グレーゾーン自動承認を有効化（既定 OFF）。フラグを引数列から
 # 取り除いてから従来の位置引数（workspace / prompt）を解釈する。事前に環境変数
 # AI_SAFE_ASSISTED_APPROVAL=1 が立っている場合もそのまま尊重して引き継ぐ。
 _args=()

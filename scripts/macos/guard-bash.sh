@@ -53,11 +53,14 @@ has_dangerous_command && block "dangerous shell command matched"
 # ここに来た時点でコマンドは「グレー」（決定的 deny に当たらず・既知の安全自動許可でもない）。
 # 既定では従来どおり allow（JSON 無し exit 0 = settings.json の承認フローに委ねる）。
 #
-# 2 鍵グレーゾーン自動承認（opt-in・既定 OFF）:
-#   AI_SAFE_ASSISTED_APPROVAL=1 のときだけ、2 つの独立 AI 判定で allow/ask を決める。
+# AI グレーゾーン自動承認（opt-in・既定 OFF）:
+#   AI_SAFE_ASSISTED_APPROVAL=1 のときだけ、AI 判定で allow/ask を決める。
+#   2026-09-18: 旧「2 鍵」（提案者＋検証者の 2 回呼び出し）は 1 者判定に戻した。検証役の
+#   既定モデルが 1 判定 28.6 秒かかり制限 12 秒を必ず超えて毎回タイムアウトしていたこと、
+#   2 鍵とも同一提供元・同一キーで独立性が無かったことが理由（command-judge.js 冒頭参照）。
 #   - d-claude セッション（coach-engine マーカーが fresh<12h で "d-claude"）はスキップ。
 #   - node が無い / 判定が失敗・タイムアウト → ask（fail-closed。決して allow に倒さない）。
-#   - 判定ロジックは scripts/common/two-key-judge.js（共有 Node モジュール）に集約。bash は
+#   - 判定ロジックは scripts/common/command-judge.js（共有 Node モジュール）に集約。bash は
 #     コマンドを渡して結果を Claude の permissionDecision JSON に翻訳するだけ。
 # OFF（未設定/0）のときはこのブロックを完全にスキップし、従来の allow にフォールスルーする。
 # ---------------------------------------------------------------------------
@@ -68,17 +71,17 @@ assisted_approval() {
     # OFF を必ず監査＋now に残す。素の claude-safe/codex-safe（DS_CLAUDE_MODE≠1）では OFF が正常なので残さない。
     # 判定ロジックは変えない（表示のみ・従来 allow にフォールスルー）。
     if [ "${DS_CLAUDE_MODE:-0}" = "1" ]; then
-      audit_log "assist-off" "assisted OFF (env≠1): 2鍵judge無効のまま従来allowへフォールスルー"
-      assisted_now_append "⚠️ AI2鍵judge OFF" "env≠1 のため判定せず従来allow（d-claude では要確認）"
+      audit_log "assist-off" "assisted OFF (env≠1): AI judge 無効のまま従来allowへフォールスルー"
+      assisted_now_append "⚠️ AI judge OFF" "env≠1 のため判定せず従来allow（d-claude では要確認）"
     fi
     return 1
   fi
 
-  # judge を実施（発火）することを監査に明示。以降 assist-key1/2 と最終 allow/ask も記録される。
-  audit_log "assist-on" "2鍵judgeで判定します（AI_SAFE_ASSISTED_APPROVAL=1）"
+  # judge を実施（発火）することを監査に明示。以降 assist-judge と最終 allow/ask も記録される。
+  audit_log "assist-on" "AI judge で判定します（AI_SAFE_ASSISTED_APPROVAL=1）"
 
-  # d-claude（DeepSeek 駆動）でも Gemini 2 鍵判定を有効にする。判定役は DeepSeek ではなく
-  # 独立した Gemini（two-key-judge.js → gemini-client.js）なので「自分のコマンドを自分で
+  # d-claude（DeepSeek 駆動）でも Gemini 判定を有効にする。判定役は DeepSeek ではなく
+  # 独立した Gemini（command-judge.js → gemini-client.js）なので「自分のコマンドを自分で
   # 審査する」自己審査問題は起きない。かつ、ここに来る時点で秘密情報・保護パス・決定的
   # 危険コマンドは上流（has_sensitive_text / has_protected_path / has_dangerous_command）で
   # block 済みなので、judge に渡るのはグレーな定型コマンドのみ（秘密は Google に出ない）。
@@ -95,13 +98,13 @@ assisted_approval() {
   local cmd cwd judge stdout
   cmd="$(_extract_json_field "command")"
   cwd="$(pwd)"
-  judge="$(cd "$(dirname "$0")/../common" 2>/dev/null && pwd)/two-key-judge.js"
+  judge="$(cd "$(dirname "$0")/../common" 2>/dev/null && pwd)/command-judge.js"
   if [ ! -r "$judge" ]; then
     assisted_emit_ask "AI 判定スクリプトが見つかりません（安全側で確認します）"
     return 0
   fi
 
-  # 全体タイムアウト: proposer 8s / verifier 12s(+フォールバック再試行) が並列なので余裕をみて 30s。
+  # 全体タイムアウト: judge 1 回（既定モデルは実測 4 秒台・上限 12s）に余裕をみて 30s。
   # timeout コマンドが無くてもフォールバックする（その場合は node 内のタイムアウトに委ねる）。
   local input
   input="$(assisted_build_input "$cmd" "$cwd")"
@@ -114,27 +117,46 @@ assisted_approval() {
   fi
 
   # 判定結果を解析。decision=allow を厳密に確認できたときだけ allow、それ以外は ask（fail-closed）。
-  local decision k1v k1r k2v k2r
+  local decision verdict reason status
   decision="$(assisted_json_field "$stdout" 'decision')"
-  k1v="$(assisted_json_nested "$stdout" 'key1' 'verdict')"
-  k1r="$(assisted_json_nested "$stdout" 'key1' 'reason')"
-  k2v="$(assisted_json_nested "$stdout" 'key2' 'verdict')"
-  k2r="$(assisted_json_nested "$stdout" 'key2' 'reason')"
+  verdict="$(assisted_json_nested "$stdout" 'judge' 'verdict')"
+  reason="$(assisted_json_nested "$stdout" 'judge' 'reason')"
+  status="$(assisted_json_nested "$stdout" 'judge' 'status')"
+  # judge が何も返さなかった（異常終了・30 秒の打ち切り・出力が壊れている）ときは status が空になる。
+  # これは「AI が慎重に判断した」ではなく「AI に聞けなかった」なので unavailable に倒す。
+  # Windows 側（guard-bash.ps1）は $status の初期値が "unavailable" で、同じ扱いになっている。
+  if [ -z "$status" ]; then
+    status="unavailable"
+    [ -n "$reason" ] || reason="判定プログラムが応答しませんでした（異常終了・時間切れ）"
+  fi
 
-  # 監査ログ（両鍵 + 最終）を残す。reason は redact 済 audit_log を流用。
-  audit_log "assist-key1" "key1=$k1v: $k1r"
-  audit_log "assist-key2" "key2=$k2v: $k2r"
+  # 監査ログ（判定 + 最終）を残す。reason は redact 済 audit_log を流用。
+  audit_log "assist-judge" "judge=$verdict ($status): $reason"
 
   if [ "$decision" = "allow" ]; then
-    audit_log "assist-allow" "2鍵承認: key1=$k1v / key2=$k2v"
-    assisted_now_append "✅ AI2鍵で自動承認" "key1=${k1v} / key2=${k2v}"
-    assisted_emit_allow "AI 2 鍵がともに承認（定型・低影響と判断）"
+    audit_log "assist-allow" "AI 判定で自動承認: judge=$verdict"
+    assisted_now_append "✅ AI判定で自動承認" "judge=${verdict}"
+    assisted_emit_allow "AI が承認しました（定型・低影響と判断）"
     return 0
   fi
 
-  audit_log "assist-ask" "人間に確認: key1=$k1v / key2=$k2v"
-  assisted_now_append "❓ AI判定→人間に確認" "key1=${k1v} / key2=${k2v}"
-  assisted_emit_ask "AI 2 鍵のどちらかが確信を持てませんでした（人間に確認します）"
+  # 「AI に聞けなかった」(status=unavailable: キー未設定・通信断・タイムアウト) と
+  # 「AI が慎重に判断した」(status=ok) は同じ ask でも原因が違うので文言を分ける。
+  # 旧実装は両方を同じ「確信を持てませんでした」で表示していたため、キーや時間切れの
+  # 不具合が「AI が慎重なだけ」に見えて発見が遅れた。
+  audit_log "assist-ask" "人間に確認: judge=$verdict ($status)"
+  if [ "$status" = "unavailable" ]; then
+    assisted_now_append "⚠️ AI判定できず→人間に確認" "judge 実行不可（${reason}）"
+    assisted_emit_ask "AI 判定を実行できませんでした（AIコーチのキー・通信・時間切れ）。人間に確認します"
+  else
+    assisted_now_append "❓ AI判定→人間に確認" "judge=${verdict}: ${reason}"
+    # 理由をそのまま見せる（「なぜ聞かれたか」が分からないと利用者は判断できない）。
+    if [ -n "$reason" ]; then
+      assisted_emit_ask "自動承認しませんでした: ${reason}"
+    else
+      assisted_emit_ask "AI が自動承認してよいと確信できませんでした（人間に確認します）"
+    fi
+  fi
   return 0
 }
 
@@ -149,7 +171,7 @@ assisted_json_field() {
   printf '%s' "$1" | sed -nE "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" | head -n 1
 }
 
-# key1/key2 のような入れ子オブジェクト内の文字列フィールドを取り出す。
+# judge のような入れ子オブジェクト内の文字列フィールドを取り出す。
 assisted_json_nested() {
   printf '%s' "$1" \
     | sed -nE "s/.*\"$2\"[[:space:]]*:[[:space:]]*\{[^}]*\"$3\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" \

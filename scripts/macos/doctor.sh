@@ -179,7 +179,7 @@ run_case "17 guard-prompt allows harmless learning prompt" "guard-prompt.sh" "al
 prompt_secret="自分のキーは sk-ant-""api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAA です"
 run_case "18 guard-prompt blocks real API key in prompt" "guard-prompt.sh" "block" "{\"hook_event_name\":\"UserPromptSubmit\",\"cwd\":\"$workspace\",\"prompt\":\"$prompt_secret\"}"
 
-# 19 judge 可視化ドリル: d-claude セッション(DS_CLAUDE_MODE=1)で 2 鍵 judge が未発火
+# 19 judge 可視化ドリル: d-claude セッション(DS_CLAUDE_MODE=1)で AI judge が未発火
 #    (AI_SAFE_ASSISTED_APPROVAL≠1)のとき、グレーコマンドで assist-off を監査に残しつつ
 #    従来 allow へフォールスルーすることを確認する。「judge が黙って無効化された」状態を
 #    監査/now で可視化できる回帰ガード（rm -r 事故の再発検知に対応）。ネット・node 不要の

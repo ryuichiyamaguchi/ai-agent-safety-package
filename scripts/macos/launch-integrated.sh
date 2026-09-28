@@ -17,7 +17,7 @@ Menu:
 
 Profiles:
   standard  Safety hooks + approval monitor. No local LLM is required.
-  assisted  Claude only. Standard profile plus two-key AI review for gray commands.
+  assisted  Claude only. Standard profile plus AI review for gray commands.
 
 OpenCode:
   standard only. DeepSeek V4 Pro/Flash is routed through the send inspection gateway.

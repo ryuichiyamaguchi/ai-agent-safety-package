@@ -245,7 +245,7 @@ export ANTHROPIC_AUTH_TOKEN="$GATEWAY_TOKEN"
 # DeepSeek ルーティング env (AUTH_TOKEN/BASE_URL/MODEL) の unset をスキップする
 # （消すと DeepSeek に繋がらず claude が "not logged in" になるため）。
 export DS_CLAUDE_MODE=1
-# d-claude ではグレーコマンドの危険判定を独立した Gemini(2鍵)に任せて自律的に回す。
+# d-claude ではグレーコマンドの危険判定を独立した Gemini に任せて自律的に回す。
 # 判定役は DeepSeek でなく Gemini なので「自分のコマンドを自分で審査」にならない。両鍵が
 # approve のときだけ自動許可、少しでも怪しければ人間に確認(fail-closed)。決定的 deny の底は不変。
 # judge は無条件で ON。以前の ${VAR:-1} は残存 "0"（旧 export/setx）を上書きできず judge が黙って

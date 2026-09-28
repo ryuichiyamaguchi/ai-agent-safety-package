@@ -332,6 +332,12 @@ fi
 # DeepSeek 送信検査 Gateway（クロスプラットフォーム・Node 実装）を配置
 cp -R "$package_root/scripts/common" "$workspace/.ai-safety/hooks/"
 
+# v1.19.0: グレー判定を 1 者化し two-key-judge.js を command-judge.js へ改名した。
+# cp -R は上書き合成なので、旧名のファイルが既存の作業フォルダに残り続ける（どこからも
+# 参照されないが、古い判定エンジンが置きっぱなしになるのは紛らわしいので消す）。
+rm -f "$workspace/.ai-safety/hooks/common/two-key-judge.js" \
+      "$workspace/.ai-safety/hooks/common/test/two-key-judge.test.js"
+
 # 旧「最大保護モード」で使っていたローカル検査 Gateway（ローカル LLM 必須）は v1.17.0 で
 # 廃止した。受講生の PC ではほぼ動かせないのにメニューに出ていたため。既存の作業フォルダに
 # 残っている古い配置はバックアップしてから片付ける。
@@ -525,6 +531,10 @@ if [ -d "$package_root/workspace-template/スタート" ]; then
 （上級）1_DeepSeekキーを登録.bat
 （上級）2_DeepSeek-Claudeを起動.command
 （上級）2_DeepSeek-Claudeを起動.bat
+（上級）3_セーフCodexをオートで起動.command
+（上級）3_セーフCodexをオートで起動.bat
+（上級）4_AIアシスト承認でClaude起動.command
+（上級）4_AIアシスト承認でClaude起動.bat
 （上級）3_モニターをコンソールで見る.command
 （上級）3_モニターをコンソールで見る.bat
 （上級）4_ステータスラインを入れる.command

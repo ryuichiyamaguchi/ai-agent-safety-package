@@ -76,7 +76,7 @@ It may not exist or you may not have access to it. Run /model to pick a differen
 
 **v1.17.3 で入れたもの**: ds-gateway が上流の 4xx/5xx を必ず `upstream_error` としてログに残し、404 のときは「Claude Code はこれをモデルの問題として表示しますが、実際は送り先が 404 を返しています」と画面にも出すようにしました。**現象そのものを直す修正ではありません**（パッケージ側のコードは mac 実機・実キーで端から端まで 200 で通ることを確認済み）。受講者の環境で再発したときに、原因が 1 分で切り分けられるようにするための変更です。
 
-## ★重大: 更新後、Windows で OpenCode / d-claude が起動しなくなる（v1.17.4・v1.17.4 で修正）
+## ★重大: 更新後、Windows で OpenCode / d-claude が起動しなくなる（v1.17.3 で修正）
 
 **症状**（受講者の Windows 実機で確認）:
 
@@ -91,7 +91,7 @@ node.exe : gateway-token: not reusable (fingerprint-mismatch)
 問題が起きました。
 ```
 
-**誰が当たるか**: **v1.18.0 時点で既に送信検査 Gateway が動いていた Windows の人全員**。
+**誰が当たるか**: **v1.17.3 の更新を入れる前から送信検査 Gateway が動いていた Windows の人全員**。
 更新前に一度も起動していない、またはパソコンを再起動した直後なら症状は出ません。
 
 **原因**: 更新で送信検査 Gateway（`ds-gateway.js`）の中身が変わったため、動いたままの古い Gateway が
@@ -116,7 +116,7 @@ for /f "tokens=5" %a in ('netstat -ano ^| findstr :8788 ^| findstr LISTENING') d
 
 そのあと、いつもどおり「OpenCode を安全に起動」または「d-claude を安全に起動」を押してください。
 
-### v1.17.4 での修正
+### v1.17.3 での修正
 
 - ランチャー側: 外部コマンド（node / opencode / codex など）の呼び出しを `Invoke-NativeQuiet` に統一し、
   **成否は必ず終了コードで判定する**ようにした。情報メッセージが 1 行出ただけで止まることはなくなる。
@@ -126,7 +126,7 @@ for /f "tokens=5" %a in ('netstat -ano ^| findstr :8788 ^| findstr LISTENING') d
 - 更新直後に古い Gateway が 8788 番を掴んだまま残らないよう、記録されたポートは立て直しの前に必ず止める
 - 回帰テスト（`scripts/common/test/windows-native-stderr.test.js`）で、危険な書き方が再び入らないよう機械的に固定した
 
-## ★重大: Windows で自分の `.ai-safety` フォルダに入れなくなる（v1.17.4 以前・v1.17.4 で修正）
+## ★重大: Windows で自分の `.ai-safety` フォルダに入れなくなる（v1.17.2 で修正）
 
 **症状**（受講者の Windows 実機で確認）:
 
@@ -236,7 +236,7 @@ PowerShell は C# の拡張メソッドをインスタンス呼び出しに解�
 | `install.ps1` の mac フック読み取り専用化 | `Get-Acl`/`Set-Acl` ＋ 名前ベースの付与。しかも `try/catch` が無く `$ErrorActionPreference = "Stop"` なので、失敗すると**導入全体が途中で止まる**（`-Platform mac`/`both` のときのみ実行される経路） |
 | `lib/SafetyPolicy.ps1` の `Set-AuditLogAcl` | 監査ログを本人だけに絞る処理。`Get-Acl`/`Set-Acl` ＋ 名前ベース ＋ 継承ルールの全削除。実機では毎回 `PrivilegeNotHeldException` で失敗しており、**この絞り込みは一度も効いていなかった**うえ、フックが動くたびに警告を出していた |
 
-### v1.17.4 での修正
+### v1.17.2 での修正
 
 - **修復の第一の手段を `icacls "<フォルダ>" /reset /T /C /Q` にしました**（実機で成功が確認された唯一の方法）。
   親フォルダから継承される既定の権限へ戻すだけなので、名前解決も SID の書式も

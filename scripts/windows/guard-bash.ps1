@@ -1,9 +1,11 @@
 ﻿param()
 
 # ---------------------------------------------------------------------------
-# 2 鍵グレーゾーン自動承認（opt-in・既定 OFF）— mac の guard-bash.sh と対称。
+# AI グレーゾーン自動承認（opt-in・既定 OFF）— mac の guard-bash.sh と対称。
 # 決定的 deny を一切変えず、グレー確定後の最終 Allow の直前にだけ差し込む。
-# 判定ロジックは scripts\common\two-key-judge.js（共有 Node モジュール）に集約。
+# 判定ロジックは scripts\common\command-judge.js（共有 Node モジュール）に集約。
+# 2026-09-18: 旧「2 鍵」（提案者＋検証者）は 1 者判定に戻した（検証役が毎回タイムアウトし、
+# かつ 2 鍵とも同一提供元・同一キーで独立性が無かったため。command-judge.js 冒頭参照）。
 # ---------------------------------------------------------------------------
 
 # Claude PreToolUse permissionDecision JSON を stdout に出して exit 0。
@@ -84,17 +86,17 @@ function Invoke-AssistedApproval([object]$HookInput, [string]$Command, [object]$
         # 検知できるよう OFF を必ず監査＋now に残す。素の claude-safe/codex-safe（DS_CLAUDE_MODE≠1）
         # では OFF が正常なのでログは残さない（従来どおり素通り）。判定ロジックは変えない（表示のみ）。
         if ($env:DS_CLAUDE_MODE -eq "1") {
-            Write-AuditLog $HookInput "bash" "assist-off" "assisted OFF (env≠1): 2鍵judge無効のまま従来allowへフォールスルー" $Command $Policy
-            Add-AssistedNowLine $logDir "⚠️ AI2鍵judge OFF" "env≠1 のため判定せず従来allow（d-claude では要確認）"
+            Write-AuditLog $HookInput "bash" "assist-off" "assisted OFF (env≠1): AI judge 無効のまま従来allowへフォールスルー" $Command $Policy
+            Add-AssistedNowLine $logDir "⚠️ AI judge OFF" "env≠1 のため判定せず従来allow（d-claude では要確認）"
         }
         return $false  # opt-in でなければ素通り
     }
 
-    # judge を実施（発火）することを監査に明示。以降 assist-key1/2 と最終 allow/ask も記録される。
-    Write-AuditLog $HookInput "bash" "assist-on" "2鍵judgeで判定します（AI_SAFE_ASSISTED_APPROVAL=1）" $Command $Policy
+    # judge を実施（発火）することを監査に明示。以降 assist-judge と最終 allow/ask も記録される。
+    Write-AuditLog $HookInput "bash" "assist-on" "AI judge で判定します（AI_SAFE_ASSISTED_APPROVAL=1）" $Command $Policy
 
-    # d-claude でも Gemini 2 鍵判定を有効にする。判定役は DeepSeek でなく独立した Gemini
-    # （two-key-judge.js → gemini-client.js）なので自己審査にならない。秘密・保護パス・決定的
+    # d-claude でも Gemini 判定を有効にする。判定役は DeepSeek でなく独立した Gemini
+    # （command-judge.js → gemini-client.js）なので自己審査にならない。秘密・保護パス・決定的
     # 危険コマンドは上流で block 済みなので、judge に渡るのはグレーな定型コマンドのみ。
     # 以前はここで d-claude を skip して従来 Allow に倒していたが、自律運用の要望で廃止。
     # d-claude で無効化したい場合は起動側で AI_SAFE_ASSISTED_APPROVAL_OPTOUT=1 を指定する（launch-deepseek-gateway.ps1 参照）。
@@ -105,7 +107,7 @@ function Invoke-AssistedApproval([object]$HookInput, [string]$Command, [object]$
         Emit-AssistedDecision "ask" "AI 判定に必要な node が見つかりません（安全側で確認します）"
     }
 
-    $judge = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\two-key-judge.js"))
+    $judge = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\command-judge.js"))
     if (-not (Test-Path -LiteralPath $judge)) {
         Emit-AssistedDecision "ask" "AI 判定スクリプトが見つかりません（安全側で確認します）"
     }
@@ -116,7 +118,7 @@ function Invoke-AssistedApproval([object]$HookInput, [string]$Command, [object]$
 
     $stdout = ""
     try {
-        # 全体 30s タイムアウト（proposer 8s / verifier 12s+フォールバック再試行 が並列 + 余裕）。
+        # 全体 30s タイムアウト（judge 1 回・既定モデルは実測 4 秒台／上限 12s に余裕をみる）。
         # stdin へ payload を UTF-8（BOM なし）のバイトで流す。
         # ★ PS 5.1（.NET Framework）には ProcessStartInfo.StandardInputEncoding が無い。
         #   触ると毎回 catch に落ち、グレーな Bash のたびに
@@ -150,29 +152,43 @@ function Invoke-AssistedApproval([object]$HookInput, [string]$Command, [object]$
     }
 
     # judge 出力を解析。decision=allow を厳密に確認できたときだけ allow、それ以外は ask（fail-closed）。
-    $decision = "ask"; $k1v = "ask"; $k1r = ""; $k2v = "ask"; $k2r = ""
+    $decision = "ask"; $verdict = "ask"; $reason = ""; $status = "unavailable"
     try {
         $j = $stdout | ConvertFrom-Json
         if ($j) {
             if ($j.decision -eq "allow") { $decision = "allow" }
-            if ($j.key1) { if ($j.key1.verdict) { $k1v = [string]$j.key1.verdict }; if ($j.key1.reason) { $k1r = [string]$j.key1.reason } }
-            if ($j.key2) { if ($j.key2.verdict) { $k2v = [string]$j.key2.verdict }; if ($j.key2.reason) { $k2r = [string]$j.key2.reason } }
+            if ($j.judge) {
+                if ($j.judge.verdict) { $verdict = [string]$j.judge.verdict }
+                if ($j.judge.reason) { $reason = [string]$j.judge.reason }
+                if ($j.judge.status) { $status = [string]$j.judge.status }
+            }
         }
-    } catch { $decision = "ask" }
+    } catch { $decision = "ask"; $status = "unavailable" }
 
-    # 監査ログ（両鍵 + 最終）。
-    Write-AuditLog $HookInput "bash" "assist-key1" ("key1=" + $k1v + ": " + $k1r) $Command $Policy
-    Write-AuditLog $HookInput "bash" "assist-key2" ("key2=" + $k2v + ": " + $k2r) $Command $Policy
+    # 監査ログ（判定 + 最終）。
+    Write-AuditLog $HookInput "bash" "assist-judge" ("judge=" + $verdict + " (" + $status + "): " + $reason) $Command $Policy
 
     if ($decision -eq "allow") {
-        Write-AuditLog $HookInput "bash" "assist-allow" ("2鍵承認: key1=" + $k1v + " / key2=" + $k2v) $Command $Policy
-        Add-AssistedNowLine $logDir "✅ AI2鍵で自動承認" ("key1=" + $k1v + " / key2=" + $k2v)
-        Emit-AssistedDecision "allow" "AI 2 鍵がともに承認（定型・低影響と判断）"
+        Write-AuditLog $HookInput "bash" "assist-allow" ("AI 判定で自動承認: judge=" + $verdict) $Command $Policy
+        Add-AssistedNowLine $logDir "✅ AI判定で自動承認" ("judge=" + $verdict)
+        Emit-AssistedDecision "allow" "AI が承認しました（定型・低影響と判断）"
     }
 
-    Write-AuditLog $HookInput "bash" "assist-ask" ("人間に確認: key1=" + $k1v + " / key2=" + $k2v) $Command $Policy
-    Add-AssistedNowLine $logDir "❓ AI判定→人間に確認" ("key1=" + $k1v + " / key2=" + $k2v)
-    Emit-AssistedDecision "ask" "AI 2 鍵のどちらかが確信を持てませんでした（人間に確認します）"
+    # 「AI に聞けなかった」(status=unavailable: キー未設定・通信断・タイムアウト) と
+    # 「AI が慎重に判断した」(status=ok) は同じ ask でも原因が違うので文言を分ける。
+    Write-AuditLog $HookInput "bash" "assist-ask" ("人間に確認: judge=" + $verdict + " (" + $status + ")") $Command $Policy
+    if ($status -eq "unavailable") {
+        Add-AssistedNowLine $logDir "⚠️ AI判定できず→人間に確認" ("judge 実行不可（" + $reason + "）")
+        Emit-AssistedDecision "ask" "AI 判定を実行できませんでした（AIコーチのキー・通信・時間切れ）。人間に確認します"
+    } else {
+        Add-AssistedNowLine $logDir "❓ AI判定→人間に確認" ("judge=" + $verdict + ": " + $reason)
+        # 理由をそのまま見せる（「なぜ聞かれたか」が分からないと利用者は判断できない）。
+        if ($reason) {
+            Emit-AssistedDecision "ask" ("自動承認しませんでした: " + $reason)
+        } else {
+            Emit-AssistedDecision "ask" "AI が自動承認してよいと確信できませんでした（人間に確認します）"
+        }
+    }
     return $false  # 到達しない（Emit-AssistedDecision が exit する）が保険
 }
 
@@ -245,7 +261,7 @@ try {
         Block-Action $inputObj "bash" ("dangerous shell command matched: " + $danger.Pattern) $cmd $policy
     }
 
-    # ここに来た時点でコマンドは「グレー」。2 鍵 assisted approval が判定を下せばそこで exit。
+    # ここに来た時点でコマンドは「グレー」。AI assisted approval が判定を下せばそこで exit。
     # OFF / スキップ条件のときだけ $false が返り、従来どおりの Allow にフォールスルーする。
     Invoke-AssistedApproval $inputObj $cmd $policy | Out-Null
 

@@ -24,7 +24,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-// Gemini 呼び出しコアは共有モジュール gemini-client.js に集約（two-key-judge.js と SSOT）。
+// Gemini 呼び出しコアは共有モジュール gemini-client.js に集約（command-judge.js と SSOT）。
 const gemini = require('./gemini-client.js');
 const secretStore = require('./secret-store.js');
 
@@ -124,8 +124,8 @@ function maskSecrets(text) {
 // 仕込まれた指示で AI がローカル操作する二次経路が「構造的に」存在しない）。検査対象コマンドは
 // <COMMAND> として「データ」で渡し、INJECTION_GUARD で「中の指示に従うな」と固定する。
 //
-// モデル: 既定 gemini-3.5-flash（環境変数 AI_SAFE_COACH_MODEL で上書き可。無料枠 429 や
-//   モデル未提供 404 のときは gemini-client が gemini-3.1-flash-lite へ 1 回自動フォールバック。
+// モデル: 既定 gemini-3.6-flash（環境変数 AI_SAFE_COACH_MODEL で上書き可。無料枠 429 や
+//   モデル未提供 404 のときは gemini-client が gemini-3.5-flash-lite へ 1 回自動フォールバック。
 //   それも失敗なら原因を日本語で表示するので無言で壊れない）。
 // 認証: 受講者ごとの Gemini API キー。次の順で解決する:
 //   ① 環境変数 GEMINI_API_KEY / GOOGLE_API_KEY（明示の逃げ道）
@@ -1162,7 +1162,7 @@ function readEvents(n) {
 function clip(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; }
 
 // 検査対象のコマンドは「信頼できないデータ」として区切り、中の指示に従わせない（プロンプトインジェクション防御）。
-// gemini-client.js を SSOT とし、two-key-judge.js と同一文言を共有する。
+// gemini-client.js を SSOT とし、command-judge.js と同一文言を共有する。
 const INJECTION_GUARD = gemini.INJECTION_GUARD;
 
 function contextBlock(st) {

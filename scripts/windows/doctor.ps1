@@ -245,7 +245,7 @@ Expect-Allow "17 guard-prompt allows harmless learning prompt" "guard-prompt.ps1
 $promptSecret = "自分のキーは sk-ant-" + "api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAA です"
 Expect-Block "18 guard-prompt blocks real API key in prompt" "guard-prompt.ps1" (@{ hook_event_name = "UserPromptSubmit"; cwd = $Workspace; prompt = $promptSecret } | ConvertTo-Json -Compress)
 
-# 19 judge 可視化ドリル: d-claude(DS_CLAUDE_MODE=1)で 2 鍵 judge 未発火(AI_SAFE_ASSISTED_APPROVAL≠1)のとき、
+# 19 judge 可視化ドリル: d-claude(DS_CLAUDE_MODE=1)で AI judge 未発火(AI_SAFE_ASSISTED_APPROVAL≠1)のとき、
 #    グレーコマンドで assist-off を監査に残しつつ従来 allow へフォールスルーすることを確認する（judge が黙って
 #    無効化された状態を監査/now で可視化できる回帰ガード）。ネット・node 不要の決定的チェック（実 judge 発火＝
 #    assist-on/allow/ask は Windows 実機 QA で確認）。mac doctor.sh のドリル 19 と対称。

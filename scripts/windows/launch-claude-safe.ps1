@@ -1,7 +1,7 @@
 ﻿param(
     [string]$Workspace = (Get-Location).Path,
     [string]$Prompt = "",
-    # --assisted 相当: 2 鍵グレーゾーン自動承認を有効化（既定 OFF）。mac の launch-claude-safe.sh と対称。
+    # --assisted 相当: AI グレーゾーン自動承認を有効化（既定 OFF）。mac の launch-claude-safe.sh と対称。
     [switch]$Assisted
 )
 
