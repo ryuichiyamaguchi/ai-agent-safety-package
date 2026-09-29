@@ -1,9 +1,10 @@
-﻿# explainer.test.ps1 — Windows コマンド解説エンジンの実行時テスト (pwsh / PS5.1)
-# 目的: mac の explainer.test.sh と同等の「誤った安心ゼロ」+「具体解説が描画される」を
-#       PowerShell 実行時に検証する。StrictMode 2.0 下での .Count アンラップ例外
-#       (要素1個の List/Where-Object 戻りが scalar 化し .Count が落ちる)を回帰ガードする。
-# 実行: pwsh -NoProfile -File scripts/windows/test/explainer.test.ps1
-#       (pwsh が無い環境ではスキップ。配布前の仮想Windows実機QAで必ず実行する)
+﻿# explainer.test.ps1 — Windows の解説表示のテスト (pwsh / PS5.1)
+# 目的: mac の explainer.test.sh と同等の「誤った安心ゼロ」+「具体解説が描画される」を、
+#       Windows の見張りが使う入口（Explainer.ps1 の Invoke-Explain）から検証する。
+# v1.19.0: 解説の本体は scripts\common\explainer.js（Mac/Windows 共通の 1 本）に移った。
+#       ここでは (1) explainer.js の説明文 (2) PowerShell から Node を呼ぶ入口（PS 5.1 で UTF-8 を正しく渡すか）
+#       (3) Node が無いときの簡易表示 を確かめる。
+# 実行: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\test\explainer.test.ps1
 
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -15,12 +16,41 @@ $pass = 0; $fail = 0
 function Ok($m)  { Write-Host "PASS $m"; $script:pass++ }
 function Ng($m)  { Write-Host "FAIL $m"; $script:fail++ }
 
+$js = Join-Path $repo "scripts\common\explainer.js"
+$node = Resolve-ExplainerNode
+if (-not $node) {
+    Write-Host "SKIP node が見つからないため explainer.js のテストを飛ばします（簡易表示のテストだけ行います）"
+}
+
+# explainer.js の explain-command を呼んで { WhatDo; Icon; Danger } を返す。
+# PS 5.1 のパイプは $OutputEncoding（既定 ASCII）で渡すため日本語が壊れる。ProcessStartInfo で UTF-8 のまま渡す。
+function Get-CommandExplanation([string]$Full) {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $node
+    $psi.Arguments = "`"$js`" explain-command"
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    if ($psi.PSObject.Properties['StandardOutputEncoding']) { $psi.StandardOutputEncoding = $utf8 }
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $bytes = $utf8.GetBytes($Full)
+    $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+    $proc.StandardInput.Close()
+    $out = $proc.StandardOutput.ReadToEnd()
+    [void]$proc.WaitForExit(10000)
+    $j = $out | ConvertFrom-Json
+    return [PSCustomObject]@{ WhatDo = [string]$j.whatdo; Icon = [string]$j.icon; Danger = [string]$j.danger }
+}
+
 # calm = 安心文「しません」が WhatDo に含まれるか
 function Get-Calm([string]$cmd) {
     $e = Get-CommandExplanation $cmd
     if ($e.WhatDo -match "しません") { return "calm" } else { return "nocalm" }
 }
 
+if ($node) {
 # ---- 1) StrictMode 回帰: 単一セグメントの一覧/読みで例外死せず具体解説が出る ----
 try {
     $e = Get-CommandExplanation "Get-ChildItem -Path C:\Temp"
@@ -66,21 +96,40 @@ try {
     if ($e.Danger -match "削除") { Ok "danger: Remove-Item -Recurse -> 削除警告" } else { Ng "danger: Remove-Item -Recurse -> [$($e.Danger)]" }
 } catch { Ng "danger Remove-Item で例外: $($_.Exception.Message)" }
 
-# ---- 5) now.html 描画 end-to-end (Write-NowCard が whatdo セクションを書く) ----
+# ---- 5) now.html 描画 end-to-end（見張りが使う入口 Invoke-Explain → explainer.js） ----
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("expltest-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 $env:AI_SAFE_LOG_DIR = $tmp
-$cards = Join-Path $repo "configs\safety\cards"
-$env:AI_SAFE_CARDS_DIR = $cards
+$env:AI_SAFE_CARDS_DIR = Join-Path $repo "configs\safety\cards"
 try {
-    $hook = '{"tool_name":"Bash","tool_input":{"command":"Get-ChildItem -Path C:\\Temp"}}' | ConvertFrom-Json
-    Write-NowCard -CardId "default-bash" -RiskDefault "low" -Mode "bash" -CardsDir $cards -HookInput $hook | Out-Null
-    $html = Get-Content -Raw (Join-Path $tmp "now.html")
-    if ($html -match "これは何をする" -and $html -match "一覧を見ようとしています") {
-        Ok "E2E: now.html に具体解説セクションが描画される"
-    } else { Ng "E2E: now.html に whatdo セクションが無い" }
-} catch { Ng "E2E: Write-NowCard で例外: $($_.Exception.Message)" }
+    $hook = '{"tool_name":"Bash","tool_input":{"command":"Get-ChildItem -Path C:\\Temp\\資料"}}' | ConvertFrom-Json
+    Invoke-Explain -HookInput $hook -Mode "bash" -Policy $null
+    $html = [System.IO.File]::ReadAllText((Join-Path $tmp "now.html"), [System.Text.Encoding]::UTF8)
+    if ($html -match "これは何をする" -and $html -match "一覧を見ようとしています" -and $html -match "資料") {
+        Ok "E2E: Invoke-Explain -> now.html に具体解説（日本語のパスも化けない）"
+    } else { Ng "E2E: now.html に whatdo セクションが無い、または日本語が化けた" }
+    if ($html -notmatch "<p>---</p>") { Ok "E2E: カードの管理用の行（---）を本文に出さない" } else { Ng "E2E: now.html に frontmatter が出ている" }
+} catch { Ng "E2E: Invoke-Explain で例外: $($_.Exception.Message)" }
 finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+}
+
+# ---- 6) Node が見つからないときの簡易表示 ----
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("expltest-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+$env:AI_SAFE_LOG_DIR = $tmp
+$env:AI_SAFE_EXPLAINER_NODE = (Join-Path $tmp "no-such-node.exe")
+try {
+    $hook = '{"tool_name":"Bash","tool_input":{"command":"echo <b>x</b> > 出力.txt"}}' | ConvertFrom-Json
+    Invoke-Explain -HookInput $hook -Mode "bash" -Policy $null
+    $html = [System.IO.File]::ReadAllText((Join-Path $tmp "now.html"), [System.Text.Encoding]::UTF8)
+    $md = [System.IO.File]::ReadAllText((Join-Path $tmp "now.md"), [System.Text.Encoding]::UTF8)
+    if ($html -match "card=fallback" -and $html -match "&lt;b&gt;x&lt;/b&gt; &gt; 出力.txt") { Ok "fallback: now.html に操作の文字列をエスケープして表示" } else { Ng "fallback: now.html が期待どおりでない" }
+    if ($md -match "出力.txt" -and $md -match "Node.js") { Ok "fallback: now.md に操作と案内を表示" } else { Ng "fallback: now.md が期待どおりでない" }
+} catch { Ng "fallback で例外: $($_.Exception.Message)" }
+finally {
+    Remove-Item Env:\AI_SAFE_EXPLAINER_NODE -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+}
 
 Write-Host ""
 Write-Host "explainer.test.ps1 summary: pass=$pass fail=$fail"

@@ -14,25 +14,18 @@ trap cleanup EXIT
 export AI_SAFE_LOG_DIR="$TD/logs"
 export AI_SAFE_CARDS_DIR="$REPO/configs/safety/cards"
 export AI_SAFE_MONITOR_INTERVAL=1
+EXPLAINER_JS="$REPO/scripts/common/explainer.js"
 
 # --- helper: MODE + RAW_INPUT で extract_action_text を実行し now.html を書く。
 #     ACTION_TEXT は subshell 外に出せないので tmp ファイル経由で取得。---
 run_explain_with_json() {
   local mode="$1" json="$2"
-  (
-    set -u
-    export MODE="$mode"
-    export RAW_INPUT="$json"
-    log_dir() { printf '%s\n' "$AI_SAFE_LOG_DIR"; }
-    audit_log() { :; }
-    source "$REPO/scripts/macos/lib/explainer.sh" 2>/dev/null
-    mkdir -p "$AI_SAFE_LOG_DIR"
-    ACTION_TEXT=""; ACTION_LABEL="操作"
-    extract_action_text 2>/dev/null || true
-    write_now_html "🔔" "テスト" "low" "2026-06-05 00:00:00" "test-card" "/dev/null" \
-      "$ACTION_TEXT" "$ACTION_LABEL" 2>/dev/null
-    printf '%s' "$ACTION_TEXT" > "$AI_SAFE_LOG_DIR/action_text.tmp"
-  )
+  # v1.19.0: 解説の本体は scripts/common/explainer.js。旧 bash 版の extract_action_text + write_now_html と
+  # 同じ見出し（🔔 テスト / low / test-card / 本文なし）で now.html を書き、操作文字列を action_text.tmp に残す。
+  mkdir -p "$AI_SAFE_LOG_DIR"
+  printf '%s' "$json" | node "$EXPLAINER_JS" render-html --mode "$mode" --icon "🔔" --title "テスト" --risk low \
+    --ts "2026-06-05 00:00:00" --card-id test-card --body-path /dev/null --log-dir "$AI_SAFE_LOG_DIR" \
+    > "$AI_SAFE_LOG_DIR/action_text.tmp" 2>/dev/null
 }
 
 html="$AI_SAFE_LOG_DIR/now.html"
@@ -157,21 +150,10 @@ fi
 
 # --- T7: TAB 入りコマンドが round-trip で壊れない（F-K修正確認）---
 rm -f "$html" "$act"
-(
-  set -u
-  export MODE="bash"
-  # awk コマンドに -F\t フラグ（フィールドセパレータ TAB）を含む
-  export RAW_INPUT='{"tool_input":{"command":"awk -v FS=\"\t\" \"{print $1}\" file.tsv"}}'
-  log_dir() { printf '%s\n' "$AI_SAFE_LOG_DIR"; }
-  audit_log() { :; }
-  source "$REPO/scripts/macos/lib/explainer.sh" 2>/dev/null
-  mkdir -p "$AI_SAFE_LOG_DIR"
-  ACTION_TEXT=""; ACTION_LABEL="操作"
-  extract_action_text 2>/dev/null || true
-  write_now_html "🔔" "タブテスト" "low" "ts" "test" "/dev/null" \
-    "$ACTION_TEXT" "$ACTION_LABEL" 2>/dev/null
-  printf '%s' "$ACTION_TEXT" > "$AI_SAFE_LOG_DIR/action_text.tmp"
-)
+json='{"tool_input":{"command":"awk -v FS=\"\t\" \"{print $1}\" file.tsv"}}'
+mkdir -p "$AI_SAFE_LOG_DIR"
+printf '%s' "$json" | node "$EXPLAINER_JS" render-html --mode bash --icon "🔔" --title "タブテスト" --risk low \
+  --ts ts --card-id test --body-path /dev/null --log-dir "$AI_SAFE_LOG_DIR" > "$AI_SAFE_LOG_DIR/action_text.tmp" 2>/dev/null
 if [ -f "$html" ] && grep -q 'awk' "$html" && grep -q 'file.tsv' "$html"; then
   ok "T7: TAB-containing command appears intact in now.html"
 else
@@ -323,19 +305,10 @@ fi
 # ---- ヘルパー: now.md に解説が出ることを検証 ----
 run_explain_with_nowmd() {
   local mode="$1" json="$2"
-  (
-    set -u
-    export MODE="$mode"
-    export RAW_INPUT="$json"
-    log_dir() { printf '%s\n' "$AI_SAFE_LOG_DIR"; }
-    audit_log() { :; }
-    source "$REPO/scripts/macos/lib/explainer.sh" 2>/dev/null
-    mkdir -p "$AI_SAFE_LOG_DIR"
-    ACTION_TEXT=""; ACTION_LABEL="操作"
-    extract_action_text 2>/dev/null || true
-    cards_dir() { printf '%s\n' "$AI_SAFE_CARDS_DIR"; }
-    write_now_card "default-bash" "low" "$ACTION_TEXT" "$ACTION_LABEL" 2>/dev/null
-  )
+  # v1.19.0: explainer.js の explain を default-bash カード固定で呼ぶ（旧 write_now_card "default-bash" 相当）。
+  mkdir -p "$AI_SAFE_LOG_DIR"
+  printf '%s' "$json" | node "$EXPLAINER_JS" explain --mode "$mode" --force-card default-bash \
+    --log-dir "$AI_SAFE_LOG_DIR" --cards-dir "$AI_SAFE_CARDS_DIR" > /dev/null 2>&1
 }
 
 md="$AI_SAFE_LOG_DIR/now.md"
@@ -660,18 +633,7 @@ else
     # コメント行・空行をスキップ
     case "$cmd_raw" in '#'*|'') continue ;; esac
     rm -f "$TD/parity_result.tmp"
-    (
-      set -u
-      source "$REPO/scripts/macos/lib/explainer.sh" 2>/dev/null
-      explain_command "$cmd_raw" 2>/dev/null
-      # danger チェック
-      has_danger="false"
-      [ -n "$EXPLAIN_DANGER" ] && has_danger="true"
-      # readonly チェック (安心文: 「しません」「読むだけ」)
-      has_readonly="false"
-      case "$EXPLAIN_WHATDO" in *しません*|*読むだけ*) has_readonly="true" ;; esac
-      printf '%s\t%s\t%s\t%s\n' "$has_danger" "$has_readonly" "$EXPLAIN_WHATDO" "$EXPLAIN_DANGER"
-    ) > "$TD/parity_result.tmp" 2>/dev/null
+    printf '%s' "$cmd_raw" | node "$EXPLAINER_JS" explain-command --format parity > "$TD/parity_result.tmp" 2>/dev/null
     res_danger="$(cut -f1 "$TD/parity_result.tmp")"
     res_readonly="$(cut -f2 "$TD/parity_result.tmp")"
     res_whatdo="$(cut -f3 "$TD/parity_result.tmp")"
