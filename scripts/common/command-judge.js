@@ -229,7 +229,9 @@ function readStdin() {
 async function main() {
   let input = {};
   try {
-    const raw = await readStdin();
+    // Windows PowerShell 5.1 は、画面の文字コードが UTF-8（65001）のとき標準入力の先頭に BOM を付ける。
+    // 残すと JSON.parse が失敗し「コマンドが空」扱いで毎回人間に確認していた（GitHub Actions で判明）。
+    const raw = (await readStdin()).replace(/^\uFEFF/, '');
     const parsed = raw && raw.trim() ? JSON.parse(raw) : {};
     if (parsed && typeof parsed === 'object') input = parsed;
   } catch {

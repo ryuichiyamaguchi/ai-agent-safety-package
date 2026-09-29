@@ -811,8 +811,10 @@ function writePlaceholder(logDir) {
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
+// Windows PowerShell 5.1 は、画面の文字コードが UTF-8（65001）のとき、子プロセスへの標準入力の先頭に
+// BOM を自動で付ける（Process.StandardInput の StreamWriter が作られた時点で書く）。先頭の BOM は外す。
 function readStdin() {
-  try { return fs.readFileSync(0, 'utf8'); } catch { return ''; }
+  try { return fs.readFileSync(0, 'utf8').replace(/^\uFEFF/, ''); } catch { return ''; }
 }
 
 function parseArgs(argv) {

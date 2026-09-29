@@ -19,7 +19,8 @@ const D_CLAUDE_MARKER_FRESH_MS = 12 * 60 * 60 * 1000;
 function readStdin() {
   try {
     const buf = fs.readFileSync(0);
-    return buf.toString('utf8').slice(0, MAX_INPUT);
+    // Windows PowerShell 5.1 から渡されると先頭に BOM が付くことがある。付いたままだと JSON.parse が失敗する。
+    return buf.toString('utf8').replace(/^\uFEFF/, '').slice(0, MAX_INPUT);
   } catch {
     return '';
   }
