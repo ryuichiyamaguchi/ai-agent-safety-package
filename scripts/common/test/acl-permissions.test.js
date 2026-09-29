@@ -41,6 +41,7 @@ const SAFETY_LIB = path.join(PKG, 'scripts', 'windows', 'lib', 'SafetyPolicy.ps1
 const BUTTON = path.join(PKG, 'workspace-template', 'スタート', '13_フォルダのアクセス権を直す.bat');
 const VERSIONS = path.join(PKG, 'docs', 'tested_versions.md');
 const KNOWN_ISSUES = path.join(PKG, 'docs', '99_known_issues.md');
+const KNOWN_ISSUES_DEV = path.join(PKG, 'docs', '_dev', 'known-issues-dev-notes.md');
 const DOC13 = path.join(PKG, 'docs', '13_秘密の入れ物-APIキーの安全な持ち方.md');
 const START_HTML = path.join(PKG, 'スタート.html');
 
@@ -397,11 +398,15 @@ test('既に壊れた受講者向けの回復手順が docs に書いてある',
   const s = read(KNOWN_ISSUES);
   assert.match(s, /アクセスが拒否/, '症状が書かれていない');
   assert.match(s, /13_フォルダのアクセス権を直す/, '回復手段が書かれていない');
-  assert.match(s, /実機確認が必要/, '未検証事項が明示されていない');
+  // v1.19.0: 実装の経緯・実機で失敗した方法・未検証事項は開発者向けの記録へ移した（受講者向けの
+  // 既知問題には症状と直し方だけを残す）。記録そのものが消えていないことをそちらで確かめる。
+  assert.match(s, /known-issues-dev-notes\.md/, '開発者向けの記録への案内が無い');
+  const dev = read(KNOWN_ISSUES_DEV);
+  assert.match(dev, /実機確認が必要/, '未検証事項が明示されていない');
   // 実機で失敗した 4 つの方法が理由つきで残っていること（同じ轍を踏ませないため）。
-  assert.match(s, /実機で失敗した方法/, '失敗した方法の一覧が無い');
+  assert.match(dev, /実機で失敗した方法/, '失敗した方法の一覧が無い');
   for (const needle of ['マッピングは実行されませんでした', 'takeown', 'PrivilegeNotHeldException', '未検証']) {
-    assert.ok(s.includes(needle), '失敗記録が不足: ' + needle);
+    assert.ok(dev.includes(needle), '失敗記録が不足: ' + needle);
   }
 });
 
