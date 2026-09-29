@@ -226,6 +226,7 @@ foreach ($sec in @(
     'scripts/common/apply-global-opencode.js',
     'scripts/common/apply-global-deny.js',
     'scripts/common/workspace-snapshot.js',
+    'scripts/common/stage-global-runtime.js',
     'scripts/macos/apply-global-guard.sh',
     'scripts/macos/uninstall-global-guard.sh',
     'scripts/macos/protect-folder.sh',
@@ -896,6 +897,46 @@ process.exit(0);
         Write-Warning ("信頼済み登録をスキップしました: " + $_.Exception.Message)
     } finally {
         Remove-Item -LiteralPath $trustFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# --- PC 全体の安全設定（既定でオン / v1.19.x） ----------------------------
+# 以前は受講者が「キーと金庫\12_PC全体に安全設定を入れる」を押したときだけ入り、押していないと
+# 作業フォルダの外で素の claude / codex を起動したときに安全ガードが 1 つも効かなかった。
+# 導入・更新のたびに自動で入れる（更新時は、古い版が入れた「作業フォルダを指す hook」を
+# %USERPROFILE%\.ai-safety\global\ を指す hook へ張り替える役目も兼ねる）。
+# 入れないのは次のときだけ:
+#   (a) 受講者が「キーと金庫\13_PC全体の安全設定を解除」で解除した（~\.ai-safety\global-guard-optout がある）
+#   (b) 環境変数 AI_SAFE_NO_GLOBAL_GUARD=1（講師・検証用）
+# この工程が失敗しても導入そのものは止めない（警告だけ出して続ける）。
+# 反映スクリプトは同じプロセスで呼ぶ（中の exit はそのスクリプトだけを終える）。中の Write-Error は
+# EAP=Stop で例外になるので try/catch で受け止め、警告に落とす。
+if ($Platform -in 'win','both') {
+    $ggApply = Join-Path $Workspace ".ai-safety\hooks\windows\apply-global-guard.ps1"
+    $ggOptout = Join-Path $HOME ".ai-safety\global-guard-optout"
+    Write-Host ""
+    if ($env:AI_SAFE_NO_GLOBAL_GUARD -eq '1') {
+        Write-Host "PC 全体の安全設定: AI_SAFE_NO_GLOBAL_GUARD=1 のため入れませんでした。"
+    } elseif (Test-Path -LiteralPath $ggOptout) {
+        Write-Host "PC 全体の安全設定: 以前「13_PC全体の安全設定を解除」で解除されているため、入れ直していません。"
+        Write-Host "  もう一度入れるときは スタート\キーと金庫\12_PC全体に安全設定を入れる.bat を実行してください。"
+    } elseif (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        Write-Warning "node が見つからないため、PC 全体の安全設定を入れられませんでした（導入は続けます）。"
+        Write-Warning "  Node.js を入れてから スタート\キーと金庫\12_PC全体に安全設定を入れる.bat を実行してください。"
+    } elseif (-not (Test-Path -LiteralPath $ggApply -PathType Leaf)) {
+        Write-Warning ("PC 全体の安全設定の反映スクリプトが見つかりませんでした（導入は続けます）: " + $ggApply)
+    } else {
+        try {
+            $global:LASTEXITCODE = 0
+            & $ggApply -Auto
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "PC 全体の安全設定の一部を入れられませんでした（導入は続けます。上のメッセージを確認してください）。"
+                Write-Warning "  あとで スタート\キーと金庫\12_PC全体に安全設定を入れる.bat を実行すると入れ直せます。"
+            }
+        } catch {
+            Write-Warning ("PC 全体の安全設定を入れられませんでした（導入は続けます）: " + $_.Exception.Message)
+            Write-Warning "  あとで スタート\キーと金庫\12_PC全体に安全設定を入れる.bat を実行すると入れ直せます。"
+        }
     }
 }
 

@@ -196,6 +196,89 @@ function editCodexConfig(originalText, os) {
 }
 
 // ==========================================================================
+// 解除用: 管理キーだけを「入れる前」の値へ戻す（入れたあとの他の変更は 1 行も失わない）
+// ==========================================================================
+// Codex CLI / デスクトップアプリは config.toml へ自分で書き足す（フォルダの信頼
+// [projects."…"]・モデル選択・MCP サーバーなど）。解除でバックアップを丸ごと書き戻すと
+// それが消えるので、ファイルが適用後に変わっていたときはこちらを使う。
+function managedKeys(os) {
+  const keys = [
+    [null, 'approval_policy'], [null, 'approvals_reviewer'], [null, 'sandbox_mode'],
+    ['features', 'hooks'],
+    ['sandbox_workspace_write', 'network_access'], ['sandbox_workspace_write', 'exclude_tmpdir_env_var'],
+    ['sandbox_workspace_write', 'exclude_slash_tmp'],
+    ['shell_environment_policy', 'inherit'], ['shell_environment_policy', 'exclude'],
+  ];
+  if (os === 'windows') keys.push(['windows', 'sandbox']);
+  return keys;
+}
+
+function findKeySpan(lines, key) {
+  const keyRe = new RegExp('^\\s*' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*=');
+  let depth = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (depth === 0 && keyRe.test(lines[i])) {
+      let j = i, run = 0;
+      do { run += bracketDelta(lines[j]); j++; } while (j < lines.length && run > 0);
+      return lines.slice(i, j);
+    }
+    depth += bracketDelta(lines[i]);
+    if (depth < 0) depth = 0;
+  }
+  return null;
+}
+
+function revertCodexConfig(currentText, originalText, os) {
+  const nl = currentText.includes('\r\n') ? '\r\n' : '\n';
+  const curLines = currentText.length ? currentText.split(/\r?\n/) : [];
+  const origLines = originalText.length ? originalText.split(/\r?\n/) : [];
+  const cur = sectionize(curLines.slice());
+  const orig = sectionize(origLines.slice());
+  const find = (secs, name) => secs.find((x) => sectionName(x) === name) || null;
+  const allowedGone = []; // 消えてよい現在の行（管理キーのスパンと、空になった自前の見出し）
+
+  for (const [sec, key] of managedKeys(os)) {
+    const cs = find(cur, sec);
+    if (!cs) continue;
+    const osec = find(orig, sec);
+    const origSpan = osec ? findKeySpan(osec.lines, key) : null;
+    const r = replaceKeySpan(cs.lines, key, origSpan || []);
+    if (r.replaced) allowedGone.push.apply(allowedGone, r.removed);
+  }
+
+  const out = [];
+  for (const sct of cur) {
+    if (sct.header !== null) {
+      const empty = sct.lines.every((l) => l.trim() === '');
+      if (empty && !find(orig, sectionName(sct))) { allowedGone.push(sct.header); continue; }
+      out.push(sct.header);
+    }
+    out.push.apply(out, sct.lines);
+  }
+  // 先頭の管理キーを取り除いた跡に残る空行だけを落とす（他の空行は、複数行文字列の中身の
+  // 可能性があるので触らない）。
+  while (out.length && out[0].trim() === '') out.shift();
+  let text = out.join(nl).replace(/(\r?\n)+$/, '');
+  text = text.trim().length ? text + nl : '';
+
+  // データ喪失インバリアント: 管理キー以外の現在の行は、すべて出力に残っていること。
+  const outCount = new Map();
+  for (const l of text.split(/\r?\n/)) { const k = l.trim(); if (k) outCount.set(k, (outCount.get(k) || 0) + 1); }
+  const goneCount = new Map();
+  for (const l of allowedGone) { const k = l.trim(); if (k) goneCount.set(k, (goneCount.get(k) || 0) + 1); }
+  for (const raw of curLines) {
+    const k = raw.trim();
+    if (!k) continue;
+    const g = goneCount.get(k) || 0;
+    if (g > 0) { goneCount.set(k, g - 1); continue; }
+    const o = outCount.get(k) || 0;
+    if (o <= 0) return { ok: false, missing: k };
+    outCount.set(k, o - 1);
+  }
+  return { ok: true, text: text };
+}
+
+// ==========================================================================
 // codex hooks.json (絶対パス配線)
 // ==========================================================================
 const GUARD_SIG = /guard-(prompt|bash|write|webfetch)\.(sh|ps1)/;
@@ -290,6 +373,11 @@ function doApply() {
     };
   } else { st.codexHooks.appliedAt = new Date().toISOString(); st.codexHooks.target = hooksPath; }
 
+  // 解除のときに「入れたあとで書き足されたか」を見分けるため、書いた中身を記録する。
+  st.codexConfig.writtenSha256 = state.sha256Text(newCfg);
+  st.codexConfig.os = os;
+  st.codexHooks.writtenSha256 = state.sha256Text(newHooks);
+
   fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
   fs.writeFileSync(cfgPath, newCfg, 'utf8');
   fs.mkdirSync(path.dirname(hooksPath), { recursive: true });
@@ -302,10 +390,35 @@ function doApply() {
   console.log('state         : ' + statePath);
 }
 
-function restoreOrRemove(entry, fallbackTarget, label) {
+// surgical(currentText, originalText) → { ok, text } : 入れたあとで書き足されていたときに使う、
+// 「このパッケージが足した分だけ取り除く」関数。text が空なら（元が無かった場合は）ファイルを消す。
+function restoreOrRemove(entry, fallbackTarget, label, surgical) {
   const tgt = (entry && entry.target) || fallbackTarget;
   if (!entry) { console.log('  (no state entry — skipped) ' + (fallbackTarget || '')); return; }
   if (fs.existsSync(tgt)) state.backupFile(tgt, label + '-preundo');
+  const modified = state.changedSinceApply(tgt, entry.writtenSha256);
+  if (modified) {
+    const origText = entry.originalBackup && fs.existsSync(entry.originalBackup)
+      ? fs.readFileSync(entry.originalBackup, 'utf8') : '';
+    if (entry.originalBackup && !fs.existsSync(entry.originalBackup)) {
+      console.log('  WARN: backup missing and file changed after apply — left as-is: ' + tgt);
+      return;
+    }
+    const r = surgical(fs.readFileSync(tgt, 'utf8'), origText);
+    if (!r.ok) {
+      console.log('  WARN: 入れたあとの変更を残したまま安全に戻せないため、そのまま残しました: ' + tgt +
+        (r.missing ? ' ("' + r.missing + '")' : '') + '（控え: ~/.ai-safety/backups/）');
+      return;
+    }
+    if (!r.text.trim().length && entry.targetExistedBefore === false) {
+      fs.unlinkSync(tgt);
+      console.log('  removed : ' + tgt + ' (足した分を除くと空になったため削除)');
+    } else {
+      fs.writeFileSync(tgt, r.text, 'utf8');
+      console.log('  kept changes: ' + tgt + ' (入れたあとの変更は残し、このパッケージが足した分だけ取り除きました)');
+    }
+    return;
+  }
   if (entry.originalBackup && fs.existsSync(entry.originalBackup)) {
     fs.copyFileSync(entry.originalBackup, tgt);
     console.log('  restored: ' + tgt + ' ← ' + entry.originalBackup);
@@ -315,6 +428,16 @@ function restoreOrRemove(entry, fallbackTarget, label) {
   } else {
     console.log('  WARN: backup missing and file existed before — left as-is: ' + tgt);
   }
+}
+
+function surgicalHooks(currentText) {
+  let obj;
+  try { obj = JSON.parse(currentText); } catch (_) { return { ok: false, missing: '(hooks.json を JSON として読めません)' }; }
+  if (!state.isPlainObject(obj)) return { ok: false, missing: '(hooks.json が JSON オブジェクトではありません)' };
+  stripOurCodexHooks(obj);
+  if (state.isPlainObject(obj.hooks) && Object.keys(obj.hooks).length === 0) delete obj.hooks;
+  if (Object.keys(obj).length === 0) return { ok: true, text: '' };
+  return { ok: true, text: JSON.stringify(obj, null, 2) + '\n' };
 }
 
 function doUninstall() {
@@ -327,8 +450,10 @@ function doUninstall() {
     console.log('[dry-run] would restore/remove codex config.toml and hooks.json from backups');
     return;
   }
-  restoreOrRemove(st.codexConfig, opts['config-target'], 'global-codex-config');
-  restoreOrRemove(st.codexHooks, opts['hooks-target'], 'global-codex-hooks');
+  const cfgOs = (st.codexConfig && st.codexConfig.os) || (process.platform === 'win32' ? 'windows' : 'macos');
+  restoreOrRemove(st.codexConfig, opts['config-target'], 'global-codex-config',
+    (cur, orig) => revertCodexConfig(cur, orig, cfgOs));
+  restoreOrRemove(st.codexHooks, opts['hooks-target'], 'global-codex-hooks', (cur) => surgicalHooks(cur));
   delete st.codexConfig; delete st.codexHooks;
   state.saveState(statePath, st);
   console.log('state         : ' + statePath + ' (codex entries removed)');

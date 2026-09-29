@@ -13,6 +13,8 @@ if not exist "%TARGET%" (
 echo この PC で AI（Claude Code / Codex / agy / OpenCode）をどのフォルダから起動しても、
 echo 危険コマンド（再帰削除・.env の読み取り・外部への送信など）を止めるようにします。
 echo Codex はデスクトップアプリも同じ設定ファイルを読むので、アプリ側にも同時に効きます。
+echo ふだんは安全パッケージの導入・更新のときに自動で入っています。
+echo 「13_PC全体の安全設定を解除」で外したあと、もう一度入れるときに使います。
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%"
 echo.

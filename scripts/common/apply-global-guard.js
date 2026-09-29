@@ -6,8 +6,10 @@
 //       (UserPromptSubmit→guard-prompt / PreToolUse: Bash→guard-bash, Write系→guard-write,
 //        WebFetch→guard-webfetch) を追加する。
 // 目的: どのフォルダから claude を起動しても、強化した guard(rm -r / cat .env / curl|sh …)が
-//       確実に発火する。guard は自分の絶対位置からポリシー(<ws>/.ai-safety/policy/…)を自己解決するため、
+//       確実に発火する。guard は自分の絶対位置からポリシー(<guard-dir>/../../policy/…)を自己解決するため、
 //       グローバル hook でも cwd に依存せず効く。
+//       --guard-dir は v1.19.x から ~/.ai-safety/global/hooks/<os>（stage-global-runtime.js が作る
+//       固定の置き場）。作業フォルダを指していた旧版の hook は、下の GUARD_SIG で除去して付け直す。
 //
 // 既存の env / allow / ask / 既存 hooks は壊さない(union / 追記のみ)。書込前に必ずバックアップし、
 // 何を足したかを状態ファイルに記録する(取り消しで確実に元へ戻すため)。
@@ -155,8 +157,14 @@ function doApply() {
     firstAddedDeny = addedDeny;
   }
 
+  // 更新で新しい版の deny が増えたときも、解除で取り除けるように「足した分」を積み上げる。
+  // （既に入っていたもの＝利用者が自分で書いたものは addedDeny に入らない）
+  const allAddedDeny = (firstAddedDeny || []).slice();
+  for (const d of addedDeny) { if (!allAddedDeny.includes(d)) allAddedDeny.push(d); }
+
+  const outText = JSON.stringify(tgt, null, 2) + '\n';
   fs.mkdirSync(path.dirname(tgtPath), { recursive: true });
-  fs.writeFileSync(tgtPath, JSON.stringify(tgt, null, 2) + '\n', 'utf8');
+  fs.writeFileSync(tgtPath, outText, 'utf8');
 
   st.claude = {
     appliedAt: new Date().toISOString(),
@@ -165,7 +173,8 @@ function doApply() {
     os: os,
     originalBackup: originalBackup,
     targetExistedBefore: existedBefore,
-    addedDeny: firstAddedDeny,
+    addedDeny: allAddedDeny,
+    writtenSha256: state.sha256Text(outText),
   };
   state.saveState(statePath, st);
   console.log('backup        : ' + (originalBackup || '(none — target did not exist)'));
@@ -192,22 +201,41 @@ function doUninstall() {
   // 解除自体も可逆に: 現状を退避
   if (fs.existsSync(tgtPath)) state.backupFile(tgtPath, 'global-claude-preundo');
 
-  if (entry.originalBackup && fs.existsSync(entry.originalBackup)) {
+  // 入れたあとに Claude Code や利用者が書き足していたら、バックアップで丸ごと戻すと
+  // それが消える。その場合は「このパッケージが足した分」だけを取り除く。
+  const modified = state.changedSinceApply(tgtPath, entry.writtenSha256);
+
+  if (!modified && entry.originalBackup && fs.existsSync(entry.originalBackup)) {
     fs.copyFileSync(entry.originalBackup, tgtPath);
     console.log('restored      : ' + tgtPath + ' ← ' + entry.originalBackup);
-  } else if (entry.targetExistedBefore === false) {
+  } else if (!modified && entry.targetExistedBefore === false) {
     if (fs.existsSync(tgtPath)) fs.unlinkSync(tgtPath);
     console.log('removed       : ' + tgtPath + ' (適用前は存在しなかったため削除)');
+  } else if (!fs.existsSync(tgtPath)) {
+    console.log('skipped       : ' + tgtPath + ' (ファイルが見つかりません)');
   } else {
-    // バックアップが失われた場合の外科的フォールバック: 足した hook / deny だけ取り除く
-    const tgt = readJson(tgtPath, {});
-    stripOurHooks(tgt);
-    if (tgt.permissions && Array.isArray(tgt.permissions.deny) && Array.isArray(entry.addedDeny)) {
-      const rm = new Set(entry.addedDeny);
-      tgt.permissions.deny = tgt.permissions.deny.filter((d) => !rm.has(d));
+    // 外科的に戻す: 足した hook / deny だけ取り除く（適用後の変更・バックアップ喪失のどちらも）
+    const tgt = state.readJsonOrNull(tgtPath);
+    if (!state.isPlainObject(tgt)) {
+      console.log('WARN: ' + tgtPath + ' を JSON として読めないため、そのまま残しました（控え: ~/.ai-safety/backups/）');
+    } else {
+      stripOurHooks(tgt);
+      if (tgt.permissions && Array.isArray(tgt.permissions.deny) && Array.isArray(entry.addedDeny)) {
+        const rm = new Set(entry.addedDeny);
+        tgt.permissions.deny = tgt.permissions.deny.filter((d) => !rm.has(d));
+        if (tgt.permissions.deny.length === 0) delete tgt.permissions.deny;
+        if (state.isPlainObject(tgt.permissions) && Object.keys(tgt.permissions).length === 0) delete tgt.permissions;
+      }
+      if (entry.targetExistedBefore === false && Object.keys(tgt).length === 0) {
+        fs.unlinkSync(tgtPath);
+        console.log('removed       : ' + tgtPath + ' (足した分を除くと空になったため削除)');
+      } else {
+        fs.writeFileSync(tgtPath, JSON.stringify(tgt, null, 2) + '\n', 'utf8');
+        console.log(modified
+          ? 'kept changes  : ' + tgtPath + ' (入れたあとの変更は残し、このパッケージが足した hook / deny だけ取り除きました)'
+          : 'surgically reverted (backup missing): ' + tgtPath);
+      }
     }
-    fs.writeFileSync(tgtPath, JSON.stringify(tgt, null, 2) + '\n', 'utf8');
-    console.log('surgically reverted (backup missing): ' + tgtPath);
   }
 
   delete st.claude;

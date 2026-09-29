@@ -261,6 +261,7 @@ for _sec in \
   "scripts/common/apply-global-opencode.js" \
   "scripts/common/apply-global-deny.js" \
   "scripts/common/workspace-snapshot.js" \
+  "scripts/common/stage-global-runtime.js" \
   "scripts/macos/apply-global-guard.sh" \
   "scripts/macos/uninstall-global-guard.sh" \
   "scripts/macos/protect-folder.sh" \
@@ -833,6 +834,37 @@ process.exit(0);
       echo "注意: 信頼済み登録に失敗しました。Claude を1回ふつうに起動して、"
       echo "      信頼の確認に「はい」と答えてください。"
     fi
+  fi
+fi
+
+# --- PC 全体の安全設定（既定でオン / v1.19.x） ----------------------------
+# 以前は受講者が「キーと金庫/12_PC全体に安全設定を入れる」を押したときだけ入り、押していないと
+# 作業フォルダの外で素の claude / codex を起動したときに安全ガードが 1 つも効かなかった。
+# 導入・更新のたびに自動で入れる（更新時は、古い版が入れた「作業フォルダを指す hook」を
+# ~/.ai-safety/global/ を指す hook へ張り替える役目も兼ねる）。
+# 入れないのは次のときだけ:
+#   (a) 受講者が「キーと金庫/13_PC全体の安全設定を解除」で解除した（~/.ai-safety/global-guard-optout がある）
+#   (b) 環境変数 AI_SAFE_NO_GLOBAL_GUARD=1（講師・検証用）
+# この工程が失敗しても導入そのものは止めない（警告だけ出して続ける）。
+if [[ "$PLATFORM" == "mac" || "$PLATFORM" == "both" ]]; then
+  _gg_apply="$workspace/.ai-safety/hooks/macos/apply-global-guard.sh"
+  _gg_optout="$HOME/.ai-safety/global-guard-optout"
+  echo ""
+  if [ "${AI_SAFE_NO_GLOBAL_GUARD:-0}" = "1" ]; then
+    echo "PC 全体の安全設定: AI_SAFE_NO_GLOBAL_GUARD=1 のため入れませんでした。"
+  elif [ -e "$_gg_optout" ]; then
+    echo "PC 全体の安全設定: 以前「13_PC全体の安全設定を解除」で解除されているため、入れ直していません。"
+    echo "  もう一度入れるときは スタート/キーと金庫/12_PC全体に安全設定を入れる を実行してください。"
+  elif ! command -v node >/dev/null 2>&1; then
+    echo "注意: node が見つからないため、PC 全体の安全設定を入れられませんでした（導入は続けます）。" >&2
+    echo "  Node.js を入れてから スタート/キーと金庫/12_PC全体に安全設定を入れる を実行してください。" >&2
+  elif [ ! -f "$_gg_apply" ]; then
+    echo "注意: PC 全体の安全設定の反映スクリプトが見つかりませんでした（導入は続けます）: ${_gg_apply}" >&2
+  elif AI_SAFE_ASSUME_YES=1 /bin/bash "$_gg_apply" --auto </dev/null; then
+    :
+  else
+    echo "注意: PC 全体の安全設定の一部を入れられませんでした（導入は続けます。上のメッセージを確認してください）。" >&2
+    echo "  あとで スタート/キーと金庫/12_PC全体に安全設定を入れる を実行すると入れ直せます。" >&2
   fi
 fi
 

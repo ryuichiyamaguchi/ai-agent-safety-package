@@ -248,4 +248,26 @@ for _js in apply-global-guard.js apply-global-codex.js apply-global-agy.js apply
   grep -q "$_js" "$ROOT/scripts/windows/uninstall-global-guard.ps1" || { note "FAIL: uninstall-global-guard.ps1 が $_js を呼ばない"; fail=1; }
 done
 
+# 9e) PC 全体の安全設定は既定でオン（v1.19.x〜）。実走は global-guard-default-on.test.js /
+#     global-guard-runtime.test.ps1 が見る。ここは「配線が外れていないこと」を静的に固定する。
+#     - install は導入・更新の最後に apply-global-guard を自動モードで呼ぶ（両 OS）
+#     - hook の向き先は作業フォルダではなく ~/.ai-safety/global（stage-global-runtime.js で複製）
+#     - 13（解除）が「外した」記録を作り、apply の自動モードと install がそれを守る
+grep -q '_gg_apply=.*/hooks/macos/apply-global-guard.sh"' "$ROOT/scripts/macos/install.sh" && grep -q '"$_gg_apply" --auto' "$ROOT/scripts/macos/install.sh" || { note "FAIL: install.sh が PC 全体の安全設定を自動で入れていない"; fail=1; }
+grep -q 'ggApply = Join-Path .*apply-global-guard.ps1' "$ROOT/scripts/windows/install.ps1" && grep -q '& $ggApply -Auto' "$ROOT/scripts/windows/install.ps1" || { note "FAIL: install.ps1 が PC 全体の安全設定を自動で入れていない"; fail=1; }
+for _f in "$ROOT/scripts/macos/install.sh" "$ROOT/scripts/windows/install.ps1" \
+          "$ROOT/scripts/macos/apply-global-guard.sh" "$ROOT/scripts/windows/apply-global-guard.ps1" \
+          "$ROOT/scripts/macos/uninstall-global-guard.sh" "$ROOT/scripts/windows/uninstall-global-guard.ps1"; do
+  grep -q 'global-guard-optout' "$_f" || { note "FAIL: 解除の記録 (global-guard-optout) を見ていない: $_f"; fail=1; }
+done
+for _f in "$ROOT/scripts/macos/install.sh" "$ROOT/scripts/windows/install.ps1" \
+          "$ROOT/scripts/macos/apply-global-guard.sh" "$ROOT/scripts/windows/apply-global-guard.ps1"; do
+  grep -q 'AI_SAFE_NO_GLOBAL_GUARD' "$_f" || { note "FAIL: AI_SAFE_NO_GLOBAL_GUARD を見ていない: $_f"; fail=1; }
+done
+grep -q 'stage-global-runtime.js' "$ROOT/scripts/macos/apply-global-guard.sh" || { note "FAIL: apply-global-guard.sh が guard を固定の置き場へ複製しない"; fail=1; }
+grep -q 'stage-global-runtime.js' "$ROOT/scripts/windows/apply-global-guard.ps1" || { note "FAIL: apply-global-guard.ps1 が guard を固定の置き場へ複製しない"; fail=1; }
+grep -q 'GUARD_DIR="$GLOBAL_RUNTIME/hooks/macos"' "$ROOT/scripts/macos/apply-global-guard.sh" || { note "FAIL: mac の hook が固定の置き場を指していない"; fail=1; }
+grep -q 'guardDir = Join-Path $globalRuntime "hooks\\windows"' "$ROOT/scripts/windows/apply-global-guard.ps1" || { note "FAIL: Windows の hook が固定の置き場を指していない"; fail=1; }
+grep -Fq 'PC 全体の安全設定は最初から入っています' "$HTML" || { note "FAIL: スタート.html が「最初から入っている」ことを案内していない"; fail=1; }
+
 if [ $fail -eq 0 ]; then note "ALL PASS"; else note "FAILURES ABOVE"; exit 1; fi

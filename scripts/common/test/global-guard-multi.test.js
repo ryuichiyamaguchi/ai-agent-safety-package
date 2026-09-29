@@ -25,10 +25,14 @@ const OPENCODE_JS = path.join(COMMON, 'apply-global-opencode.js');
 const CODEX_JS = path.join(COMMON, 'apply-global-codex.js');
 const CLAUDE_JS = path.join(COMMON, 'apply-global-guard.js');
 
+const madeHomes = [];
 function mkHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-safety-global-'));
+  madeHomes.push(home);
   return home;
 }
+// 偽 HOME は最後にまとめて片付ける（テストの痕跡を残さない）。
+test.after(() => { for (const h of madeHomes) fs.rmSync(h, { recursive: true, force: true }); });
 
 // 偽 HOME でスクリプトを走らせる。state / backups も偽 HOME の中に閉じ込める。
 function run(js, args, home) {
@@ -340,4 +344,208 @@ test('4 エンジンを 1 回で入れて 1 回で戻せる（記録は入れた
     assert.ok(!fs.existsSync(p), `解除後も残っている: ${p}`);
   }
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(st, 'utf8')), {});
+});
+
+// ---------------------------------------------------------------- 安全ガードの固定の置き場
+// hook が作業フォルダの中の guard を絶対パスで指していると、作業フォルダを移動・名前変更した
+// 瞬間に「AI Safety hook missing」(exit 2) で PC 中の Claude が止まる。v1.19.x からは
+// guard 一式を ~/.ai-safety/global/ へ複製し（stage-global-runtime.js）、hook はそちらを指す。
+const STAGE_JS = path.join(COMMON, 'stage-global-runtime.js');
+
+// 作業フォルダ（<ws>/.ai-safety/...）と同じ並びを、配布物から組み立てる。
+function mkFakeWorkspace(root, osName) {
+  const ai = path.join(root, '.ai-safety');
+  fs.cpSync(path.join(PKG, 'scripts', osName), path.join(ai, 'hooks', osName), { recursive: true });
+  fs.cpSync(COMMON, path.join(ai, 'hooks', 'common'), { recursive: true });
+  fs.mkdirSync(path.join(ai, 'policy'), { recursive: true });
+  fs.copyFileSync(path.join(PKG, 'policy', 'safety-policy.json'), path.join(ai, 'policy', 'safety-policy.json'));
+  fs.cpSync(path.join(PKG, 'configs', 'safety', 'cards'), path.join(ai, 'cards'), { recursive: true });
+  return path.join(ai, 'hooks', osName);
+}
+
+function stage(home, guardSrc, dest, osName) {
+  return run(STAGE_JS, ['--os', osName || 'macos', '--guard-src', guardSrc, '--dest', dest], home);
+}
+
+test('固定の置き場: 作業フォルダから guard 一式を複製し、ガードが相対で読むものがそろう', () => {
+  const home = mkHome();
+  const guardSrc = mkFakeWorkspace(path.join(home, 'ws'), 'macos');
+  const dest = path.join(home, '.ai-safety', 'global');
+  const r = stage(home, guardSrc, dest);
+  assert.strictEqual(r.code, 0, r.out);
+
+  for (const rel of ['hooks/macos/guard-prompt.sh', 'hooks/macos/guard-bash.sh', 'hooks/macos/guard-write.sh',
+    'hooks/macos/guard-webfetch.sh', 'hooks/macos/guard-post-output.sh', 'hooks/macos/guard-observe.sh',
+    'hooks/macos/lib/safety_policy.sh', 'hooks/macos/lib/explainer.sh',
+    'hooks/common/command-judge.js', 'hooks/common/plutil-p.js', 'hooks/common/answer-snapshot.js',
+    'hooks/common/gemini-client.js', 'policy/safety-policy.json', 'cards/index.tsv', 'README.txt', 'runtime.json']) {
+    assert.ok(fs.existsSync(path.join(dest, rel)), 'ない: ' + rel);
+  }
+  // ガードは <hooks/macos>/../../policy を同梱ポリシーとして読む。中身が配布物と同一であること。
+  assert.deepStrictEqual(fs.readFileSync(path.join(dest, 'policy', 'safety-policy.json')),
+    fs.readFileSync(path.join(PKG, 'policy', 'safety-policy.json')));
+  // hook は [ -x ] で存在を確かめるので実行権が要る
+  assert.ok(fs.statSync(path.join(dest, 'hooks', 'macos', 'guard-bash.sh')).mode & 0o100, '実行権がない');
+  // hook 専用の置き場なので、ランチャー・導入スクリプト・テスト・画像素材は持ち込まない
+  for (const rel of ['hooks/macos/install.sh', 'hooks/macos/apply-global-guard.sh', 'hooks/macos/launch-claude-safe.sh',
+    'hooks/macos/test', 'hooks/common/test', 'hooks/common/assets']) {
+    assert.ok(!fs.existsSync(path.join(dest, rel)), '持ち込んでいる: ' + rel);
+  }
+  const info = JSON.parse(fs.readFileSync(path.join(dest, 'runtime.json'), 'utf8'));
+  const pv = JSON.parse(fs.readFileSync(path.join(PKG, 'policy', 'safety-policy.json'), 'utf8')).packageVersion;
+  assert.strictEqual(info.packageVersion, pv);
+});
+
+test('固定の置き場: 作り直しは丸ごと入れ替わり、一時フォルダ・退避フォルダを残さない', () => {
+  const home = mkHome();
+  const guardSrc = mkFakeWorkspace(path.join(home, 'ws'), 'macos');
+  const dest = path.join(home, '.ai-safety', 'global');
+  assert.strictEqual(stage(home, guardSrc, dest).code, 0);
+  fs.writeFileSync(path.join(dest, 'stray.txt'), 'old');
+  assert.strictEqual(stage(home, guardSrc, dest).code, 0);
+  assert.ok(!fs.existsSync(path.join(dest, 'stray.txt')), '古い一式が混ざったまま');
+  const leftovers = fs.readdirSync(path.dirname(dest)).filter((n) => n.startsWith('global.'));
+  assert.deepStrictEqual(leftovers, [], '一時フォルダ/退避フォルダが残った: ' + leftovers.join(', '));
+});
+
+test('固定の置き場: 元が壊れていたら今ある一式を残す（無ければ失敗を返し、hook を向けさせない）', () => {
+  const home = mkHome();
+  const dest = path.join(home, '.ai-safety', 'global');
+  const broken = path.join(home, 'broken', '.ai-safety', 'hooks', 'macos');
+  fs.mkdirSync(broken, { recursive: true });
+  fs.writeFileSync(path.join(broken, 'guard-bash.sh'), '#!/bin/bash\nexit 0\n');
+  // 置き場がまだ無い → 使える一式が無いので 1
+  const none = stage(home, broken, dest);
+  assert.strictEqual(none.code, 1, none.out);
+  assert.ok(!fs.existsSync(dest), '不完全な一式を置いた');
+  // 完全な一式がある → 壊れた元では作り直さず、前の一式を残して 0
+  const guardSrc = mkFakeWorkspace(path.join(home, 'ws'), 'macos');
+  assert.strictEqual(stage(home, guardSrc, dest).code, 0);
+  const before = fs.readFileSync(path.join(dest, 'hooks', 'macos', 'guard-bash.sh'));
+  const kept = stage(home, broken, dest);
+  assert.strictEqual(kept.code, 0, kept.out);
+  assert.match(kept.out, /keeping the previous complete runtime/);
+  assert.deepStrictEqual(fs.readFileSync(path.join(dest, 'hooks', 'macos', 'guard-bash.sh')), before);
+});
+
+test('固定の置き場: Windows 用の一式も作れる（ps1 と lib\\SafetyPolicy.ps1・cards）', () => {
+  const home = mkHome();
+  const dest = path.join(home, 'rt');
+  const r = stage(home, path.join(PKG, 'scripts', 'windows'), dest, 'windows');
+  assert.strictEqual(r.code, 0, r.out);
+  for (const rel of ['hooks/windows/guard-bash.ps1', 'hooks/windows/guard-prompt.ps1', 'hooks/windows/lib/SafetyPolicy.ps1',
+    'hooks/windows/lib/Explainer.ps1', 'hooks/common/command-judge.js', 'policy/safety-policy.json', 'cards/index.tsv']) {
+    assert.ok(fs.existsSync(path.join(dest, rel)), 'ない: ' + rel);
+  }
+  assert.ok(!fs.existsSync(path.join(dest, 'hooks', 'windows', 'install.ps1')));
+  assert.ok(!fs.existsSync(path.join(dest, 'hooks', 'windows', 'test')));
+  assert.ok(!fs.existsSync(path.join(dest, 'hooks', 'macos')), '別 OS の一式を置いた');
+});
+
+// 設定ファイルに書かれた hook コマンドを、Claude Code と同じように実行する。
+function fireClaudeHook(settingsPath, event, matcher, payload, home, cwd) {
+  const s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  const group = s.hooks[event].find((g) => (matcher ? g.matcher === matcher : true));
+  const h = group.hooks[0];
+  const env = { ...process.env, HOME: home, AI_SAFE_LOG_DIR: path.join(home, 'logs') };
+  delete env.AI_SAFE_POLICY;
+  const r = spawnSync(h.command, h.args || [], { input: JSON.stringify(payload), encoding: 'utf8', env, cwd });
+  return { code: r.status, out: (r.stdout || '') + (r.stderr || '') };
+}
+
+test('作業フォルダを移動・名前変更しても、全体設定の hook は危険コマンドを止め続ける', { skip: process.platform === 'win32' }, () => {
+  const home = mkHome();
+  const wsRoot = path.join(home, 'Documents', 'my-ai-workspace');
+  const guardSrc = mkFakeWorkspace(wsRoot, 'macos');
+  const dest = path.join(home, '.ai-safety', 'global');
+  assert.strictEqual(stage(home, guardSrc, dest).code, 0);
+  const target = path.join(home, '.claude', 'settings.json');
+  const src = path.join(PKG, 'configs', 'claude', 'settings.mac.json');
+  assert.strictEqual(run(CLAUDE_JS, ['apply', '--source', src, '--target', target, '--os', 'macos',
+    '--guard-dir', path.join(dest, 'hooks', 'macos'), '--state', statePath(home)], home).code, 0);
+  assert.ok(!fs.readFileSync(target, 'utf8').includes(wsRoot), 'hook が作業フォルダを指している');
+
+  // 受講者が作業フォルダの名前を変えた
+  fs.renameSync(wsRoot, path.join(home, 'Documents', 'renamed'));
+  const proj = path.join(home, 'proj');
+  fs.mkdirSync(path.join(proj, 'somedir'), { recursive: true });
+  const bashInput = (command) => ({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd: proj, tool_input: { command } });
+
+  const danger = fireClaudeHook(target, 'PreToolUse', 'Bash|PowerShell', bashInput('rm -rf somedir'), home, proj);
+  assert.strictEqual(danger.code, 2, '再帰削除が止まらなかった: ' + danger.out);
+  assert.match(danger.out, /BLOCKED/);
+  assert.doesNotMatch(danger.out, /hook missing/);
+  assert.ok(fs.existsSync(path.join(proj, 'somedir')));
+
+  const ok = fireClaudeHook(target, 'PreToolUse', 'Bash|PowerShell', bashInput('ls -la'), home, proj);
+  assert.strictEqual(ok.code, 0, '通常のコマンドまで止まった: ' + ok.out);
+  const prompt = fireClaudeHook(target, 'UserPromptSubmit', null,
+    { hook_event_name: 'UserPromptSubmit', prompt: 'こんにちは', cwd: proj }, home, proj);
+  assert.strictEqual(prompt.code, 0, 'プロンプトが止まった（全 Claude セッションが止まる状態）: ' + prompt.out);
+});
+
+// ---------------------------------------------------------------- 旧版からの移行（作業フォルダ → 固定の置き場）
+test('移行: 作業フォルダを指していた hook は、固定の置き場を指す hook へ張り替わる（重複なし・冪等）', () => {
+  const home = mkHome();
+  const st = statePath(home);
+  const oldDir = '/Users/me/Documents/my-ai-workspace/.ai-safety/hooks/macos';
+  const newDir = path.join(home, '.ai-safety', 'global', 'hooks', 'macos');
+  const src = path.join(PKG, 'configs', 'claude', 'settings.mac.json');
+  const claudeTarget = path.join(home, '.claude', 'settings.json');
+  const original = { env: { KEEP: '1' }, hooks: { Stop: [{ hooks: [{ type: 'command', command: '/opt/mine.sh' }] }] } };
+  writeFile(claudeTarget, JSON.stringify(original, null, 2) + '\n');
+  const before = fs.readFileSync(claudeTarget, 'utf8');
+  const codexCfg = path.join(home, '.codex', 'config.toml');
+  const codexHooks = path.join(home, '.codex', 'hooks.json');
+  const agyTarget = path.join(home, '.gemini', 'settings.json');
+
+  const applyAll = (dir) => {
+    assert.strictEqual(run(CLAUDE_JS, ['apply', '--source', src, '--target', claudeTarget, '--os', 'macos',
+      '--guard-dir', dir, '--state', st], home).code, 0);
+    assert.strictEqual(run(CODEX_JS, ['apply', '--config-target', codexCfg, '--hooks-target', codexHooks,
+      '--os', 'macos', '--guard-dir', dir, '--state', st], home).code, 0);
+    assert.strictEqual(run(AGY_JS, ['apply', '--target', agyTarget, '--os', 'macos',
+      '--guard-dir', dir, '--state', st], home).code, 0);
+  };
+  applyAll(oldDir); // 旧版の「12」が入れた状態
+  const oldClaude = JSON.parse(fs.readFileSync(claudeTarget, 'utf8'));
+  applyAll(newDir); // 更新（install の自動反映）
+  const texts = () => [claudeTarget, codexHooks, agyTarget].map((p) => fs.readFileSync(p, 'utf8'));
+  const once = texts();
+  for (const t of once) {
+    assert.ok(!t.includes(oldDir), '作業フォルダを指す hook が残った');
+    assert.ok(t.includes(newDir), '固定の置き場を指していない');
+  }
+  const newClaude = JSON.parse(once[0]);
+  // 張り替えただけで、hook の数は旧版と同じ（増殖しない）。受講者自身の hook も残る。
+  for (const ev of Object.keys(oldClaude.hooks)) {
+    assert.strictEqual(newClaude.hooks[ev].length, oldClaude.hooks[ev].length, ev + ' の hook 数が変わった');
+  }
+  assert.ok(JSON.stringify(newClaude.hooks.Stop).includes('/opt/mine.sh'), '受講者の hook が消えた');
+  applyAll(newDir); // もう一度（次の更新）
+  assert.deepStrictEqual(texts(), once, '2 回目で内容が変わった（冪等でない）');
+
+  // 解除すると、最初に入れる前（旧版で入れる前）の状態へ戻る
+  assert.strictEqual(run(CLAUDE_JS, ['uninstall', '--target', claudeTarget, '--state', st], home).code, 0);
+  assert.strictEqual(fs.readFileSync(claudeTarget, 'utf8'), before);
+});
+
+test('移行 (Windows): 作業フォルダを指していた powershell.exe の hook も固定の置き場へ張り替わる', () => {
+  const home = mkHome();
+  const st = statePath(home);
+  const src = path.join(PKG, 'configs', 'claude', 'settings.windows.json');
+  const target = path.join(home, '.claude', 'settings.json');
+  const oldDir = 'C:\\Users\\me\\Documents\\AI作業フォルダ\\.ai-safety\\hooks\\windows';
+  const newDir = 'C:\\Users\\me\\.ai-safety\\global\\hooks\\windows';
+  for (const dir of [oldDir, newDir, newDir]) {
+    assert.strictEqual(run(CLAUDE_JS, ['apply', '--source', src, '--target', target, '--os', 'windows',
+      '--guard-dir', dir, '--state', st], home).code, 0);
+  }
+  const s = JSON.parse(fs.readFileSync(target, 'utf8'));
+  const text = JSON.stringify(s);
+  assert.ok(!text.includes('AI作業フォルダ'), '作業フォルダを指す hook が残った');
+  assert.strictEqual(s.hooks.PreToolUse.length, 3, 'PreToolUse の hook が増殖した');
+  assert.strictEqual(s.hooks.UserPromptSubmit.length, 1);
+  const cmd = s.hooks.PreToolUse.find((g) => g.matcher === 'Bash|PowerShell').hooks[0].args.slice(-1)[0];
+  assert.ok(cmd.includes(newDir + '\\guard-bash.ps1'), cmd);
 });

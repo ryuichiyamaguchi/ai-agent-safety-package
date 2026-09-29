@@ -140,8 +140,10 @@ function doApply() {
     st.agy.os = os;
   }
 
+  const outText = JSON.stringify(tgt, null, 2) + '\n';
+  st.agy.writtenSha256 = state.sha256Text(outText);
   fs.mkdirSync(path.dirname(tgtPath), { recursive: true });
-  fs.writeFileSync(tgtPath, JSON.stringify(tgt, null, 2) + '\n', 'utf8');
+  fs.writeFileSync(tgtPath, outText, 'utf8');
   state.saveState(statePath, st);
   console.log('backup        : ' + (st.agy.originalBackup || '(none — target did not exist)'));
   console.log('written       : ' + tgtPath);
@@ -161,19 +163,42 @@ function doUninstall() {
   }
   if (fs.existsSync(tgtPath)) state.backupFile(tgtPath, 'global-agy-preundo');
 
-  if (entry.originalBackup && fs.existsSync(entry.originalBackup)) {
+  // 入れたあとに agy / Gemini CLI や利用者が書き足していたら（認証方式・テーマ・MCP など）、
+  // バックアップで丸ごと戻すとそれが消える。その場合は足した hook だけを取り除く。
+  const modified = state.changedSinceApply(tgtPath, entry.writtenSha256);
+
+  if (!modified && entry.originalBackup && fs.existsSync(entry.originalBackup)) {
     fs.copyFileSync(entry.originalBackup, tgtPath);
     console.log('restored      : ' + tgtPath + ' ← ' + entry.originalBackup);
-  } else if (entry.targetExistedBefore === false) {
+  } else if (!modified && entry.targetExistedBefore === false) {
     if (fs.existsSync(tgtPath)) fs.unlinkSync(tgtPath);
     console.log('removed       : ' + tgtPath + ' (適用前は存在しなかったため削除)');
+  } else if (!fs.existsSync(tgtPath)) {
+    console.log('skipped       : ' + tgtPath + ' (ファイルが見つかりません)');
   } else {
-    // バックアップが失われた場合の外科的フォールバック: 足した hook だけ取り除く。
-    let tgt = {};
-    try { tgt = JSON.parse(fs.readFileSync(tgtPath, 'utf8')); } catch (_) { tgt = {}; }
-    stripOurHooks(tgt);
-    fs.writeFileSync(tgtPath, JSON.stringify(tgt, null, 2) + '\n', 'utf8');
-    console.log('surgically reverted (backup missing): ' + tgtPath);
+    // 外科的に戻す: 足した hook だけ取り除き、hooksConfig.enabled は入れる前の値へ戻す。
+    const tgt = state.readJsonOrNull(tgtPath);
+    if (!state.isPlainObject(tgt)) {
+      console.log('WARN: ' + tgtPath + ' を JSON として読めないため、そのまま残しました（控え: ~/.ai-safety/backups/）');
+    } else {
+      stripOurHooks(tgt);
+      const orig = entry.originalBackup ? state.readJsonOrNull(entry.originalBackup) : null;
+      const origEnabled = state.isPlainObject(orig) && state.isPlainObject(orig.hooksConfig)
+        ? orig.hooksConfig.enabled : undefined;
+      if (state.isPlainObject(tgt.hooksConfig)) {
+        if (origEnabled === undefined) delete tgt.hooksConfig.enabled; else tgt.hooksConfig.enabled = origEnabled;
+        if (Object.keys(tgt.hooksConfig).length === 0) delete tgt.hooksConfig;
+      }
+      if (entry.targetExistedBefore === false && Object.keys(tgt).length === 0) {
+        fs.unlinkSync(tgtPath);
+        console.log('removed       : ' + tgtPath + ' (足した分を除くと空になったため削除)');
+      } else {
+        fs.writeFileSync(tgtPath, JSON.stringify(tgt, null, 2) + '\n', 'utf8');
+        console.log(modified
+          ? 'kept changes  : ' + tgtPath + ' (入れたあとの変更は残し、このパッケージが足した hook だけ取り除きました)'
+          : 'surgically reverted (backup missing): ' + tgtPath);
+      }
+    }
   }
 
   delete st.agy;
