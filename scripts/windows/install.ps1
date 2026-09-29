@@ -816,14 +816,14 @@ if ((Test-Path -LiteralPath $aiSafeHome) -and ($IsWindows -ne $false)) {
                 Write-Host ("権限の調整はスキップしました（対象がまだありません）: " + $aiSafeHome)
             } else {
                 Write-Warning ("権限を確認できませんでした（変更は元に戻してあります）: " + $aiSafeHome)
-                Write-Warning "  スタート\12_フォルダのアクセス権を直す.bat を実行してください。"
+                Write-Warning "  スタート\13_フォルダのアクセス権を直す.bat を実行してください。"
                 # 実機で成功が確認された形だけを案内する。cmd 指定は必須
                 # （PowerShell では %USERPROFILE% が展開されないため動かない）。
                 Write-Warning '  または コマンドプロンプト(cmd) で: icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q'
             }
         } catch {
             Write-Warning ("権限の調整に失敗しました(スキップ): " + $_.Exception.Message)
-            Write-Warning ("  必要なら スタート\12_フォルダのアクセス権を直す.bat を実行してください。")
+            Write-Warning ("  必要なら スタート\13_フォルダのアクセス権を直す.bat を実行してください。")
             Write-Warning '  または コマンドプロンプト(cmd) で: icacls "%USERPROFILE%\.ai-safety" /reset /T /C /Q'
         }
     } else {
