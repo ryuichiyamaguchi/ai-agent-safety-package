@@ -260,6 +260,7 @@ for _sec in \
   "scripts/common/apply-global-agy.js" \
   "scripts/common/apply-global-opencode.js" \
   "scripts/common/apply-global-deny.js" \
+  "scripts/common/workspace-snapshot.js" \
   "scripts/macos/apply-global-guard.sh" \
   "scripts/macos/uninstall-global-guard.sh" \
   "scripts/macos/protect-folder.sh" \
@@ -458,6 +459,10 @@ if [ -d "$package_root/workspace-template/スタート" ]; then
   #          サブフォルダ「キーと金庫」へ移した。個別のセーフ起動ボタンは
   #          「4_AIを起動する」（統合ランチャー）へ集約し、「（上級）」プレフィックスは全廃。
   #          野良 d-claude 退治ボタンは診断（9_困ったとき診断）へ統合した。
+  # v1.19.0: 「10_作業フォルダを元に戻す」を基本枠に入れたぶん、Windows 専用の旧 10〜12 が
+  #          1 つずつ繰り下がった（11_PowerShellを開く / 12_作業フォルダを開く / 13_フォルダのアクセス権を直す）。
+  #          いまの名前と同じになった v1.16 世代の「11_PowerShellを開く.bat」「12_作業フォルダを開く.bat」は
+  #          一覧から外した（中身も同じ役目なので、上書きで最新になる）。
   # 消すのは「パッケージが過去に配布した既知の旧名」だけに限定し、受講者の自作ファイルには触らない。
   # Finder / Archive Utility 経由の展開はファイル名が NFD (UTF-8-MAC) になることがあるため、
   # 名前を NFC に正規化してから照合する（install のハッシュ照合と同じ手法）。
@@ -500,8 +505,6 @@ if [ -d "$package_root/workspace-template/スタート" ]; then
 8_AIツールを最新版に更新.bat
 10_野良d-claudeを退治.command
 10_野良d-claudeを退治.bat
-11_PowerShellを開く.bat
-12_作業フォルダを開く.bat
 1_AIをまとめて起動.command
 1_AIをまとめて起動.bat
 2_セーフCodexを起動.command
@@ -566,7 +569,10 @@ if [ -d "$package_root/workspace-template/スタート" ]; then
 （上級）17_金庫から秘密を取り出す.command
 （上級）17_金庫から秘密を取り出す.bat
 （上級）18_金庫の秘密を消す.command
-（上級）18_金庫の秘密を消す.bat'
+（上級）18_金庫の秘密を消す.bat
+10_PowerShellを開く.bat
+11_作業フォルダを開く.bat
+12_フォルダのアクセス権を直す.bat'
   for _old in "$workspace/スタート"/*; do
     [ -f "$_old" ] || continue
     _old_name="$(normalize_hash_rel_path "$(basename "$_old")")"

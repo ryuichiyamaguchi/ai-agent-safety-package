@@ -225,6 +225,7 @@ foreach ($sec in @(
     'scripts/common/apply-global-agy.js',
     'scripts/common/apply-global-opencode.js',
     'scripts/common/apply-global-deny.js',
+    'scripts/common/workspace-snapshot.js',
     'scripts/macos/apply-global-guard.sh',
     'scripts/macos/uninstall-global-guard.sh',
     'scripts/macos/protect-folder.sh',
@@ -581,8 +582,8 @@ if (Test-Path -LiteralPath $startSrc) {
         "7_安全パッケージを最新版に更新.command", "7_安全パッケージを最新版に更新.bat",
         "8_AIツールを最新版に更新.command", "8_AIツールを最新版に更新.bat",
         "10_野良d-claudeを退治.command", "10_野良d-claudeを退治.bat",
-        "11_PowerShellを開く.bat",
-        "12_作業フォルダを開く.bat",
+        # （v1.16 世代の 11_PowerShellを開く / 12_作業フォルダを開く は v1.19.0 で
+        #   いまの名前と同じになったので一覧から外した。中身も同じ役目なので上書きで最新になる）
         # v1.18.0: スタート再編（基本 9 個 + Windows 3 個、キー・金庫系は「キーと金庫」へ）。
         "1_AIをまとめて起動.command", "1_AIをまとめて起動.bat",
         "2_セーフCodexを起動.command", "2_セーフCodexを起動.bat",
@@ -617,7 +618,12 @@ if (Test-Path -LiteralPath $startSrc) {
         "（上級）15_長時間おまかせモードで起動.command", "（上級）15_長時間おまかせモードで起動.bat",
         "（上級）16_金庫に秘密をしまう.command", "（上級）16_金庫に秘密をしまう.bat",
         "（上級）17_金庫から秘密を取り出す.command", "（上級）17_金庫から秘密を取り出す.bat",
-        "（上級）18_金庫の秘密を消す.command", "（上級）18_金庫の秘密を消す.bat"
+        "（上級）18_金庫の秘密を消す.command", "（上級）18_金庫の秘密を消す.bat",
+        # v1.19.0: 「10_作業フォルダを元に戻す」を基本枠に入れたぶん、Windows 専用の旧 10〜12 が
+        #          1 つずつ繰り下がった（11_PowerShellを開く / 12_作業フォルダを開く / 13_フォルダのアクセス権を直す）。
+        "10_PowerShellを開く.bat",
+        "11_作業フォルダを開く.bat",
+        "12_フォルダのアクセス権を直す.bat"
     )
     foreach ($legacyName in $legacyStartNames) {
         $legacyPath = Join-Path $startDest $legacyName

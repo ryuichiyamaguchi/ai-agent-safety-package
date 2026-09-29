@@ -110,6 +110,38 @@ mkdir -p "$log_dir"
   exit 2
 }
 
+# --- AI を起動する直前に、作業フォルダの控え（元に戻す用）を取る ------------------------
+# 実体は hooks/common/workspace-snapshot.js。戻すときはスタートの「10_作業フォルダを元に戻す」。
+# 控えは「おまけの安全網」で起動の条件ではないので、node が無い・失敗した等のときは
+# 警告を 1 行だけ出して起動を続ける。成功したときは node が 1 行（ファイル数と秒数）を出す。
+# 長時間おまかせモード（launch-longrun.sh）から渡されたときは向こうで取り終えているので
+# 二重に取らない（AI_SAFE_SNAPSHOT_ALREADY に作業フォルダのパスが入ってくる）。この目印は
+# AI 本体へ持ち込まないよう、見たらすぐ消す。控えを止めたいときは AI_SAFE_SNAPSHOT=off。
+snapshot_before_launch() {
+  _snap_reason="$1"
+  _snap_already="${AI_SAFE_SNAPSHOT_ALREADY:-}"
+  unset AI_SAFE_SNAPSHOT_ALREADY
+  if [ -n "$_snap_already" ] && [ "$_snap_already" = "$workspace" ]; then
+    return 0
+  fi
+  if [ "${AI_SAFE_SNAPSHOT:-on}" = "off" ]; then
+    return 0
+  fi
+  _snap_js="$root/hooks/common/workspace-snapshot.js"
+  if [ ! -f "$_snap_js" ]; then
+    echo "※ 元に戻す用の控えを取る仕組みがまだ入っていないため、控えは取りませんでした。そのまま起動します。"
+    return 0
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    echo "※ node が見つからないため、元に戻す用の控えは取りませんでした。そのまま起動します。"
+    return 0
+  fi
+  # --launcher: 成功なら「控えを取りました（…）」、失敗でも「※ …そのまま起動します。」の 1 行を
+  # node が画面へ出し、終了コードは常に 0。起動をここで止めないため、結果は見ない。
+  node "$_snap_js" take --workspace "$workspace" --reason "$_snap_reason" --launcher || true
+  return 0
+}
+
 # --- 対話メニュー（agent=menu のとき）--------------------------------------------
 # 並びは「どの課金プランの人か」順。スタートのボタンはここへ委譲すれば、
 # mac / Windows でメニューの正本が 1 か所（このランチャー）にまとまる。
@@ -208,6 +240,7 @@ if [ "$agent" = "menu" ]; then
         echo "  agent:     agy (launch-agy-safe.sh へ委譲)"
         exit 0
       fi
+      snapshot_before_launch "before-agy"
       exec bash "$agy_launcher" "$workspace"
       ;;
     3) agent="opencode"; profile="standard"; choose_project; extra="$PROJECT_FLAG"; extra2="" ;;
@@ -267,6 +300,14 @@ if [ "${AI_SAFE_DRY_RUN:-0}" = "1" ]; then
     echo "  gateway:   bypassed (AIの応答速度を優先)"
   fi
   exit 0
+fi
+
+# ここがメニューのどの番号でも通る「AI を起動する直前」。AntiGravity（2）は上の分岐で、
+# 長時間おまかせ（10）は launch-longrun.sh 側で控えを取る。
+if [ "$profile" = "assisted" ]; then
+  snapshot_before_launch "before-$agent-assisted"
+else
+  snapshot_before_launch "before-$agent"
 fi
 
 monitor_pid=""

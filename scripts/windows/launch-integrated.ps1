@@ -57,6 +57,49 @@ function Invoke-NativeQuiet {
     }
 }
 
+# --- AI を起動する直前に、作業フォルダの控え（元に戻す用）を取る ---------------------------
+# 実体は hooks\common\workspace-snapshot.js。戻すときはスタートの「10_作業フォルダを元に戻す」。
+# 控えは「おまけの安全網」で起動の条件ではないので、node が無い・失敗した等のときは
+# 警告を 1 行だけ出して起動を続ける。成功したときは node が出す 1 行（ファイル数と秒数）を表示する。
+# 長時間おまかせモード（launch-longrun.ps1）から渡されたときは向こうで取り終えているので
+# 二重に取らない（$env:AI_SAFE_SNAPSHOT_ALREADY に作業フォルダのパスが入ってくる）。この目印は
+# AI 本体へ持ち込まないよう、見たらすぐ消す。控えを止めたいときは $env:AI_SAFE_SNAPSHOT = 'off'。
+function Invoke-WorkspaceSnapshot {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+    $already = $env:AI_SAFE_SNAPSHOT_ALREADY
+    Remove-Item Env:\AI_SAFE_SNAPSHOT_ALREADY -ErrorAction SilentlyContinue
+    if ($already -and ($already -eq $Workspace)) { return }
+    if ($env:AI_SAFE_SNAPSHOT -eq 'off') { return }
+    try {
+        $snapJs = Join-Path $root 'hooks\common\workspace-snapshot.js'
+        if (-not (Test-Path -LiteralPath $snapJs -PathType Leaf)) {
+            Write-Host '※ 元に戻す用の控えを取る仕組みがまだ入っていないため、控えは取りませんでした。そのまま起動します。'
+            return
+        }
+        $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+        if (-not $nodeCmd) {
+            Write-Host '※ node が見つからないため、元に戻す用の控えは取りませんでした。そのまま起動します。'
+            return
+        }
+        # 出力は取り込まず、node に画面へ直接書かせる（node は WriteConsoleW で書くので、
+        # chcp 932 の画面のままでも日本語は化けない）。取り込むには [Console]::OutputEncoding を
+        # 切り替える必要があり、実コンソールへ出すスクリプトでそれをすると逆に化ける
+        # （windows-hook-encoding.test.js が見張っている）。
+        # --launcher: 成功なら「控えを取りました（…）」、失敗でも「※ …そのまま起動します。」の 1 行を
+        # node が出し、終了コードは常に 0。起動をここで止めないため、結果は見ない。
+        $prevEap = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $nodeCmd.Source $snapJs 'take' '--workspace' $Workspace '--reason' $Reason '--launcher'
+        } finally {
+            $ErrorActionPreference = $prevEap
+            $global:LASTEXITCODE = 0
+        }
+    } catch {
+        Write-Host ('※ 元に戻す用の控えを取れませんでした（' + $_.Exception.Message + '）。そのまま起動します。')
+    }
+}
+
 # --- 対話メニュー (-Agent menu のとき) ------------------------------------------------
 # 並びは「どの課金プランの人か」順。スタートのボタンはここへ委譲すれば、
 # mac / Windows でメニューの正本が 1 か所（このランチャー）にまとまる。
@@ -130,6 +173,7 @@ if ($Agent -eq 'menu') {
                 Write-Output '  agent:     agy (launch-agy-safe.ps1 へ委譲)'
                 exit 0
             }
+            Invoke-WorkspaceSnapshot -Reason 'before-agy'
             & $agyLauncher -Workspace $Workspace
             exit $LASTEXITCODE
         }
@@ -208,6 +252,11 @@ if (-not (Test-Path -LiteralPath $monitorScript -PathType Leaf)) {
 $powerShell = Get-Command powershell.exe -ErrorAction SilentlyContinue
 if (-not $powerShell) { $powerShell = Get-Command pwsh -ErrorAction SilentlyContinue }
 if (-not $powerShell) { throw 'PowerShell が見つかりません。' }
+
+# ここがメニューのどの番号でも通る「AI を起動する直前」。AntiGravity（2）は上の分岐で、
+# 長時間おまかせ（10）は launch-longrun.ps1 側で控えを取る。
+$snapAgent = if ($SafetyProfile -eq 'assisted') { $Agent + '-assisted' } else { $Agent }
+Invoke-WorkspaceSnapshot -Reason ('before-' + $snapAgent)
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $monitorProc = $null
