@@ -358,6 +358,25 @@ const SECRET_FILES = [
 // ⚠️ `..` を含む形も 1 本足してある。OpenCode は照合前にパスを正規化する（1.18.9 の
 // resolve が canonical を返し、location_escape を別途エラーにする）ので通常は当たらないが、
 // 「会話ログの置き場から親をたどって設定本体へ」という踏み台を、正規化に頼らずに閉じる。
+// ⚠️ OpenCode 1.18.26 以降の `opencode debug config` は、名前に credential / secret / password /
+//    api-key / private-key / oauth-token などを含む設定項目の値を `***` に伏せて表示する（1.18.33 で実測）。
+//    起動前検査は debug config の値を配布物と突き合わせるので、名前にこれらの単語を含む規則は
+//    値が `deny` か確かめられず、OpenCode が起動できなくなっていた（2026-09-29 受講者の Windows、
+//    OpenCode を最新版にした直後）。OpenCode の規則に書くときだけ 1 文字を `?`（OpenCode の照合では
+//    任意の 1 文字）に置き換え、同じファイルに当てたまま名前から単語を消す。
+//    （Claude Code 側の deny は同じ一覧を正式な名前のまま使う。伏せ字の問題は OpenCode だけ）
+//    scripts/common/test/opencode-redaction.test.js が、どの表の名前にも伏せ字の対象になる単語が
+//    無いことを検査する。
+const OC_REDACTION_SAFE = [
+  [/credential/gi, (m) => m[0] + '?' + m.slice(2)],   // credentials → c?edentials
+  [/oauth-token/gi, (m) => m.slice(0, 7) + '?' + m.slice(8)], // oauth-token → oauth-t?ken
+];
+function ocRedactionSafe(name) {
+  let out = name;
+  for (const [re, fn] of OC_REDACTION_SAFE) out = out.replace(re, fn);
+  return out;
+}
+
 function enforcedSecretReadDenyRules() {
   const rules = {};
   for (const dir of SECRET_DIRS) {
@@ -366,7 +385,7 @@ function enforcedSecretReadDenyRules() {
     rules[`**/${dir}`] = 'deny';
     rules[`**/${dir}/**`] = 'deny';
   }
-  for (const file of [...SECRET_FILES, ...AGENT_SECRET_FILES]) {
+  for (const file of [...SECRET_FILES, ...AGENT_SECRET_FILES].map(ocRedactionSafe)) {
     rules[`~/${file}`] = 'deny';
     rules[`**/${file}`] = 'deny';
   }
@@ -607,6 +626,17 @@ function verifyResolvedConfig(resolved, { longrun = false } = {}) {
   // read / edit は「並び順まで含めて」配布物どおりであることを求める。ここは最後に一致した
   // ルールが勝つ世界なので、キーが全部残っていても順番を入れ替えるだけで禁止が無効になる
   // （`*: allow` を deny の後ろへ動かす等）。丸ごと比較なら書き換え・並べ替えの両方を弾ける。
+  // OpenCode が値を `***` に伏せて表示した項目があると、値が配布物どおりか確かめられない。
+  // 原因が分かるように、その項目名を添えて止める（新しい OpenCode で伏せ字の対象が増えた可能性）。
+  for (const [table, label] of [['read', '読み取り'], ['edit', '書き換え'], ['external_directory', '作業フォルダ外']]) {
+    const t = permission[table];
+    if (t && typeof t === 'object') {
+      const masked = Object.keys(t).filter((k) => t[k] === '***');
+      if (masked.length) {
+        problems.push(`OpenCode が${label}の規則の一部を伏せ字（***）で表示したため、値を確認できません: ${masked.join(', ')}（OpenCode が新しくなった可能性があります。安全パッケージを最新版にしてください）`);
+      }
+    }
+  }
   if (JSON.stringify(permission.read) !== JSON.stringify(enforcedReadRules())) {
     problems.push('パスワードや鍵が入ったファイル（.env など）と安全ルール置き場の読み取り禁止が書き換えられています。');
   }

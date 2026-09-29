@@ -627,9 +627,13 @@ test('mac 統合ランチャー: AI の起動前に控えを取り、dry-run・�
 
   // 控えの仕組みが壊れていても起動は止めない（警告 1 行で続ける）。
   fs.writeFileSync(path.join(w.ws, '.ai-safety', 'hooks', 'common', 'workspace-snapshot.js'), 'process.exit(3);\n');
+  // 見守りモニター（open-monitor.sh）は裏で並行して立ち上がるので、記録の「最後の行」は
+  // タイミング次第でモニター側になる。AI 本体の起動記録が 1 行増えたかで確かめる。
+  const codexLaunches = () => fs.readFileSync(w.log, 'utf8').split('\n').filter((l) => /^launch-codex-safe\.sh /.test(l)).length;
+  const before = codexLaunches();
   const broken = run({}, ['codex', 'standard']);
   assert.strictEqual(broken.status, 0, broken.stdout + broken.stderr);
-  assert.match(fs.readFileSync(w.log, 'utf8').trim().split('\n').pop(), /^launch-codex-safe\.sh /, '控えの失敗で AI が起動しなかった');
+  assert.strictEqual(codexLaunches(), before + 1, '控えの失敗で AI が起動しなかった');
 });
 
 test('mac 長時間おまかせ: 同意の後に控えを取り、OpenCode では統合ランチャーに二重取りさせない', { skip: macOnly }, (t) => {
