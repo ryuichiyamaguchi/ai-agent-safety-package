@@ -30,16 +30,24 @@ function Get-CommandExplanation([string]$Full) {
     $psi.Arguments = "`"$js`" explain-command"
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $utf8 = New-Object System.Text.UTF8Encoding $false
     if ($psi.PSObject.Properties['StandardOutputEncoding']) { $psi.StandardOutputEncoding = $utf8 }
     $proc = [System.Diagnostics.Process]::Start($psi)
+    # 見張りの入口（Explainer.ps1 の Invoke-ExplainerJs）と同じ渡し方: バイト列を書き、Flush してから閉じる。
+    # Flush を省くと Windows PowerShell 5.1 では node に何も届かないことがあった（GitHub Actions で判明）。
     $bytes = $utf8.GetBytes($Full)
     $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+    $proc.StandardInput.BaseStream.Flush()
     $proc.StandardInput.Close()
     $out = $proc.StandardOutput.ReadToEnd()
+    $err = $proc.StandardError.ReadToEnd()
     [void]$proc.WaitForExit(10000)
+    if ([string]::IsNullOrWhiteSpace($out)) {
+        Write-Host ("  (explain-command の出力が空: exit=" + $proc.ExitCode + " stderr=" + $err + ")")
+    }
     $j = $out | ConvertFrom-Json
     return [PSCustomObject]@{ WhatDo = [string]$j.whatdo; Icon = [string]$j.icon; Danger = [string]$j.danger }
 }

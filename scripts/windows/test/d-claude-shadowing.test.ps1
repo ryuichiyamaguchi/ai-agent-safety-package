@@ -65,9 +65,9 @@ if (-not $pwsh) {
 } else {
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $pwsh
-    $psi.ArgumentList.Add('-NoProfile')
-    $psi.ArgumentList.Add('-Command')
-    $psi.ArgumentList.Add($child)
+    # ArgumentList は .NET Core（PowerShell 7）にしか無く、Windows PowerShell 5.1 では null で落ちる。
+    # 5.1 / 7 のどちらでも同じように渡せる -EncodedCommand（UTF-16LE の Base64）を使う。
+    $psi.Arguments = '-NoProfile -EncodedCommand ' + [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($child))
     $psi.RedirectStandardInput = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true

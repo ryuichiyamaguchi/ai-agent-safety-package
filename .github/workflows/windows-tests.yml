@@ -83,6 +83,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      - name: Install Codex CLI (doctor checks that it is installed)
+        run: npm install -g @openai/codex
       - name: Install and doctor on PowerShell 5.1
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\test\ci-install-doctor.ps1
