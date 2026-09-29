@@ -40,7 +40,8 @@ function Invoke-Guard([string]$ScriptPath, [string]$Json) {
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
-    $psi.StandardInputEncoding = [System.Text.Encoding]::UTF8
+    # StandardInputEncoding は .NET Core（PowerShell 7）にしか無く、Windows PowerShell 5.1 では代入で落ちる。
+    # UTF-8（BOM なし）のバイト列を標準入力へ直接書いて Flush する（製品の guard-bash.ps1 と同じやり方）。
     $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
     # 子プロセスにも env を伝播
     $psi.EnvironmentVariables["AI_SAFE_LOG_DIR"] = $logDir
@@ -48,7 +49,9 @@ function Invoke-Guard([string]$ScriptPath, [string]$Json) {
     $psi.EnvironmentVariables["AI_SAFE_POLICY"] = $env:AI_SAFE_POLICY
     $psi.EnvironmentVariables["AI_SAFE_MONITOR_INTERVAL"] = "1"
     $proc = [System.Diagnostics.Process]::Start($psi)
-    $proc.StandardInput.Write($Json)
+    $inBytes = (New-Object System.Text.UTF8Encoding $false).GetBytes([string]$Json)
+    $proc.StandardInput.BaseStream.Write($inBytes, 0, $inBytes.Length)
+    $proc.StandardInput.BaseStream.Flush()
     $proc.StandardInput.Close()
     $out = $proc.StandardOutput.ReadToEnd()
     $null = $proc.StandardError.ReadToEnd()

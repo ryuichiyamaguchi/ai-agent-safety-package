@@ -68,7 +68,8 @@ if (-not $pwsh) {
     # ArgumentList は .NET Core（PowerShell 7）にしか無く、Windows PowerShell 5.1 では null で落ちる。
     # 5.1 / 7 のどちらでも同じように渡せる -EncodedCommand（UTF-16LE の Base64）を使う。
     $psi.Arguments = '-NoProfile -EncodedCommand ' + [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($child))
-    $psi.RedirectStandardInput = $false
+    # 入力はすぐ閉じる（子が何かを尋ねても、CI の標準入力を待ち続けて止まらないように）。
+    $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
@@ -76,9 +77,16 @@ if (-not $pwsh) {
     $psi.Environment['USERPROFILE'] = $tmphome
     $psi.Environment['APPDATA'] = (Join-Path $tmphome 'AppData\Roaming')
     $p = [System.Diagnostics.Process]::Start($psi)
-    $stdout = $p.StandardOutput.ReadToEnd()
-    $stderr = $p.StandardError.ReadToEnd()
-    $p.WaitForExit()
+    $p.StandardInput.Close()
+    # エラー出力は並行して読む（標準出力を読み切るまで待つと、エラー出力が多いときに互いに待ち合って止まる）。
+    $errTask = $p.StandardError.ReadToEndAsync()
+    $outTask = $p.StandardOutput.ReadToEndAsync()
+    if (-not $p.WaitForExit(120000)) {
+        try { $p.Kill() } catch { }
+        Ng 'cleanup tool finishes within 120 seconds'
+    }
+    $stdout = $outTask.Result
+    $stderr = $errTask.Result
 
     if ($p.ExitCode -eq 0) { Ok 'cleanup tool exits 0' } else { Ng "cleanup tool exits 0 (rc=$($p.ExitCode); stderr=$stderr; stdout=$stdout)" }
 

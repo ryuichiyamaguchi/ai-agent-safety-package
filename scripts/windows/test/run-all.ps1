@@ -8,10 +8,11 @@
 # 子プロセスは「このスクリプトを動かしている PowerShell と同じもの」で起動する。
 # powershell.exe（5.1）で呼べば 5.1 で、pwsh（7）で呼べば 7 でテストが走る。
 # GitHub Actions（.github/workflows/windows-tests.yml）はこれを Windows PowerShell 5.1 で呼ぶ。
-# 1 本でも失敗したら exit 1。
+# 1 本でも失敗・時間切れ（既定 300 秒、-TimeoutSec で変更）があれば exit 1。
 param(
     [string[]]$Exclude = @(),
-    [string[]]$Only = @()
+    [string[]]$Only = @(),
+    [int]$TimeoutSec = 300
 )
 $ErrorActionPreference = 'Continue'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -33,11 +34,24 @@ foreach ($t in $tests) {
     Write-Host ''
     Write-Host ('===== ' + $t.Name + ' =====')
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    & $psExe -NoProfile -ExecutionPolicy Bypass -File $t.FullName
-    $rc = $LASTEXITCODE
+    # 1 本ごとに制限時間を設ける（入力待ちなどで止まったテストが全体を止めないように）。
+    # 出力はそのまま画面へ流す（取り込まない）。
+    $p = Start-Process -FilePath $psExe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $t.FullName + '"')) -NoNewWindow -PassThru
+    $null = $p.Handle   # これを先に読まないと、終了後に ExitCode が取れないことがある（Windows PowerShell の癖）
+    $timedOut = -not $p.WaitForExit($TimeoutSec * 1000)
+    if ($timedOut) {
+        try { $p.Kill($true) } catch {
+            try { & taskkill.exe /T /F /PID $p.Id *> $null } catch { }
+            try { $p.Kill() } catch { }
+        }
+        $rc = -1
+    } else {
+        $p.WaitForExit()
+        $rc = $p.ExitCode
+    }
     $sw.Stop()
     $result = 'FAIL'
-    if ($rc -eq 0) { $result = 'PASS' }
+    if ($timedOut) { $result = 'TIMEOUT' } elseif ($rc -eq 0) { $result = 'PASS' }
     $rows += [PSCustomObject]@{ Test = $t.Name; Result = $result; ExitCode = $rc; Seconds = [int]$sw.Elapsed.TotalSeconds }
 }
 
