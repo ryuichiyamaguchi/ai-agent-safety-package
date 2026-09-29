@@ -47,9 +47,9 @@ function Invoke-Guard([string]$ScriptPath, [string]$Json) {
     $proc.StandardInput.BaseStream.Flush()
     $proc.StandardInput.Close()
     $out = $proc.StandardOutput.ReadToEnd()
-    $null = $proc.StandardError.ReadToEnd()
+    $err = $proc.StandardError.ReadToEnd()
     $proc.WaitForExit(20000) | Out-Null
-    return [PSCustomObject]@{ Code = $proc.ExitCode; Stdout = $out }
+    return [PSCustomObject]@{ Code = $proc.ExitCode; Stdout = $out; Stderr = $err }
 }
 
 # Build real-looking secrets via concatenation so they are not literal in source.
@@ -64,7 +64,7 @@ try {
     # --- T1: generic assignment in AI output → ALLOW (regression for the over-block bug) ---
     $r = Invoke-Guard $guardPost ('{"hook_event_name":"Stop","content":"' + $genericVal.Replace('"','\"') + '"}')
     if ($r.Code -eq 0) { Ok "T1: generic api_key placeholder in output -> ALLOW (exit 0)" }
-    else { Ng "T1: generic placeholder still blocked (code=$($r.Code)) — over-block NOT fixed" }
+    else { Ng "T1: generic placeholder still blocked (code=$($r.Code)) — over-block NOT fixed / stderr=[$($r.Stderr)] stdout=[$($r.Stdout)]" }
     $snap = Join-Path $logDir "latest-answer.json"
     if ((Test-Path -LiteralPath $snap) -and ((Get-Content -LiteralPath $snap -Raw -Encoding UTF8) -match 'REDACTED:Generic sensitive assignment')) {
         Ok "T1b: allowed Stop output writes redacted latest-answer.json"

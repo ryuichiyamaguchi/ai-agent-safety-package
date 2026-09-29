@@ -48,6 +48,11 @@ function Get-CommandExplanation([string]$Full) {
     if ([string]::IsNullOrWhiteSpace($out)) {
         Write-Host ("  (explain-command の出力が空: exit=" + $proc.ExitCode + " stderr=" + $err + ")")
     }
+    if (-not $script:explainDiagShown) {
+        # 1 回目だけ、渡したバイト数と node の生の出力を出す（Windows PowerShell 5.1 での調査用）。
+        $script:explainDiagShown = $true
+        Write-Host ("  (diag: node=" + $node + " js=" + $js + " inputBytes=" + $bytes.Length + " exit=" + $proc.ExitCode + " stdout=" + $out.Trim() + " stderr=" + $err.Trim() + ")")
+    }
     $j = $out | ConvertFrom-Json
     return [PSCustomObject]@{ WhatDo = [string]$j.whatdo; Icon = [string]$j.icon; Danger = [string]$j.danger }
 }
