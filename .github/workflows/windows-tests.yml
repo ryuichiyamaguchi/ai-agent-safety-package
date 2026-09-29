@@ -6,10 +6,10 @@
 #
 # ジョブ:
 #   ps51             : scripts\windows\test の必須テスト（落ちたら赤）
-#   ps51-machine     : Windows 実機向けのテスト（auto-mode）。様子見のため赤にしない
-#   install-doctor   : 日本語名の作業フォルダへ導入 → 診断（出荷条件 C の足がかり）。様子見のため赤にしない
+#   ps51-machine     : Windows 実機向けのテスト（auto-mode）
+#   install-doctor   : 日本語名の作業フォルダへ導入 → 診断（出荷条件 C の足がかり）
 #
-# 様子見の 2 本は、初回の結果を見て通るようになったら continue-on-error を外す。
+# 3 本とも必須（v1.19.1 で様子見を外した。落ちたら赤になる）。
 #
 # 改行: Windows の git は既定で LF を CRLF に変換して取り出すため、導入時のハッシュ照合が
 # 配布 ZIP（git archive = コミットしたバイト列そのまま）と食い違う。checkout 前に変換を止める。
@@ -49,10 +49,9 @@ jobs:
           exit $LASTEXITCODE
 
   ps51-machine:
-    name: Windows machine tests (observing)
+    name: Windows machine tests
     runs-on: windows-latest
     timeout-minutes: 30
-    continue-on-error: true
     defaults:
       run:
         shell: powershell
@@ -69,10 +68,9 @@ jobs:
           exit $LASTEXITCODE
 
   install-doctor:
-    name: Install into a Japanese-named folder, then doctor (observing)
+    name: Install into a Japanese-named folder, then doctor
     runs-on: windows-latest
     timeout-minutes: 30
-    continue-on-error: true
     defaults:
       run:
         shell: powershell
