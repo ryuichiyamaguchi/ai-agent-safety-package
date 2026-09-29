@@ -421,7 +421,12 @@ function Set-AuditLogAcl([string]$Path) {
     #    （フックの読み込み経路に新しい依存を増やさないため、あえて各所で自己完結させてある）。
     # mac / Linux の PowerShell（3 エンジン照合テストなど）では ACL の概念が無い。
     # 呼ぶだけ無駄で、フックの stderr に毎回 warn を出すノイズにしかならないので抜ける。
-    if ($IsWindows -eq $false) { return }
+    # ⚠️ $IsWindows は PowerShell 6 以降の自動変数。Windows PowerShell 5.1 には無く、この lib は
+    #    StrictMode 2.0 なので、そのまま参照すると「未定義の変数」の例外になる。この関数は
+    #    その日最初の監査ログを作るときに呼ばれるため、5.1 では毎日最初のフックが 1 回
+    #    fail-closed していた（v1.17.2〜v1.19.0。GitHub Actions の Windows PowerShell 5.1 で判明）。
+    #    5.1 は Windows でしか動かないので、変数が無ければ Windows とみなす。
+    if ((Test-Path -LiteralPath 'variable:IsWindows') -and -not $IsWindows) { return }
     try {
         $sections = [System.Security.AccessControl.AccessControlSections]::Access
         $fi = New-Object System.IO.FileInfo $Path

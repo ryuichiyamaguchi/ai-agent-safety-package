@@ -57,6 +57,8 @@ function Get-CommandExplanation([string]$Full) {
     return [PSCustomObject]@{ WhatDo = [string]$j.whatdo; Icon = [string]$j.icon; Danger = [string]$j.danger }
 }
 
+$script:explainDiagShown = $false
+
 # calm = 安心文「しません」が WhatDo に含まれるか
 function Get-Calm([string]$cmd) {
     $e = Get-CommandExplanation $cmd
