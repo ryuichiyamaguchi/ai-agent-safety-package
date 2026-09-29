@@ -114,8 +114,10 @@ function doApply() {
     st.opencode.addedKeys = Object.keys(enforced);
   }
 
+  const outText = JSON.stringify(tgt, null, 2) + '\n';
+  st.opencode.writtenSha256 = state.sha256Text(outText);
   fs.mkdirSync(path.dirname(tgtPath), { recursive: true });
-  fs.writeFileSync(tgtPath, JSON.stringify(tgt, null, 2) + '\n', 'utf8');
+  fs.writeFileSync(tgtPath, outText, 'utf8');
   state.saveState(statePath, st);
   console.log('backup        : ' + (st.opencode.originalBackup || '(none — target did not exist)'));
   console.log('written       : ' + tgtPath);
@@ -134,23 +136,50 @@ function doUninstall() {
   }
   if (fs.existsSync(tgtPath)) state.backupFile(tgtPath, 'global-opencode-preundo');
 
-  if (entry.originalBackup && fs.existsSync(entry.originalBackup)) {
+  // 入れたあとに OpenCode や利用者が書き足していたら（モデル・プロバイダ・MCP など）、
+  // バックアップで丸ごと戻すとそれが消える。その場合は足したキーだけを入れる前の値へ戻す。
+  const modified = state.changedSinceApply(tgtPath, entry.writtenSha256);
+
+  if (!modified && entry.originalBackup && fs.existsSync(entry.originalBackup)) {
     fs.copyFileSync(entry.originalBackup, tgtPath);
     console.log('restored      : ' + tgtPath + ' ← ' + entry.originalBackup);
-  } else if (entry.targetExistedBefore === false) {
+  } else if (!modified && entry.targetExistedBefore === false) {
     if (fs.existsSync(tgtPath)) fs.unlinkSync(tgtPath);
     console.log('removed       : ' + tgtPath + ' (適用前は存在しなかったため削除)');
+  } else if (!fs.existsSync(tgtPath)) {
+    console.log('skipped       : ' + tgtPath + ' (ファイルが見つかりません)');
   } else {
-    // バックアップが失われた場合の外科的フォールバック: 足したキーだけ取り除く。
-    let tgt = {};
-    try { tgt = JSON.parse(fs.readFileSync(tgtPath, 'utf8')); } catch (_) { tgt = {}; }
-    if (tgt.permission && tgt.permission.bash && typeof tgt.permission.bash === 'object') {
-      for (const k of (entry.addedKeys || [])) delete tgt.permission.bash[k];
-      if (Object.keys(tgt.permission.bash).length === 0) delete tgt.permission.bash;
-      if (Object.keys(tgt.permission).length === 0) delete tgt.permission;
+    // 外科的に戻す: 足したキーを取り除き、入れる前にあった値はその値へ戻す。
+    const tgt = state.readJsonOrNull(tgtPath);
+    if (!state.isPlainObject(tgt)) {
+      console.log('WARN: ' + tgtPath + ' を JSON として読めないため、そのまま残しました（控え: ~/.ai-safety/backups/）');
+    } else {
+      const orig = entry.originalBackup ? state.readJsonOrNull(entry.originalBackup) : null;
+      const origBash = state.isPlainObject(orig) && state.isPlainObject(orig.permission) ? orig.permission.bash : undefined;
+      if (state.isPlainObject(tgt.permission) && state.isPlainObject(tgt.permission.bash)) {
+        const bash = tgt.permission.bash;
+        for (const k of (entry.addedKeys || [])) {
+          if (state.isPlainObject(origBash) && Object.prototype.hasOwnProperty.call(origBash, k)) bash[k] = origBash[k];
+          else delete bash[k];
+        }
+        // 入れる前が文字列の一括指定（'ask' 等）で、表に直した '*' だけが残ったなら元の形へ戻す。
+        if (typeof origBash === 'string' && Object.keys(bash).length === 1 && bash['*'] === origBash) {
+          tgt.permission.bash = origBash;
+        } else if (Object.keys(bash).length === 0) {
+          delete tgt.permission.bash;
+        }
+        if (Object.keys(tgt.permission).length === 0) delete tgt.permission;
+      }
+      if (entry.targetExistedBefore === false && Object.keys(tgt).length === 0) {
+        fs.unlinkSync(tgtPath);
+        console.log('removed       : ' + tgtPath + ' (足した分を除くと空になったため削除)');
+      } else {
+        fs.writeFileSync(tgtPath, JSON.stringify(tgt, null, 2) + '\n', 'utf8');
+        console.log(modified
+          ? 'kept changes  : ' + tgtPath + ' (入れたあとの変更は残し、このパッケージが足したキーだけ元に戻しました)'
+          : 'surgically reverted (backup missing): ' + tgtPath);
+      }
     }
-    fs.writeFileSync(tgtPath, JSON.stringify(tgt, null, 2) + '\n', 'utf8');
-    console.log('surgically reverted (backup missing): ' + tgtPath);
   }
 
   delete st.opencode;
