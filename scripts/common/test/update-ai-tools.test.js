@@ -36,12 +36,15 @@ const EXPECTED_BOTH = [
   '7_見守りモニターを起動',
   '8_使い方ガイドを開く',
   '9_困ったとき診断',
+  // v1.19.0: AI にファイルを壊されたときに、起動前の控えへ戻す（workspace-snapshot.js の wizard）。
+  '10_作業フォルダを元に戻す',
 ];
-// Windows 専用ボタン。12 は v1.17.2 新設のアクセス権修復口で、Windows の ACL 固有の
+// Windows 専用ボタン。13 は v1.17.2 新設のアクセス権修復口で、Windows の ACL 固有の
 // 事故（v1.17.1 までの install が `USERDOMAIN\USERNAME` という解決できない名前へ権限を
 // 与え、`/inheritance:r` と合わさって受講者本人まで締め出していた）からの回復に使う。
 // mac は chmod なので同型の事故が起きず、対になる .command は作らない。
-const EXPECTED_WIN_ONLY = ['10_PowerShellを開く', '11_作業フォルダを開く', '12_フォルダのアクセス権を直す'];
+// v1.19.0 で「10_作業フォルダを元に戻す」が入ったぶん 10〜12 → 11〜13 へ繰り下がった。
+const EXPECTED_WIN_ONLY = ['11_PowerShellを開く', '12_作業フォルダを開く', '13_フォルダのアクセス権を直す'];
 // サブフォルダ「キーと金庫」（キーの登録・削除と OS 金庫の自由枠）。
 const VAULT_DIR = 'キーと金庫';
 const EXPECTED_VAULT_BOTH = [
@@ -215,6 +218,10 @@ test('install は既知の旧名ボタンだけを掃除リストに持つ（両
     '（上級）15_長時間おまかせモードで起動.command',
     '（上級）16_金庫に秘密をしまう.command',
     '（上級）18_金庫の秘密を消す.command',
+    // v1.19.0 の繰り下げで旧名になった Windows 専用ボタン。
+    '10_PowerShellを開く.bat',
+    '11_作業フォルダを開く.bat',
+    '12_フォルダのアクセス権を直す.bat',
   ]) {
     assert.ok(sh.includes(legacy), `install.sh の掃除リストに無い: ${legacy}`);
     assert.ok(ps.includes(legacy.replace('.command', '.command')), `install.ps1 の掃除リストに無い: ${legacy}`);
@@ -222,6 +229,20 @@ test('install は既知の旧名ボタンだけを掃除リストに持つ（両
   // 現行の名前を誤って掃除対象にしていないこと。
   for (const current of ['4_AIを起動する', '2_AIツールをまとめて入れる', '9_困ったとき診断.command']) {
     assert.ok(!sh.match(new RegExp(`^${current}`, 'm')), `install.sh が現行ボタンを掃除しようとしている: ${current}`);
+  }
+  // 配布しているボタン全部について、両 OS の掃除リストに同じ名前が無いこと（v1.19.0 の繰り下げで
+  // 旧名といまの名前が重なった 11_PowerShellを開く / 12_作業フォルダを開く を外し忘れない）。
+  const shList = (sh.match(/legacy_start_names='([\s\S]*?)'/) || [])[1] || '';
+  const psList = (ps.match(/\$legacyStartNames = @\(([\s\S]*?)\n\s*\)/) || [])[1] || '';
+  assert.ok(shList.includes('0_Bouncer統合版を起動.command'), 'install.sh の掃除リストを取り出せない');
+  assert.ok(psList.includes('0_Bouncer統合版を起動.command'), 'install.ps1 の掃除リストを取り出せない');
+  const shNames = new Set(shList.split('\n').map((l) => l.trim()).filter(Boolean));
+  const psNames = new Set([...psList.matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+  const shipped = fs.readdirSync(startDir).filter((f) => /\.(command|bat)$/.test(f));
+  assert.ok(shipped.length >= 20, 'スタートのボタンを数えられない');
+  for (const name of shipped) {
+    assert.ok(!shNames.has(name), `install.sh が配布中のボタンを掃除対象にしている: ${name}`);
+    assert.ok(!psNames.has(name), `install.ps1 が配布中のボタンを掃除対象にしている: ${name}`);
   }
 });
 

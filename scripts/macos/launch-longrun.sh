@@ -117,6 +117,32 @@ has_wall() {
 
 wall_text() { if has_wall "$1"; then printf '壁あり'; else printf '壁なし'; fi; }
 
+# --- AI を起動する直前に、作業フォルダの控え（元に戻す用）を取る ------------------------
+# 目を離す前提のモードなので、AI が作業フォルダの中を壊したときに戻せることが特に大事。
+# 実体は hooks/common/workspace-snapshot.js（戻すときはスタートの「10_作業フォルダを元に戻す」）。
+# 控えは「おまけの安全網」で起動の条件ではないので、失敗しても警告 1 行で起動を続ける。
+# OpenCode は統合ランチャーへ渡すので、向こうで二重に取らないよう AI_SAFE_SNAPSHOT_ALREADY を付ける。
+# 控えを止めたいときは AI_SAFE_SNAPSHOT=off。
+snapshot_before_launch() {
+  _snap_reason="$1"
+  if [ "${AI_SAFE_SNAPSHOT:-on}" = "off" ]; then
+    return 0
+  fi
+  _snap_js="$AI_SAFE_ROOT/hooks/common/workspace-snapshot.js"
+  if [ ! -f "$_snap_js" ]; then
+    echo "※ 元に戻す用の控えを取る仕組みがまだ入っていないため、控えは取りませんでした。そのまま起動します。"
+    return 0
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    echo "※ node が見つからないため、元に戻す用の控えは取りませんでした。そのまま起動します。"
+    return 0
+  fi
+  # --launcher: 成功なら「控えを取りました（…）」、失敗でも「※ …そのまま起動します。」の 1 行を
+  # node が画面へ出し、終了コードは常に 0。起動をここで止めないため、結果は見ない。
+  node "$_snap_js" take --workspace "$workspace" --reason "$_snap_reason" --launcher || true
+  return 0
+}
+
 if [ -z "$engine" ]; then
   cat <<EOF
 
@@ -239,6 +265,9 @@ echo ""
 
 cd "$workspace"
 
+# ここが 4 エンジン共通の「AI を起動する直前」（同意を取ったあと・起動の前）。
+snapshot_before_launch "before-longrun-$engine"
+
 case "$engine" in
   codex)
     exec bash "$hooks/launch-codex-safe.sh" "$workspace" "$prompt" --longrun
@@ -249,7 +278,8 @@ case "$engine" in
   opencode)
     # OpenCode は統合ランチャー経由で起動する（見守りモニターと送信検査ゲートウェイが
     # そこで一緒に立ち上がるため。本体を直接叩くと画面に何も出ないまま AI が動く）。
-    exec bash "$hooks/launch-integrated.sh" "$workspace" opencode standard --longrun
+    # 控えはここで取り終えたので、統合ランチャー側では取らない（目印は向こうで消える）。
+    AI_SAFE_SNAPSHOT_ALREADY="$workspace" exec bash "$hooks/launch-integrated.sh" "$workspace" opencode standard --longrun
     ;;
 esac
 

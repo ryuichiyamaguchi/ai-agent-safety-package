@@ -120,7 +120,7 @@ rm -f "$win_installer_txt"
 #    v1.18.0: 個別のセーフ起動ボタンは「4_AIを起動する」（統合ランチャー）へ集約し、
 #    「（上級）」プレフィックスを全廃。キー・金庫系は「キーと金庫」へ移した。
 VAULT_DIR="$START_DIR/キーと金庫"
-for base in "1_安全パッケージを最新版にする" "2_AIツールをまとめて入れる" "3_じぶんに合うAIを選ぶ" "4_AIを起動する" "5_Codexデスクトップアプリを起動" "6_長時間おまかせモードで起動" "7_見守りモニターを起動" "8_使い方ガイドを開く" "9_困ったとき診断"; do
+for base in "1_安全パッケージを最新版にする" "2_AIツールをまとめて入れる" "3_じぶんに合うAIを選ぶ" "4_AIを起動する" "5_Codexデスクトップアプリを起動" "6_長時間おまかせモードで起動" "7_見守りモニターを起動" "8_使い方ガイドを開く" "9_困ったとき診断" "10_作業フォルダを元に戻す"; do
   [ -f "$START_DIR/$base.command" ] || { note "FAIL: $base.command がない"; fail=1; }
   [ -f "$START_DIR/$base.bat" ] || { note "FAIL: $base.bat がない"; fail=1; }
 done
@@ -128,15 +128,21 @@ for base in "1_DeepSeekキーを登録" "2_DeepSeekキーを削除" "3_AIコー�
   [ -f "$VAULT_DIR/$base.command" ] || { note "FAIL: キーと金庫/$base.command がない"; fail=1; }
   [ -f "$VAULT_DIR/$base.bat" ] || { note "FAIL: キーと金庫/$base.bat がない"; fail=1; }
 done
-# Windows だけの追加ボタン（.command は無い）。
-#   12 は v1.17.2 新設のアクセス権修復ボタン。Windows の ACL 固有の事故（install が
+# Windows だけの追加ボタン（.command は無い）。v1.19.0 で「10_作業フォルダを元に戻す」が入ったぶん
+# 10〜12 → 11〜13 へ繰り下がった。
+#   13 は v1.17.2 新設のアクセス権修復ボタン。Windows の ACL 固有の事故（install が
 #   USERDOMAIN\USERNAME という解決できない名前に権限を与え、本人まで締め出す）への
 #   回復口なので mac 版は無い。
-for base in "10_PowerShellを開く" "11_作業フォルダを開く" "12_フォルダのアクセス権を直す"; do
+for base in "11_PowerShellを開く" "12_作業フォルダを開く" "13_フォルダのアクセス権を直す"; do
   [ -f "$START_DIR/$base.bat" ] || { note "FAIL: $base.bat がない"; fail=1; }
 done
-grep -q 'repair-permissions.ps1' "$START_DIR/12_フォルダのアクセス権を直す.bat" || { note "FAIL: 12 のボタンが repair-permissions.ps1 を呼ばない"; fail=1; }
-grep -Fq '12_フォルダのアクセス権を直す' "$HTML" || { note "FAIL: スタート.html に 12_フォルダのアクセス権を直す の案内がない"; fail=1; }
+grep -q 'repair-permissions.ps1' "$START_DIR/13_フォルダのアクセス権を直す.bat" || { note "FAIL: 13 のボタンが repair-permissions.ps1 を呼ばない"; fail=1; }
+grep -Fq '13_フォルダのアクセス権を直す' "$HTML" || { note "FAIL: スタート.html に 13_フォルダのアクセス権を直す の案内がない"; fail=1; }
+# 10_作業フォルダを元に戻す: 控えの正本（workspace-snapshot.js の wizard）へ委譲すること。
+{ grep -q 'hooks/common/workspace-snapshot.js' "$START_DIR/10_作業フォルダを元に戻す.command" && grep -q '"$TARGET" wizard --workspace' "$START_DIR/10_作業フォルダを元に戻す.command"; } || { note "FAIL: 10 の .command が workspace-snapshot.js wizard を呼ばない"; fail=1; }
+{ LC_ALL=C grep -q 'hooks\\common\\workspace-snapshot.js' "$START_DIR/10_作業フォルダを元に戻す.bat" && LC_ALL=C grep -q '"%TARGET%" wizard --workspace' "$START_DIR/10_作業フォルダを元に戻す.bat"; } || { note "FAIL: 10 の .bat が workspace-snapshot.js wizard を呼ばない"; fail=1; }
+grep -Fq '10_作業フォルダを元に戻す' "$HTML" || { note "FAIL: スタート.html に 10_作業フォルダを元に戻す の案内がない"; fail=1; }
+[ -f "$ROOT/docs/14_作業フォルダを元に戻す.md" ] || { note "FAIL: docs/14_作業フォルダを元に戻す.md がない"; fail=1; }
 # 旧番号が残っていないこと（旧新併存で番号が重複すると受講者が迷う）。
 for old in "1_AIをまとめて起動" "2_セーフCodexを起動" "3_セーフClaudeを起動" \
            "4_セーフAntiGravityを起動" "5_セーフOpenCodeを起動" "9_AIツールを最新版に更新" \
@@ -152,7 +158,8 @@ for old in "1_AIをまとめて起動.command" "2_セーフCodexを起動.comman
            "11_野良d-claudeを退治.command" "12_PowerShellを開く.bat" "13_作業フォルダを開く.bat" \
            "14_フォルダのアクセス権を直す.bat" "（上級）2_DeepSeek-Claudeを起動.command" \
            "（上級）14_新しい作業フォルダを安全にする.command" "（上級）15_長時間おまかせモードで起動.command" \
-           "（上級）16_金庫に秘密をしまう.command" "（上級）17_金庫から秘密を取り出す.command" "（上級）18_金庫の秘密を消す.command"; do
+           "（上級）16_金庫に秘密をしまう.command" "（上級）17_金庫から秘密を取り出す.command" "（上級）18_金庫の秘密を消す.command" \
+           "10_PowerShellを開く.bat" "11_作業フォルダを開く.bat" "12_フォルダのアクセス権を直す.bat"; do
   grep -Fq "$old" "$ROOT/scripts/macos/install.sh" || { note "FAIL: install.sh の旧名掃除リストに $old がない"; fail=1; }
   grep -Fq "$old" "$ROOT/scripts/windows/install.ps1" || { note "FAIL: install.ps1 の旧名掃除リストに $old がない"; fail=1; }
 done

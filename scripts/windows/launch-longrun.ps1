@@ -82,6 +82,44 @@ function Invoke-Limited {
     return $out
 }
 
+# --- AI を起動する直前に、作業フォルダの控え（元に戻す用）を取る ---------------------------
+# 目を離す前提のモードなので、AI が作業フォルダの中を壊したときに戻せることが特に大事。
+# 実体は hooks\common\workspace-snapshot.js（戻すときはスタートの「10_作業フォルダを元に戻す」）。
+# 控えは「おまけの安全網」で起動の条件ではないので、失敗しても警告 1 行で起動を続ける。
+# 控えを止めたいときは $env:AI_SAFE_SNAPSHOT = 'off'。
+function Invoke-WorkspaceSnapshot {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+    if ($env:AI_SAFE_SNAPSHOT -eq 'off') { return }
+    try {
+        $snapJs = Join-Path $root 'hooks\common\workspace-snapshot.js'
+        if (-not (Test-Path -LiteralPath $snapJs -PathType Leaf)) {
+            Write-Host '※ 元に戻す用の控えを取る仕組みがまだ入っていないため、控えは取りませんでした。そのまま起動します。'
+            return
+        }
+        $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+        if (-not $nodeCmd) {
+            Write-Host '※ node が見つからないため、元に戻す用の控えは取りませんでした。そのまま起動します。'
+            return
+        }
+        # 出力は取り込まず、node に画面へ直接書かせる（node は WriteConsoleW で書くので、
+        # chcp 932 の画面のままでも日本語は化けない）。取り込むには [Console]::OutputEncoding を
+        # 切り替える必要があり、実コンソールへ出すスクリプトでそれをすると逆に化ける
+        # （windows-hook-encoding.test.js が見張っている）。
+        # --launcher: 成功なら「控えを取りました（…）」、失敗でも「※ …そのまま起動します。」の 1 行を
+        # node が出し、終了コードは常に 0。起動をここで止めないため、結果は見ない。
+        $prevEap = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $nodeCmd.Source $snapJs 'take' '--workspace' $Workspace '--reason' $Reason '--launcher'
+        } finally {
+            $ErrorActionPreference = $prevEap
+            $global:LASTEXITCODE = 0
+        }
+    } catch {
+        Write-Host ('※ 元に戻す用の控えを取れませんでした（' + $_.Exception.Message + '）。そのまま起動します。')
+    }
+}
+
 # 壁（OS のサンドボックス）が効くか。Windows で壁があるのは Codex だけ。
 function Test-Wall {
     param([string]$Name)
@@ -196,6 +234,9 @@ Write-Host ''
 
 Set-Location -LiteralPath $Workspace
 
+# ここが 4 エンジン共通の「AI を起動する直前」（同意を取ったあと・起動の前）。
+Invoke-WorkspaceSnapshot -Reason ('before-longrun-' + $Engine)
+
 $powerShell = Get-Command powershell.exe -ErrorAction SilentlyContinue
 if (-not $powerShell) { $powerShell = Get-Command pwsh -ErrorAction SilentlyContinue }
 if (-not $powerShell) { Write-Host 'PowerShell が見つかりません。'; exit 1 }
@@ -210,6 +251,8 @@ if ($Engine -eq 'agy') {
 }
 if ($Engine -eq 'opencode') {
     # OpenCode は統合ランチャー経由（見守りモニターと送信検査ゲートウェイが一緒に立つ）。
+    # 控えはここで取り終えたので、統合ランチャー側では取らない（目印は向こうで消える）。
+    $env:AI_SAFE_SNAPSHOT_ALREADY = $Workspace
     & (Join-Path $hooks 'launch-integrated.ps1') -Workspace $Workspace -Agent opencode -SafetyProfile standard -LongRun
     exit $LASTEXITCODE
 }
