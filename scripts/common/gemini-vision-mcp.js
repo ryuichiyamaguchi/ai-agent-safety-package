@@ -2,18 +2,21 @@
 // gemini-vision-mcp.js — 依存ゼロの最小 MCP サーバー（stdio）。
 //
 // 目的:
-//   d-claude（DeepSeek 駆動の Claude Code）に「目」を与える。DeepSeek は画像入力を
-//   受け付けない（Anthropic 互換で image コンテンツは黙殺される＝実測確認済み）ので、
-//   モデル本体は画像を見られない。そこで「画像を Gemini に見せて内容/文字をテキストで
-//   返す」ツール `describe_image` を 1 個公開し、DeepSeek がツール呼び出しで“見て”もらう。
-//   画像生成 MCP（pollinations / agy）の逆パターン（画像→テキスト）。
+//   d-claude / OpenCode に「画像を Gemini に見せて内容や文字をテキストで返す」ツール
+//   `describe_image` を 1 個公開する（画像生成 MCP の逆・画像→テキスト）。
+//   2026-10-02: d-claude の通常モデル deepseek-flash（V4.1 Flash）は画像を直接見られる
+//   （Anthropic 互換 API で image 対応・実測で「赤背景に 7」を正答）。送信検査 Gateway も
+//   deepseek-flash 宛ては画像を通すようにした。このツールは deepseek-v4-pro（画像を見られない・
+//   実測）に切り替えているときや、文字を正確に書き出してほしいときの補助になった。
 //
 // 設計方針:
 //   - 依存ゼロ（本パッケージの gemini-search-mcp と同じ純 Node・stdio JSON-RPC）。
 //   - キーは既存の安全パッケージ Gemini キーを使い回す（gemini-client.resolveApiKey）。
 //     受講者は新規アカウント不要（検索/コーチと同じキー・画像“入力”は無料枠で通る実測済み）。
-//   - モデルは gemini-2.5-flash 既定（無料キーで画像読取が返ることを実測）。429 時は
-//     gemini-3.1-flash-lite にフォールバック。AI_SAFE_VISION_MODEL で上書き可。
+//   - モデルは gemini-3.5-flash-lite 既定（2026-10-02 実測で最速 1.5 秒・誰のキーでも使える）。
+//     失敗したら AI_SAFE_VISION_FALLBACK（既定 gemini-3.1-flash-lite → gemini-2.5-flash-lite）を
+//     順に試す。次を試すのは上限切れ・未提供・権限・混雑（5xx）・通信エラー・時間切れのとき。
+//     AI_SAFE_VISION_MODEL で上書き可。
 //   - **サブプロセスを一切起動しない**（agy MCP の shell 注入事故を避け、Gemini API を
 //     https 直叩きのみ）。宛先は generativelanguage.googleapis.com 固定（任意 URL 不可）。
 //   - マジックバイトで PNG/JPEG/GIF/WebP/BMP を判定し、**プレーンな非画像ファイル（.env 等の
@@ -44,8 +47,9 @@ try {
 const SERVER_NAME = 'gemini-vision';
 const SERVER_VERSION = '1.0.0';
 const DEFAULT_PROTOCOL = '2025-06-18';
-const VISION_MODEL = process.env.AI_SAFE_VISION_MODEL || 'gemini-2.5-flash';
-const FALLBACK_MODEL = process.env.AI_SAFE_VISION_FALLBACK || 'gemini-3.1-flash-lite';
+const VISION_MODEL = process.env.AI_SAFE_VISION_MODEL || 'gemini-3.5-flash-lite';
+const FALLBACK_MODELS = String(process.env.AI_SAFE_VISION_FALLBACK || 'gemini-3.1-flash-lite,gemini-2.5-flash-lite')
+  .split(',').map((m) => m.trim()).filter(Boolean);
 const REQUEST_TIMEOUT_MS = Number(process.env.AI_SAFE_VISION_TIMEOUT || 30000);
 const MAX_IMAGE_BYTES = Number(process.env.AI_SAFE_VISION_MAX_BYTES || 20 * 1024 * 1024);
 const MAX_RESPONSE_BYTES = Number(process.env.AI_SAFE_VISION_MAX_RESPONSE || 2 * 1024 * 1024);
@@ -113,7 +117,7 @@ function readImage(imagePath) {
 function callGemini(model, question, mime, b64) {
   return new Promise((resolve) => {
     const key = resolveApiKey();
-    if (!key) return resolve({ ok: false, status: 0, message: 'Gemini API キーが未設定です（「キーと金庫/3_AIコーチのキーを登録」で登録してください）。' });
+    if (!key) return resolve({ ok: false, status: 0, noKey: true, message: 'Gemini API キーが未設定です（「キーと金庫/3_AIコーチのキーを登録」で登録してください）。' });
     const body = JSON.stringify({
       contents: [{ role: 'user', parts: [
         { text: String(question || DEFAULT_QUESTION).slice(0, MAX_QUESTION_CHARS) },
@@ -148,32 +152,40 @@ function callGemini(model, question, mime, b64) {
         resolve({ ok: true, status: res.statusCode, text });
       });
     });
-    req.on('error', (e) => resolve({ ok: false, status: 0, message: 'ネットワークエラー: ' + e.message }));
-    req.on('timeout', () => { req.destroy(); resolve({ ok: false, status: 0, message: 'Gemini 画像読取がタイムアウトしました。' }); });
+    req.on('error', (e) => resolve({ ok: false, status: 0, network: true, message: 'ネットワークエラー: ' + e.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, status: 0, network: true, message: 'Gemini 画像読取がタイムアウトしました。' }); });
     req.write(body);
     req.end();
   });
 }
 
-// 429/RESOURCE_EXHAUSTED と 404/NOT_FOUND（モデル未提供）は fallback モデルへ 1 回だけ切替。
-// gemini-client.runAI と同じ多段。既定モデルが引退したとき画像読取だけ沈黙するのを防ぐ。
+// 次のモデルを試す失敗: 上限切れ(429)・未提供(404)・権限(403。2.5 系の利用制限など)・
+// 混雑や障害(5xx / UNAVAILABLE)・通信エラー・時間切れ。キー未登録や画像の問題では試さない。
+// 2026-10-02 の教室で、混雑（UNAVAILABLE）とタイムアウトが数分続いて画像読取が失敗した（旧版は
+// 429/404 しか切り替えなかった）。
+const RETRY_GSTATUS = new Set(['RESOURCE_EXHAUSTED', 'NOT_FOUND', 'PERMISSION_DENIED', 'UNAVAILABLE', 'INTERNAL', 'DEADLINE_EXCEEDED']);
 function shouldFallback(r) {
-  return r && !r.ok && (
-    r.status === 429 || r.status === 404 ||
-    r.gstatus === 'RESOURCE_EXHAUSTED' || r.gstatus === 'NOT_FOUND'
-  );
+  if (!r || r.ok || r.noKey) return false;
+  return r.network === true || r.status === 429 || r.status === 404 || r.status === 403
+    || r.status >= 500 || RETRY_GSTATUS.has(r.gstatus);
 }
-async function describeImage(imagePath, question) {
+async function describeImage(imagePath, question, call = callGemini) {
   const img = readImage(imagePath);
   if (!img.ok) return { text: img.message, isError: true };
-  let r = await callGemini(VISION_MODEL, question, img.mime, img.b64);
-  if (shouldFallback(r) && FALLBACK_MODEL && FALLBACK_MODEL !== VISION_MODEL) {
-    r = await callGemini(FALLBACK_MODEL, question, img.mime, img.b64);
+  const chain = [VISION_MODEL, ...FALLBACK_MODELS.filter((m) => m !== VISION_MODEL)];
+  let r = null;
+  let rateLimited = false;
+  for (const m of chain) {
+    r = await call(m, question, img.mime, img.b64);
+    if (r.ok || !shouldFallback(r)) break;
+    if (r.status === 429 || r.gstatus === 'RESOURCE_EXHAUSTED') rateLimited = true;
   }
   if (!r.ok) {
     let msg = r.message || 'Gemini 画像読取に失敗しました。';
-    if (r.status === 429 || r.gstatus === 'RESOURCE_EXHAUSTED') {
+    if (shouldFallback(r) && rateLimited) {
       msg = 'Gemini 画像読取の無料クォータを超過しました（RESOURCE_EXHAUSTED）。しばらく時間をおいて再試行してください。';
+    } else if (shouldFallback(r)) {
+      msg += '（予備のモデルも含めて応答がありませんでした。Google 側の混雑の可能性があります。少し待って再試行してください）';
     }
     return { text: msg, isError: true };
   }
@@ -184,8 +196,10 @@ async function describeImage(imagePath, question) {
 const TOOL = {
   name: 'describe_image',
   description: '画像/スクリーンショットを Gemini に見せて、写っている内容や書かれている文字を'
-    + '日本語テキストで説明・読み取る。d-claude(DeepSeek)は画像を直接見られないので、'
-    + '画面のスクショ・図・エラー画面・写真などを「見て」欲しいときはこのツールを使う。'
+    + '日本語テキストで説明・読み取る。d-claude の通常モデル（deepseek-flash）は画像を Read で'
+    + '開けば直接見られるので、普段はこのツールは不要。deepseek-v4-pro に切り替えているとき'
+    + '（画像を見られない）や、長い文字・エラー文を正確に書き出してほしいときに使う。'
+    + '同じ画像を何度も細かく説明させないこと（1 枚につき 1 回で足りる）。'
     + '画像は Google(Gemini) に送信される。対応形式は PNG/JPEG/GIF/WebP/BMP。',
   inputSchema: {
     type: 'object',

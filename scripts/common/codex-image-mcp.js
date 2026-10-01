@@ -2,7 +2,8 @@
 // codex-image-mcp.js — 依存ゼロの最小 MCP サーバー（stdio）。
 //
 // 目的:
-//   OpenCode / d-claude に「GPT-Image-2 による高品質の画像生成」を与える。
+//   OpenCode / d-claude に「GPT Image（Codex 内蔵の画像生成）」を与える。ChatGPT の有料プランの人向け。
+//   無料の受講者は agy-image（Google アカウントで無料）が標準（2026-10 の授業方針）。
 //   同梱の agy-image（実体は Gemini 系 Nano Banana）より画質が良いという実測にもとづく追加で、
 //   agy-image を置き換えるものではない（用途で選べるように 3 本並べる）。
 //
@@ -37,13 +38,15 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const imageRefs = require('./image-refs.js');
 
 const SERVER_NAME = 'codex-image';
 const SERVER_VERSION = '1.0.0';
 const DEFAULT_PROTOCOL = '2025-06-18';
 const IS_WIN = process.platform === 'win32';
-// 1 枚あたり実測 50 秒前後（推論の設定次第でもっとかかる）。agy-image（180 秒）より長めに取る。
-const CODEX_TIMEOUT_MS = Number(process.env.AI_SAFE_CODEX_IMAGE_TIMEOUT || 240000);
+// 1 枚あたり実測 50 秒前後。参考画像 2 枚＋縦長の全体モックは 4 分 2 秒かかり、旧既定 240 秒では
+// d-claude 経由で 3 回続けて時間切れになった（2026-10-02）。10 分まで待つ。
+const CODEX_TIMEOUT_MS = Number(process.env.AI_SAFE_CODEX_IMAGE_TIMEOUT || 600000);
 const MAX_PROMPT_CHARS = 1500;
 
 // Codex が生成画像を置く場所。CODEX_HOME を尊重する（既定は ~/.codex）。
@@ -125,19 +128,24 @@ function winEscapeArgument(arg, doubleEscape) {
 //   --skip-git-repo-check    git 管理下でない作業フォルダでも動かす
 //   -s read-only             モデルが動かすシェルには一切書かせない（画像生成はホスト側の機能）
 //   -C <cwd>                 作業フォルダを固定する
-function codexArgs(prompt, cwd) {
-  return ['exec', '--enable', 'image_generation', '--skip-git-repo-check', '-s', 'read-only', '-C', cwd, prompt];
+//   -i <画像>                参考画像を添付する（image-refs.js で作業フォルダ内の画像だけに絞ったもの）
+//   --                       ここから先はプロンプト（-i の値と取り違えさせない）
+function codexArgs(prompt, cwd, refs = []) {
+  const args = ['exec', '--enable', 'image_generation', '--skip-git-repo-check', '-s', 'read-only', '-C', cwd];
+  for (const r of refs) args.push('-i', r);
+  args.push('--', prompt);
+  return args;
 }
 
 // codex exec を子プロセスで実行。返り値: { ok, code, stderr }
-function runCodex(prompt, cwd) {
+function runCodex(prompt, cwd, refs = []) {
   return new Promise((resolve) => {
     const bin = resolveCodexBin();
     // .cmd/.bat は CreateProcess で直接起動できず cmd.exe が要るが、shell:true は使わない（上記の
     // インジェクション対策）。エスケープ済みコマンド行を cmd.exe に渡し windowsVerbatimArguments で
     // 二重処理を防ぐ。exe/ネイティブ（mac 含む）は shell なしで直接起動（libuv が引数を安全に quoting）。
     const isBatch = IS_WIN && /\.(cmd|bat)$/i.test(bin);
-    const argv = codexArgs(prompt, cwd);
+    const argv = codexArgs(prompt, cwd, refs);
     let file, spawnArgs, spawnOpts;
     if (isBatch) {
       const line = [winEscapeCommand(bin)]
@@ -162,7 +170,7 @@ function runCodex(prompt, cwd) {
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
     const timer = setTimeout(() => {
       try { child.kill('SIGKILL'); } catch { /* */ }
-      finish({ ok: false, code: -2, stderr: 'codex がタイムアウトしました（' + Math.round(CODEX_TIMEOUT_MS / 1000) + '秒）。' });
+      finish({ ok: false, code: -2, timedOut: true, stderr: 'codex がタイムアウトしました（' + Math.round(CODEX_TIMEOUT_MS / 1000) + '秒）。' });
     }, CODEX_TIMEOUT_MS);
     if (child.stderr) child.stderr.on('data', (c) => { if (stderr.length < 8192) stderr += c.toString('utf8'); });
     child.on('error', (e) => { clearTimeout(timer); finish({ ok: false, code: -1, stderr: 'codex 実行エラー: ' + e.message }); });
@@ -182,30 +190,54 @@ function resolveDest(dir, name, ext) {
   return dest;
 }
 
+// 画像ができなかったときの案内。時間切れ・未ログイン・利用上限を取り違えない
+// （2026-10-02: 時間切れなのに「未ログインかも」と出て、ログイン済みの受講者を迷わせた）。
+function failureMessage(r) {
+  const detail = (r && r.stderr ? String(r.stderr).trim() : '');
+  if (r && r.timedOut) {
+    return 'codex の画像生成が ' + Math.round(CODEX_TIMEOUT_MS / 1000) + ' 秒以内に終わりませんでした（時間切れ）。'
+      + 'ログインの問題ではありません。参考画像が多い・縦長の大きな画像などは時間がかかります。'
+      + 'もう一度試すか、内容を簡単にしてください。';
+  }
+  if (/usage limit|rate limit|quota|exceeded|上限/i.test(detail)) {
+    return 'codex（ChatGPT）の利用上限に達しました。無料プランでは画像生成をほとんど使えません。'
+      + 'generate_image_agy（Google アカウントで無料）を使ってください。詳細: ' + detail.slice(0, 200);
+  }
+  if (/log ?in|not logged|unauthori[sz]ed|401|auth/i.test(detail)) {
+    return 'codex にログインしていないようです。一度 codex-safe を起動して ChatGPT でログインしてください。詳細: ' + detail.slice(0, 200);
+  }
+  let msg = 'codex が画像を生成しませんでした。';
+  if (detail) msg += ' 詳細: ' + detail.slice(0, 300);
+  msg += '（ChatGPT の有料プランでログインしているか確認してください。無料の場合は generate_image_agy を使ってください。）';
+  return msg;
+}
+
 // 生成 → 回収 → 保存。成功: { ok:true, filePath, bytes }  失敗: { ok:false, message }
 async function generate(args) {
   const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
   if (!prompt) return { ok: false, message: 'prompt が空です。作りたい画像の内容を指定してください。' };
 
+  const refs = imageRefs.checkReferenceImages(args.reference_images, process.cwd());
+  if (!refs.ok) return { ok: false, message: refs.message };
+
   // codex に「画像を 1 枚生成する」ことを明示。文字は指定どおり正確にと促す。
-  const codexPrompt = '次の内容の画像を1枚だけ生成してください（画像生成ツールを使い、指定された文字は正確に描く）。'
-    + '画像以外の作業はしないでください（ファイルの作成・編集・コマンド実行は不要です）。内容: '
-    + prompt.slice(0, MAX_PROMPT_CHARS);
+  let codexPrompt = '次の内容の画像を1枚だけ生成してください（画像生成ツールを使い、指定された文字は正確に描く）。'
+    + '画像以外の作業はしないでください（ファイルの作成・編集・コマンド実行は不要です）。';
+  if (refs.paths.length) {
+    codexPrompt += '添付した参考画像 ' + refs.paths.length + ' 枚（添付した順に 1 枚目・2 枚目…）をよく見て、'
+      + '内容・文言・雰囲気を指示に沿って反映してください。';
+  }
+  codexPrompt += '内容: ' + prompt.slice(0, MAX_PROMPT_CHARS);
 
   // 呼び出し前時刻（数秒のスキュー余裕を引く）。この時刻以降の新規画像を回収対象にする。
   const sinceMs = Date.now() - 3000;
-  const r = await runCodex(codexPrompt, process.cwd());
+  const r = await runCodex(codexPrompt, process.cwd(), refs.paths);
 
   // 実行が非 0 でも、画像が生成されていれば拾う（codex は補足メッセージを stderr に出すことがある）。
   const found = [];
   findImagesSince(generatedImagesDir(), sinceMs, found, 0);
   if (found.length === 0) {
-    let msg = 'codex が画像を生成しませんでした。';
-    if (!r.ok && r.stderr) {
-      msg += ' 詳細: ' + r.stderr.trim().slice(0, 300);
-    }
-    msg += '（codex に未ログインの可能性があります。一度 codex-safe を起動して ChatGPT でログインしてください。）';
-    return { ok: false, message: msg };
+    return { ok: false, message: failureMessage(r) };
   }
   // 最新（mtime 最大）を採用。
   found.sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -226,22 +258,22 @@ async function generate(args) {
 const TOOL = {
   name: 'generate_image_gpt',
   description:
-    '高品質の画像生成（GPT-Image-2 / Codex 経由）。同梱の画像生成 3 本のうち一番きれいに'
-    + '仕上がる。ポスター・告知物・図解・バナーなど仕上がりの質を優先したいときに使う。'
+    '画像生成（GPT Image / Codex 経由）。**ChatGPT の有料プランでログインしている人向け**。'
+    + '無料プランでは利用上限ですぐ失敗するので、ふだんは generate_image_agy（Google アカウントで無料）を使う。'
+    + '利用者が「GPT で」「Codex で」と指定したとき、または agy が使えないときに使う。'
+    + '参考画像は reference_images に作業フォルダ内のパスを渡せば、そのまま見て描く'
+    + '（今のサイトと参考サイトのスクショ 2 枚など。画像を言葉で説明し直さないこと）。'
     + '生成画像をワークスペースの generated-images/ に保存しパスを返す。'
-    + 'ChatGPT のサブスクリプションを使うので API キーは不要。1 枚 1 分前後かかる。'
-    + '速さ優先で文字の要らない画像なら generate_image（Pollinations）、'
-    + 'Google アカウントの無料枠で作るなら generate_image_agy を使う。'
-    + '【送信先の注意】プロンプトはそのまま OpenAI へ送られる（DeepSeek 向けの送信検査は通らない）。'
-    + '【重要・トークン節約】生成後に画像ファイルを Read ツールで開かないこと（base64 として'
-    + 'ローカルのコンテキストに載りトークンを大量消費する。d-claude では gateway が DeepSeek 送信前に'
-    + '画像を捨てるうえ DeepSeek は画像を見られないため、Read した分は完全な無駄になる）。'
-    + '内容を確認したいときは describe_image を使う。',
+    + '1 枚 1 分前後、参考画像つきの大きな画像は 4〜5 分かかることがある（最大 10 分待つ）。'
+    + '【送信先の注意】プロンプトと参考画像はそのまま OpenAI へ送られる（DeepSeek 向けの送信検査は通らない）。'
+    + '【トークン節約】仕上がりを確かめたいときは、生成後の画像を 1 回だけ Read で開けば'
+    + 'd-claude（deepseek-flash）が直接見られる。何度も開かないこと。',
   inputSchema: {
     type: 'object',
     properties: {
       prompt: { type: 'string', description: '作りたい画像の説明。画像内に入れたい文字（日本語可）も具体的に書く。' },
       filename: { type: 'string', description: '保存ファイル名（省略可。英数字。拡張子不要）。' },
+      reference_images: imageRefs.SCHEMA,
     },
     required: ['prompt'],
   },
@@ -285,7 +317,7 @@ async function handle(msg) {
       if (!r.ok) {
         return ok(id, { content: [{ type: 'text', text: r.message }], isError: true });
       }
-      const text = '画像を生成しました: ' + r.filePath + '（' + r.bytes + ' bytes, GPT-Image-2 / Codex）';
+      const text = '画像を生成しました: ' + r.filePath + '（' + r.bytes + ' bytes, GPT Image / Codex）';
       return ok(id, { content: [{ type: 'text', text }], isError: false });
     }
     default:
@@ -318,6 +350,7 @@ function main() {
 if (require.main === module) main();
 
 module.exports = {
+  failureMessage,
   generate, runCodex, resolveCodexBin, codexArgs, resolveDest,
   winEscapeCommand, winEscapeArgument, findImagesSince, safeName, handle, TOOL,
   generatedImagesDir, outputDir,

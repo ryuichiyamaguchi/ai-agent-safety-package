@@ -174,16 +174,18 @@ if ($env:DS_CLAUDE_MODE -eq '1') {
     # 無料で画像を作れるのは受講者環境では実質 Pollinations のみ（codex 無料枠=usage limit /
     # Gemini 無料 API=画像モデル limit:0）。API キー不要・無登録。無効化は $env:AI_SAFE_DCLAUDE_IMAGE='0'。
     # 検索 MCP と画像 MCP を 1 つの --mcp-config JSON に束ねて渡す（有効なものだけ載せる）。
-    # 画像は 2 系統: generate_image=Pollinations（無認証・文字なし向け・速い）/
-    # generate_image_agy=agy（Google アカウント無料・日本語文字入り/高品質・1枚20秒前後）。
+    # 画像生成は 3 系統（2026-10 の授業方針: agy が標準）:
+    #   generate_image_agy=agy（標準。Google アカウント無料・日本語文字入り・参考画像を渡せる・最大 10 分待つ）/
+    #   generate_image=Pollinations（無認証・文字なし向け・速い）/ generate_image_gpt=下記（ChatGPT 有料プラン向け）。
     # 切替: $env:AI_SAFE_DCLAUDE_IMAGE='0' / $env:AI_SAFE_DCLAUDE_AGY_IMAGE='0'。
     $searchMcp = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\gemini-search-mcp.js"))
     $imageMcp  = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\pollinations-image-mcp.js"))
     $agyMcp    = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\agy-image-mcp.js"))
-    # generate_image_gpt=GPT-Image-2 (Codex 経由・API キー不要・3 本で一番きれい・1 枚 1 分前後)。
-    # 切替: $env:AI_SAFE_DCLAUDE_CODEX_IMAGE=0。プロンプトはそのまま OpenAI へ送られる (Gateway は通らない)。
+    # generate_image_gpt=GPT Image (Codex 経由・ChatGPT 有料プラン向け・参考画像を渡せる・最大 10 分待つ)。
+    # 切替: $env:AI_SAFE_DCLAUDE_CODEX_IMAGE=0。プロンプトと参考画像はそのまま OpenAI へ送られる (Gateway は通らない)。
     $codexImgMcp = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\codex-image-mcp.js"))
-    # vision MCP=画像→テキスト（DeepSeek は画像を見られないので Gemini に見せて文字/説明を得る）。
+    # vision MCP=画像→テキスト。2026-10 からは通常モデルの deepseek-flash が画像を直接見られる（Gateway も通す）ので、
+    # deepseek-v4-pro（画像を見られない）に切り替えたときや、文字を正確に書き出したいときの補助。
     # 検索と同じ無料 Gemini キーを使う。無効化は $env:AI_SAFE_DCLAUDE_VISION='0'。
     # Playwright MCP=ブラウザ自動操作・UIテスト・スクレイピング。無効化は $env:AI_SAFE_DCLAUDE_PLAYWRIGHT='0'。
     $visionMcp     = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\common\gemini-vision-mcp.js"))

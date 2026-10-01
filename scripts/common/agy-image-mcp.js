@@ -2,7 +2,8 @@
 // agy-image-mcp.js — 依存ゼロの最小 MCP サーバー（stdio）。
 //
 // 目的:
-//   d-claude（DeepSeek 駆動の Claude Code）に「日本語文字入り・高品質の画像生成」を与える。
+//   d-claude（DeepSeek 駆動の Claude Code）/ OpenCode に「日本語文字入り・高品質の画像生成」を与える。
+//   2026-10 の授業方針: 画像生成の標準はこれ（無料）。GPT Image（codex-image）は ChatGPT 有料プランの人だけ。
 //   Pollinations（sana）は文字なし画像は得意だが日本語文字が崩れる。agy（Antigravity CLI）は
 //   受講者自身の Google アカウント OAuth で無料の画像生成（Gemini 系 Nano Banana）が使え、
 //   「新発売」等の日本語文字を正しく描ける（実測で確認）。生の Gemini API キーは画像 limit:0
@@ -10,9 +11,16 @@
 //
 // 仕組み:
 //   agy にはヘッドレスの単発実行モード `agy -p "<prompt>"` がある。これを子プロセスで実行すると
-//   agy が画像を ~/.gemini/antigravity-cli/brain/<conv>/ に保存する。呼び出し前の時刻を記録して
-//   おき、実行後にその時刻より新しい画像を brain から拾ってワークスペースへ回収する（mac の
-//   zshrc ラッパーがやっている回収を MCP 内で行う）。tmux も常駐 TUI も不要。
+//   agy が画像を ~/.gemini/antigravity-cli/brain/<会話ID>/ に保存する。`--output-format json` で
+//   会話ID（conversation_id）を受け取り、その会話のフォルダの画像だけを回収する（2026-10:
+//   同じ PC で別の agy が同時に作った画像を拾ってしまう事故を実際に確認したため）。会話ID が
+//   取れない古い agy では、従来どおり「呼び出し以降で一番新しい画像」を拾う。
+//
+// 参考画像（2026-10）:
+//   reference_images に作業フォルダ内の画像パスを渡すと、プロンプトに「まずこの画像を見て」と
+//   パスを添える。agy は作業フォルダのファイルを自分で読める（--dangerously-skip-permissions
+//   なしで読めることを実測）。パスは image-refs.js で作業フォルダ内の画像だけに絞る。
+//   参考画像 2 枚の縦長モックは約 190 秒かかった（旧既定 180 秒では時間切れ）。10 分まで待つ。
 //
 // 設計方針:
 //   - 依存ゼロ（純 Node）。API キー不要（agy は Google アカウントでログイン済み前提）。
@@ -28,12 +36,13 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const imageRefs = require('./image-refs.js');
 
 const SERVER_NAME = 'agy-image';
 const SERVER_VERSION = '1.0.0';
 const DEFAULT_PROTOCOL = '2025-06-18';
 const IS_WIN = process.platform === 'win32';
-const AGY_TIMEOUT_MS = Number(process.env.AI_SAFE_AGY_TIMEOUT || 180000);
+const AGY_TIMEOUT_MS = Number(process.env.AI_SAFE_AGY_TIMEOUT || 600000);
 const MAX_PROMPT_CHARS = 1500;
 
 function brainDir() {
@@ -105,6 +114,25 @@ function winEscapeArgument(arg, doubleEscape) {
   return arg;
 }
 
+// agy に渡す引数。--output-format json で会話ID を受け取る（画像の回収先を絞るため）。
+function agyArgs(agyPrompt) {
+  return ['-p', agyPrompt, '--output-format', 'json'];
+}
+
+// agy の JSON 出力から会話ID を取り出す（取れなければ ''）。英数とハイフンだけを通す。
+function conversationId(stdout) {
+  const text = String(stdout || '');
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  for (const l of [text, ...lines.reverse()]) {
+    try {
+      const j = JSON.parse(l);
+      const id = j && (j.conversation_id || j.conversationId);
+      if (typeof id === 'string' && /^[A-Za-z0-9-]{8,80}$/.test(id)) return id;
+    } catch { /* 次へ */ }
+  }
+  return '';
+}
+
 // agy -p を子プロセスで実行。プロンプトは引数で渡す（stdin 非対応を実測済み）。
 // 返り値: { ok, code, stderr }
 function runAgy(agyPrompt) {
@@ -116,14 +144,14 @@ function runAgy(agyPrompt) {
     const isBatch = IS_WIN && /\.(cmd|bat)$/i.test(bin);
     let file, spawnArgs, spawnOpts;
     if (isBatch) {
-      const line = [winEscapeCommand(bin), winEscapeArgument('-p', true), winEscapeArgument(agyPrompt, true)].join(' ');
+      const line = [winEscapeCommand(bin)].concat(agyArgs(agyPrompt).map((a) => winEscapeArgument(a, true))).join(' ');
       file = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
       spawnArgs = ['/d', '/s', '/c', '"' + line + '"'];
-      spawnOpts = { shell: false, windowsVerbatimArguments: true, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] };
+      spawnOpts = { shell: false, windowsVerbatimArguments: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] };
     } else {
       file = bin;
-      spawnArgs = ['-p', agyPrompt];
-      spawnOpts = { shell: false, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] };
+      spawnArgs = agyArgs(agyPrompt);
+      spawnOpts = { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] };
     }
     let child;
     try {
@@ -132,16 +160,35 @@ function runAgy(agyPrompt) {
       return resolve({ ok: false, code: -1, stderr: 'agy を起動できませんでした: ' + e.message });
     }
     let stderr = '';
+    let stdout = '';
     let done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
     const timer = setTimeout(() => {
       try { child.kill('SIGKILL'); } catch { /* */ }
-      finish({ ok: false, code: -2, stderr: 'agy がタイムアウトしました（' + Math.round(AGY_TIMEOUT_MS / 1000) + '秒）。' });
+      finish({ ok: false, code: -2, timedOut: true, stdout, stderr: 'agy がタイムアウトしました（' + Math.round(AGY_TIMEOUT_MS / 1000) + '秒）。' });
     }, AGY_TIMEOUT_MS);
     if (child.stderr) child.stderr.on('data', (c) => { if (stderr.length < 8192) stderr += c.toString('utf8'); });
-    child.on('error', (e) => { clearTimeout(timer); finish({ ok: false, code: -1, stderr: 'agy 実行エラー: ' + e.message }); });
-    child.on('close', (code) => { clearTimeout(timer); finish({ ok: code === 0, code, stderr }); });
+    if (child.stdout) child.stdout.on('data', (c) => { if (stdout.length < 65536) stdout += c.toString('utf8'); });
+    child.on('error', (e) => { clearTimeout(timer); finish({ ok: false, code: -1, stdout, stderr: 'agy 実行エラー: ' + e.message }); });
+    child.on('close', (code) => { clearTimeout(timer); finish({ ok: code === 0, code, stdout, stderr }); });
   });
+}
+
+// 画像ができなかったときの案内。時間切れと未ログインを取り違えない。
+function failureMessage(r) {
+  const detail = (r && r.stderr ? String(r.stderr).trim() : '');
+  if (r && r.timedOut) {
+    return 'agy の画像生成が ' + Math.round(AGY_TIMEOUT_MS / 1000) + ' 秒以内に終わりませんでした（時間切れ）。'
+      + 'ログインの問題ではありません。参考画像が多い・縦長の大きな画像などは時間がかかります。'
+      + 'もう一度試すか、内容を簡単にしてください。';
+  }
+  if (/quota|rate limit|exceeded|exhausted|上限/i.test(detail)) {
+    return 'agy（Google）の画像生成の無料枠に達しました。しばらく時間をおいてから試してください。詳細: ' + detail.slice(0, 200);
+  }
+  let msg = 'agy が画像を生成しませんでした。';
+  if (detail) msg += ' 詳細: ' + detail.slice(0, 300);
+  msg += '（agy に未ログインの可能性があります。一度 agy-safe を起動してログインしてください。）';
+  return msg;
 }
 
 // 生成 → 回収 → 保存。成功: { ok:true, filePath, bytes }  失敗: { ok:false, message }
@@ -149,24 +196,32 @@ async function generate(args) {
   const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
   if (!prompt) return { ok: false, message: 'prompt が空です。作りたい画像の内容を指定してください。' };
 
-  // agy に「画像を 1 枚生成する」ことを明示。文字は指定どおり正確にと促す。
-  const agyPrompt = '次の内容の画像を1枚だけ生成してください（画像生成ツールを使い、指定された文字は正確に描く）。'
-    + '画像以外の作業はしないでください。内容: ' + prompt.slice(0, MAX_PROMPT_CHARS);
+  const refs = imageRefs.checkReferenceImages(args.reference_images, process.cwd());
+  if (!refs.ok) return { ok: false, message: refs.message };
 
-  // 呼び出し前時刻（数秒のスキュー余裕を引く）。この時刻以降の新規画像を回収対象にする。
+  // agy に「画像を 1 枚生成する」ことを明示。文字は指定どおり正確にと促す。
+  let agyPrompt = '次の内容の画像を1枚だけ生成してください（画像生成ツールを使い、指定された文字は正確に描く）。'
+    + '画像以外の作業はしないでください。';
+  if (refs.paths.length) {
+    agyPrompt += 'まず次の参考画像ファイルをよく見て、内容・文言・雰囲気を指示に沿って反映してください: '
+      + refs.paths.map((p, i) => (i + 1) + '枚目=' + p).join(' / ') + '。';
+  }
+  agyPrompt += '内容: ' + prompt.slice(0, MAX_PROMPT_CHARS);
+
+  // 呼び出し前時刻（数秒のスキュー余裕を引く）。会話ID が取れないときはこの時刻以降の新規画像を拾う。
   const sinceMs = Date.now() - 3000;
   const r = await runAgy(agyPrompt);
 
   // 実行が非 0 でも、画像が生成されていれば拾う（agy は補足メッセージを stderr に出すことがある）。
   const found = [];
-  findImagesSince(brainDir(), sinceMs, found, 0);
+  const conv = conversationId(r.stdout);
+  if (conv) {
+    findImagesSince(path.join(brainDir(), conv), sinceMs, found, 0);
+  } else {
+    findImagesSince(brainDir(), sinceMs, found, 0);
+  }
   if (found.length === 0) {
-    let msg = 'agy が画像を生成しませんでした。';
-    if (!r.ok && r.stderr) {
-      msg += ' 詳細: ' + r.stderr.trim().slice(0, 300);
-    }
-    msg += '（agy に未ログインの可能性があります。一度 agy-safe を起動してログインしてください。）';
-    return { ok: false, message: msg };
+    return { ok: false, message: failureMessage(r) };
   }
   // 最新（mtime 最大）を採用。
   found.sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -186,20 +241,22 @@ async function generate(args) {
 const TOOL = {
   name: 'generate_image_agy',
   description:
-    '日本語などの文字入り・高品質の画像生成（agy / Gemini 画像）。ポスター・告知物・図解・'
-    + 'バナーなど「画像内に文字を正しく入れたい」ときや高品質が必要なときに使う。生成画像を'
-    + 'ワークスペースの generated-images/ に保存しパスを返す。受講者自身の Google アカウントで'
-    + '無料。1 枚 20 秒前後かかる。文字が不要な背景・写真・イラストを速く作るだけなら '
-    + 'generate_image（Pollinations）の方が速い。'
-    + '【重要・トークン節約】生成後に画像ファイルを Read ツールで開かないこと（base64 として'
-    + 'ローカルのコンテキストに載りトークンを大量消費する。d-claude では gateway が DeepSeek 送信前に'
-    + '画像を捨てるうえ DeepSeek は画像を見られないため、Read した分は完全な無駄になる）。'
-    + '内容を確認したいときは describe_image を使う。',
+    '画像生成の標準（agy / Google の Gemini 画像）。受講者自身の Google アカウントで無料。'
+    + 'ふつうの画像生成はまずこれを使う。日本語の文字入り・ポスター・告知物・図解・バナー・サイトのモックに強い。'
+    + '参考画像は reference_images に作業フォルダ内のパスを渡せば、そのまま見て描く'
+    + '（今のサイトと参考サイトのスクショ 2 枚など。画像を言葉で説明し直さないこと）。'
+    + '生成画像をワークスペースの generated-images/ に保存しパスを返す。'
+    + '1 枚 20 秒〜1 分、参考画像つきの大きな画像は 3〜4 分かかることがある（最大 10 分待つ）。'
+    + '文字が不要な画像を速く作るだけなら generate_image（Pollinations）。'
+    + 'ChatGPT の有料プランの人が GPT で作りたいときだけ generate_image_gpt。'
+    + '【トークン節約】仕上がりを確かめたいときは、生成後の画像を 1 回だけ Read で開けば'
+    + 'd-claude（deepseek-flash）が直接見られる。何度も開かないこと。',
   inputSchema: {
     type: 'object',
     properties: {
       prompt: { type: 'string', description: '作りたい画像の説明。画像内に入れたい文字（日本語可）も具体的に書く。' },
       filename: { type: 'string', description: '保存ファイル名（省略可。英数字。拡張子不要）。' },
+      reference_images: imageRefs.SCHEMA,
     },
     required: ['prompt'],
   },
@@ -275,4 +332,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { generate, runAgy, resolveAgyBin, winEscapeCommand, winEscapeArgument, findImagesSince, safeName, handle, TOOL };
+module.exports = { generate, runAgy, agyArgs, conversationId, failureMessage, resolveAgyBin, winEscapeCommand, winEscapeArgument, findImagesSince, safeName, handle, TOOL };

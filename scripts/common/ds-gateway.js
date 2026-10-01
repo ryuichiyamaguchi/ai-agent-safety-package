@@ -497,6 +497,28 @@ const VISION_MIME_EXT = {
   'image/webp': '.webp',
 };
 
+// 画像をそのまま上流へ通してよいモデルか（2026-10-02）。
+// DeepSeek の Anthropic 互換 API は image（base64: jpeg/png/gif/webp）に対応し、deepseek-flash
+// （V4.1 Flash）は実測で画像を正しく読んだ（赤背景の「7」を正答）。deepseek-v4-pro は同じ画像に
+// 「見えない」と答えたので通さない（従来どおりパス付きの案内に差し替えて describe_image へ回す）。
+// AI_SAFE_DS_PASS_IMAGES=0 で全モデル従来どおり（画像を送らない）に戻せる。
+// 先頭のバイトが本当に画像か（PNG / JPEG / GIF / WebP）。gateway の依存を増やさないため
+// image-refs.js の同名関数と同じ判定をここに持つ（gateway は必要最小のファイルだけで動く）。
+function looksLikeImage(buf) {
+  if (!buf || buf.length < 12) return false;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true;
+  if (buf.slice(0, 4).toString('ascii') === 'GIF8') return true;
+  if (buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP') return true;
+  return false;
+}
+const IMAGE_PASS_MAX_BYTES = 5 * 1024 * 1024; // Anthropic 互換 API の 1 枚あたり上限に合わせる
+function visionCapableModel(model) {
+  if (process.env.AI_SAFE_DS_PASS_IMAGES === '0') return false;
+  const m = String(model || '').trim().toLowerCase();
+  return /^deepseek-(v4(\.1)?-)?flash($|-)/.test(m);
+}
+
 function visionCacheDir() {
   const d = process.env.AI_SAFE_VISION_CACHE_DIR;
   if (d && String(d).trim()) return String(d).trim();
@@ -551,13 +573,35 @@ function maskValue(v, counts, ctx) {
     return v.map((item) => maskValue(item, counts, ctx));
   }
   if (v && typeof v === 'object') {
-    // D (2026-07): d-claude 経路では DeepSeek は画像を見られない（実測=黙殺）のに、base64 画像を
+    // D (2026-07): 当時の d-claude 経路では DeepSeek は画像を見られなかった（実測=黙殺）のに、base64 画像を
     // そのまま送ると毎ターン全履歴分の巨大トークンを浪費する。ds-gateway は DeepSeek 専用経路
     // （upstream=api.deepseek.com）なので、素の Anthropic 直叩き（claude-safe）には影響しない。
     // 画像 content block を短いテキストプレースホルダに差し替える（Anthropic 互換の text block を
     // 維持＝構造は壊さない）。tool_result.content[] 内の画像も deep-walk 中にここで捕捉される。
     // ※ document(PDF) は対象外（下の base64 保全ロジックへ流す）。data の中身は一切載せない。
     if (v.type === 'image' && v.source && typeof v.source === 'object' && v.source.type === 'base64') {
+      // 画像を読めるモデル宛てで、本物の画像で大きすぎないものだけはそのまま通す。
+      // 判定: MIME が既知の画像と完全一致・base64 の文字だけ・デコードした先頭が本当に画像
+      // （PNG/JPEG/GIF/WebP のマジックバイト）・5MB 以下。短い秘密を「画像」と偽って送らせる手口は、
+      // デコードしても画像の先頭にならないのでここで弾ける。1 つでも外れたら下の差し替え（送らない）。
+      if (ctx.passImages) {
+        const mt = typeof v.source.media_type === 'string' ? String(v.source.media_type).split(';')[0].trim() : '';
+        const data = typeof v.source.data === 'string' ? v.source.data : '';
+        const strictB64 = /^[A-Za-z0-9+/\s]+=*$/.test(data);
+        const bytes = Math.floor(data.replace(/\s/g, '').length * 3 / 4);
+        let realImage = false;
+        if (strictB64) {
+          try { realImage = looksLikeImage(Buffer.from(data.replace(/\s/g, '').slice(0, 64), 'base64')); } catch { realImage = false; }
+        }
+        if (VISION_MIME_EXT[mt] && strictB64 && realImage && bytes <= IMAGE_PASS_MAX_BYTES) {
+          counts.images_passed = (counts.images_passed || 0) + 1;
+          const out = { type: 'image', source: { type: 'base64', media_type: mt, data } };
+          if (v.cache_control && typeof v.cache_control === 'object' && v.cache_control.type === 'ephemeral') {
+            out.cache_control = { type: 'ephemeral' };
+          }
+          return out;
+        }
+      }
       // media_type は placeholder に生 echo しない（RED-1 修正）。MIME 形状 regex は
       // "sk-ant-…/png" のようなハイフン込み 40 字以下の秘密を誤って通す（=マスク迂回の回帰）ため、
       // 既知の安全な画像 MIME ホワイトリスト(BINARY_MIME)との完全一致のみ echo し、集合外は「不明」。
@@ -575,7 +619,8 @@ function maskValue(v, counts, ctx) {
           try { saved = materializeVisionImage(mime, v.source.data); } catch { saved = null; }
         }
       }
-      let text = '[画像データは送信していません: ' + mime + ' 約' + approxBytes + 'bytes。DeepSeek は画像を見られません。';
+      let text = '[画像データは送信していません: ' + mime + ' 約' + approxBytes + 'bytes。'
+        + (ctx.passImages ? '形式または大きさ（5MB まで）の条件を満たさないため送っていません。' : 'いまのモデルは画像を見られません。');
       if (saved) {
         text += '内容確認は describe_image ツールに image_path として次のパスを渡してください: ' + saved + ']';
       } else {
@@ -741,6 +786,7 @@ async function handleProxy(req, res, upstreamUrl, session) {
       res.end('{"error":"ds-gateway: unparseable JSON; not forwarded (fail-closed)"}');
       return;
     }
+    ctx.passImages = visionCapableModel(parsed && parsed.model);
     const { json, counts: bodyCounts } = maskRequestBody(parsed, ctx);
     addCounts(counts, bodyCounts);
     requestMeta = requestMetaFromJson(json, req);
@@ -1011,7 +1057,7 @@ function forward(req, res, upstreamUrl, body, session, allocated, outUrl, reques
 
 module.exports = {
   createGateway, DEFAULT_PORT, DEFAULT_UPSTREAM, DEFAULT_AUTH_FILE,
-  materializeVisionImage, visionCacheDir,
+  materializeVisionImage, visionCacheDir, visionCapableModel,
 };
 
 if (require.main === module) {

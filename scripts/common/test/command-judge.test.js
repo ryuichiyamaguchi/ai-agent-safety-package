@@ -3,7 +3,7 @@
 // 実行: node scripts/common/test/command-judge.test.js （node:test が PASS/FAIL 集計し失敗時 exit≠0）
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { decide, parseVerdict, deterministicSafe, deterministicAsk, JUDGE_MODEL } = require('../command-judge.js');
+const { decide, parseVerdict, deterministicSafe, deterministicAsk, judgeOnce, JUDGE_MODEL } = require('../command-judge.js');
 
 // 与えた JSON 文字列を順番に返す mock runAI を作る（1 者判定なので通常 1 回だけ呼ばれる）。
 function mockRunAI(...responses) {
@@ -213,10 +213,17 @@ test('decide: JUDGE_MODEL と timeoutMs が runAI に渡る', async () => {
   assert.strictEqual(seen[0].timeoutMs, 9000);
 });
 
-test('JUDGE_MODEL は既定で 2026-09 実測で最速だった gemini-3.6-flash', () => {
-  // 旧既定 gemini-3.5-flash は 1 判定 28.6 秒かかり、制限 12 秒を必ず超えて
-  // 全件が人間確認に落ちていた。速いモデルを既定に固定しておく回帰ガード。
+test('JUDGE_MODEL は既定で gemini-3.5-flash-lite（2026-10 実測で速く、誰のキーでも使える）', () => {
+  // 旧既定 gemini-3.5-flash は 1 判定 28.6 秒かかり、制限 12 秒を必ず超えて全件が人間確認に落ちた。
+  // 2026-10-02: gemini-3.6-flash は 1 日の無料枠が小さく昼過ぎに 429。3.5-flash-lite は 10 判定 10.5 秒。
   if (!process.env.AI_SAFE_JUDGE_MODEL) {
-    assert.strictEqual(JUDGE_MODEL, 'gemini-3.6-flash');
+    assert.strictEqual(JUDGE_MODEL, 'gemini-3.5-flash-lite');
   }
+});
+
+test('判定は時間切れのとき予備モデルを試さない（制限時間内に ask へ倒す）', async () => {
+  const seen = [];
+  const runAIFn = async (prompt, opts) => { seen.push(opts); return { ok: true, text: '{"verdict":"approve","reason":"x"}' }; };
+  await judgeOnce(runAIFn, 'p', 5000, JUDGE_MODEL);
+  assert.strictEqual(seen[0].fallbackOnTimeout, false);
 });

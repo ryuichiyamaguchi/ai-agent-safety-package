@@ -39,12 +39,14 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.AI_SAFE_ASSIST_TIMEOUT) > 0
 const MAX_COMMAND_CHARS = 2000;
 const MAX_CWD_CHARS = 400;
 
-// 判定モデル。2026-09-18 実測（同一プロンプト・同一コマンドで比較）:
-//   gemini-3.6-flash 4.1/4.3s ・ gemini-3.8-flash 7.7/8.2s ・ gemini-3.5-flash-lite 9.6/12.7s
-//   gemini-3.7-flash 13.0/14.6s ・ gemini-3.5-flash（旧検証役の既定）28.6s
-// 既定は最速かつ安定していた gemini-3.6-flash。制限 12 秒に対して約 3 倍の余裕がある。
-// 429（無料枠上限）/404（モデル未提供）のときの再試行は gemini-client.runAI が担う。
-const JUDGE_MODEL = process.env.AI_SAFE_JUDGE_MODEL || 'gemini-3.6-flash';
+// 判定モデル。
+//   2026-09-18 実測: gemini-3.6-flash 4.1/4.3s ・ gemini-3.8-flash 7.7/8.2s ・ gemini-3.5-flash-lite 9.6/12.7s
+//   2026-10-02 実測（無料キー）: gemini-3.5-flash-lite 10 判定で計 10.5 秒（9/10 正解・危険な持ち出し等は
+//   すべて ask）／ gemini-3.6-flash は 1 日の無料枠が小さく昼過ぎには 429 ／ 3.7・3.8-flash は 503（混雑）。
+// 既定は gemini-3.5-flash-lite（Google も新規に推奨・誰のキーでも使える）。
+// 上限切れ・混雑・未提供などすぐ返る失敗のときは gemini-client.runAI が予備モデルを順に試す。
+// 時間切れのときは予備を試さず ask に倒す（判定には制限時間があり、待たせ続けないため）。
+const JUDGE_MODEL = process.env.AI_SAFE_JUDGE_MODEL || 'gemini-3.5-flash-lite';
 
 function clip(s, n) { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n) + '…' : s; }
 
@@ -159,7 +161,7 @@ function parseVerdict(text) {
 async function judgeOnce(runAIFn, prompt, timeoutMs, model) {
   let r;
   try {
-    r = await runAIFn(prompt, { timeoutMs, model });
+    r = await runAIFn(prompt, { timeoutMs, model, fallbackOnTimeout: false });
   } catch {
     return { verdict: 'ask', reason: 'AI 呼び出しでエラーが発生（安全側で確認します）', status: 'unavailable' };
   }

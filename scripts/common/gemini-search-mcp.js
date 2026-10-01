@@ -11,9 +11,15 @@
 //   - 依存ゼロ（本パッケージの ds-gateway / command-judge / gemini-client と同じ純 Node）。
 //   - キーは既存の安全パッケージ Gemini キーを使い回す（gemini-client.resolveApiKey）。
 //     受講者は新しいアカウントを作らなくてよい（コーチ用キーをそのまま利用）。
-//   - 検索モデルは gemini-2.5-flash 固定（無料枠で Google 検索 grounding が実際に返る
-//     ことを実測で確認済みのモデル。3.x flash 系は無料の grounding 枠がほぼ無く 429）。
-//     AI_SAFE_SEARCH_MODEL で上書き可。
+//   - 検索モデルは gemini-2.5-flash-lite 既定、予備 gemini-2.5-flash（AI_SAFE_SEARCH_MODEL /
+//     AI_SAFE_SEARCH_FALLBACK で上書き可）。無料枠で Google 検索 grounding が返るのは 2.5 系だけ
+//     （2026-10-02 実測: 3.1-flash-lite / 3.5-flash-lite / 3.5〜3.8-flash はすべて 429）。
+//     2.5-flash は 1 日の無料枠が小さく昼過ぎに 429 になるため、軽い 2.5-flash-lite を先に使う。
+//     ※ Google は 2.5 系を「以前から使っていた利用者だけ」に制限しているため、新しく作った
+//       キーでは検索が使えない可能性がある（未検証）。その場合も他の機能には影響しない。
+//   - 混雑（5xx / UNAVAILABLE）・通信エラー・時間切れのときは、同じモデルで 1 回だけ待って
+//     やり直し、だめなら予備へ。上限切れ（429）・未提供（404）・権限（403）はすぐ予備へ。
+//     2026-10-02 の教室で UNAVAILABLE が数分続き、旧版（やり直しなし）は検索に失敗した。
 //   - 検索のみ。任意 URL の取得やシェル実行はしない。クエリは Google に送られる
 //     （AI コーチと同じ信頼境界）。機微情報を含むクエリは投げない前提。
 //   - どんな失敗も例外で落とさず、MCP のエラー応答として返す（接続を維持する）。
@@ -37,18 +43,21 @@ try {
 const SERVER_NAME = 'gemini-search';
 const SERVER_VERSION = '1.0.0';
 const DEFAULT_PROTOCOL = '2025-06-18';
-const SEARCH_MODEL = process.env.AI_SAFE_SEARCH_MODEL || 'gemini-2.5-flash';
+const SEARCH_MODEL = process.env.AI_SAFE_SEARCH_MODEL || 'gemini-2.5-flash-lite';
+const SEARCH_FALLBACKS = String(process.env.AI_SAFE_SEARCH_FALLBACK || 'gemini-2.5-flash')
+  .split(',').map((m) => m.trim()).filter(Boolean);
+const RETRY_DELAY_MS = Number(process.env.AI_SAFE_SEARCH_RETRY_DELAY || 3000);
 const REQUEST_TIMEOUT_MS = Number(process.env.AI_SAFE_SEARCH_TIMEOUT || 30000);
 const MAX_QUERY_CHARS = 800;
 
 // ---- Gemini grounding 呼び出し ---------------------------------------------
 // 成功: { ok:true, text, sources:[{title,uri}], queries:[...] }
 // 失敗: { ok:false, message }（429/キー無し/ネットワーク等は全部ここに寄せる）
-function groundedSearch(query) {
+function groundedSearchOnce(query, model) {
   return new Promise((resolve) => {
     const key = resolveApiKey();
     if (!key) {
-      return resolve({ ok: false, message: 'Gemini API キーが未設定です（「キーと金庫/3_AIコーチのキーを登録」で登録してください）。' });
+      return resolve({ ok: false, kind: 'nokey', message: 'Gemini API キーが未設定です（「キーと金庫/3_AIコーチのキーを登録」で登録してください）。' });
     }
     const body = JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: String(query).slice(0, MAX_QUERY_CHARS) }] }],
@@ -56,7 +65,7 @@ function groundedSearch(query) {
     });
     const req = https.request({
       hostname: GEMINI_HOST,
-      path: '/v1beta/models/' + encodeURIComponent(SEARCH_MODEL) + ':generateContent',
+      path: '/v1beta/models/' + encodeURIComponent(model) + ':generateContent',
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': key, 'content-length': Buffer.byteLength(body) },
       timeout: REQUEST_TIMEOUT_MS,
@@ -65,14 +74,20 @@ function groundedSearch(query) {
       res.on('data', (c) => (data += c));
       res.on('end', () => {
         let json = null; try { json = JSON.parse(data); } catch { /* below */ }
-        if (!json) return resolve({ ok: false, message: 'Gemini 応答を解釈できませんでした（HTTP ' + res.statusCode + '）。' });
+        if (!json) return resolve({ ok: false, kind: res.statusCode >= 500 ? 'busy' : 'other', message: 'Gemini 応答を解釈できませんでした（HTTP ' + res.statusCode + '）。' });
         if (json.error) {
           const st = json.error.status || ('HTTP ' + res.statusCode);
           let msg = 'Gemini 検索に失敗しました（' + st + '）。';
+          let kind = 'other';
           if (st === 'RESOURCE_EXHAUSTED' || res.statusCode === 429) {
+            kind = 'quota';
             msg = 'Gemini 検索の無料クォータを超過しました（RESOURCE_EXHAUSTED）。しばらく時間をおいて再試行してください。';
+          } else if (res.statusCode === 404 || res.statusCode === 403 || st === 'NOT_FOUND' || st === 'PERMISSION_DENIED') {
+            kind = 'model';
+          } else if (res.statusCode >= 500 || st === 'UNAVAILABLE' || st === 'INTERNAL' || st === 'DEADLINE_EXCEEDED') {
+            kind = 'busy';
           }
-          return resolve({ ok: false, message: msg });
+          return resolve({ ok: false, kind, message: msg });
         }
         const cand = (json.candidates && json.candidates[0]) || {};
         const text = ((cand.content && cand.content.parts) || []).map((p) => p.text || '').join('').trim();
@@ -83,11 +98,36 @@ function groundedSearch(query) {
         resolve({ ok: true, text, sources, queries: gm.webSearchQueries || [] });
       });
     });
-    req.on('error', (e) => resolve({ ok: false, message: 'ネットワークエラー: ' + e.message }));
-    req.on('timeout', () => { req.destroy(); resolve({ ok: false, message: 'Gemini 検索がタイムアウトしました。' }); });
+    req.on('error', (e) => resolve({ ok: false, kind: 'busy', message: 'ネットワークエラー: ' + e.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, kind: 'busy', message: 'Gemini 検索がタイムアウトしました。' }); });
     req.write(body);
     req.end();
   });
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 既定モデル → 予備の順に試す。混雑・通信・時間切れは同じモデルで 1 回だけ待ってやり直す。
+// once は差し替え可能（テスト用）。
+async function groundedSearch(query, { once = groundedSearchOnce, delayMs = RETRY_DELAY_MS } = {}) {
+  const chain = [SEARCH_MODEL, ...SEARCH_FALLBACKS.filter((m) => m !== SEARCH_MODEL)];
+  let r = null;
+  let quota = false;
+  for (const model of chain) {
+    r = await once(query, model);
+    if (!r.ok && r.kind === 'busy') {
+      await sleep(delayMs);
+      r = await once(query, model);
+    }
+    if (r.ok || r.kind === 'nokey' || r.kind === 'other') break;
+    if (r.kind === 'quota') quota = true;
+  }
+  if (!r.ok && quota && r.kind !== 'quota') {
+    r = { ok: false, kind: 'quota', message: 'Gemini 検索の無料クォータを超過しました（RESOURCE_EXHAUSTED）。しばらく時間をおいて再試行してください。' };
+  } else if (!r.ok && r.kind === 'busy') {
+    r = { ok: false, kind: 'busy', message: r.message + '（やり直しと予備のモデルでも応答がありませんでした。Google 側の混雑の可能性があります。少し待って再試行してください）' };
+  }
+  return r;
 }
 
 // 検索結果をモデルが読みやすい 1 つのテキストに整形する。
@@ -190,4 +230,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { groundedSearch, formatResult, handle, TOOL };
+module.exports = { groundedSearch, groundedSearchOnce, formatResult, handle, TOOL, SEARCH_MODEL, SEARCH_FALLBACKS };

@@ -16,15 +16,19 @@ const secretStore = require('./secret-store.js');
 //   - Gemini 系（検索・画像読取）はコーチ用キー（~/.ai-safety/gemini-api-key.txt / 環境変数）が
 //     無ければ登録しない。壊れた MCP を登録すると毎回エラーだけ返るツールが並ぶため。
 // timeout は OpenCode 既定の 5000ms では全滅する（各 MCP の内部タイムアウトの方が長い）ので、
-// 実体側の上限（検索/画像読取 30 秒・Pollinations 90 秒・agy 180 秒）より余裕を持たせる。
+// 実体側の上限より余裕を持たせる（2026-10 改定）:
+//   検索 = 1 回 30 秒 × (やり直し 1 回 + 予備 1 モデル) ＋待ち 3 秒×2 ≒ 最大 126 秒 → 150 秒
+//   画像読取 = 1 回 30 秒 × 3 モデル（既定＋予備 2） = 最大 90 秒 → 120 秒
+//   Pollinations 90 秒 → 120 秒
+//   agy / GPT Image = 最大 600 秒（参考画像 2 枚の縦長モックで agy 約 190 秒・GPT 4 分 2 秒を実測） → 660 秒
 const MCP_SERVERS = [
-  { key: 'gemini-search', file: 'gemini-search-mcp.js', flag: 'AI_SAFE_DCLAUDE_SEARCH', tool: 'web_search', timeout: 45000, needsGeminiKey: true },
-  { key: 'gemini-vision', file: 'gemini-vision-mcp.js', flag: 'AI_SAFE_DCLAUDE_VISION', tool: 'describe_image', timeout: 45000, needsGeminiKey: true },
+  { key: 'gemini-search', file: 'gemini-search-mcp.js', flag: 'AI_SAFE_DCLAUDE_SEARCH', tool: 'web_search', timeout: 150000, needsGeminiKey: true },
+  { key: 'gemini-vision', file: 'gemini-vision-mcp.js', flag: 'AI_SAFE_DCLAUDE_VISION', tool: 'describe_image', timeout: 120000, needsGeminiKey: true },
   { key: 'pollinations-image', file: 'pollinations-image-mcp.js', flag: 'AI_SAFE_DCLAUDE_IMAGE', tool: 'generate_image', timeout: 120000, needsGeminiKey: false },
-  { key: 'agy-image', file: 'agy-image-mcp.js', flag: 'AI_SAFE_DCLAUDE_AGY_IMAGE', tool: 'generate_image_agy', timeout: 210000, needsGeminiKey: false },
-  // GPT-Image-2（Codex 経由。API キー不要＝ChatGPT のサブスクリプションを使う）。3 本のうち一番きれい。
-  // 1 枚 1 分前後かかる（実測 50 秒前後）ので、agy（210 秒）よりさらに余裕を持たせる。
-  { key: 'codex-image', file: 'codex-image-mcp.js', flag: 'AI_SAFE_DCLAUDE_CODEX_IMAGE', tool: 'generate_image_gpt', timeout: 300000, needsGeminiKey: false },
+  // 画像生成の標準（Google アカウントで無料）。2026-10 の授業方針で GPT Image より先に使う。
+  { key: 'agy-image', file: 'agy-image-mcp.js', flag: 'AI_SAFE_DCLAUDE_AGY_IMAGE', tool: 'generate_image_agy', timeout: 660000, needsGeminiKey: false },
+  // GPT Image（Codex 経由。API キー不要＝ChatGPT のサブスクリプションを使う）。有料プランの人向け。
+  { key: 'codex-image', file: 'codex-image-mcp.js', flag: 'AI_SAFE_DCLAUDE_CODEX_IMAGE', tool: 'generate_image_gpt', timeout: 660000, needsGeminiKey: false },
   { key: 'playwright', file: 'playwright-mcp.js', flag: 'AI_SAFE_DCLAUDE_PLAYWRIGHT', tool: '*', timeout: 90000, needsGeminiKey: false },
 ];
 

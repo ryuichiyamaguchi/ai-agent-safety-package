@@ -49,15 +49,20 @@ test('キー未設定の案内は専用ボタンを指す（旧平文パスを�
   assert.doesNotMatch(src, /gemini-api-key\.txt/);
 });
 
-test('404 と 429 は fallback 対象、それ以外は対象外', () => {
+test('404・429・混雑(5xx)・通信エラーは fallback 対象、認証エラーなどは対象外', () => {
   assert.strictEqual(vision.shouldFallback({ ok: false, status: 404, gstatus: 'NOT_FOUND' }), true);
   assert.strictEqual(vision.shouldFallback({ ok: false, status: 429, gstatus: 'RESOURCE_EXHAUSTED' }), true);
+  assert.strictEqual(vision.shouldFallback({ ok: false, status: 503, gstatus: 'UNAVAILABLE' }), true);
   assert.strictEqual(vision.shouldFallback({ ok: false, status: 401, gstatus: 'UNAUTHENTICATED' }), false);
   assert.strictEqual(vision.shouldFallback({ ok: true, status: 200 }), false);
 });
 
-test('honesty prompt は添付画像で describe_image にパスを渡せと書く', () => {
+test('honesty prompt: 画像は 1 回だけ見る・送信していない案内のときは describe_image・画像生成は agy が標準', () => {
   const t = fs.readFileSync(path.join(root, 'scripts', 'common', 'deepseek-honesty-prompt.txt'), 'utf8');
   assert.match(t, /image_path/);
   assert.match(t, /describe_image/);
+  assert.match(t, /generate_image_agy/);
+  assert.match(t, /reference_images/);
+  // 2026-10: 「あなたは画像を直接見られない」と書くと deepseek-flash でも Gemini に 9 回説明させに行った
+  assert.doesNotMatch(t, /あなたは画像を直接見られない/);
 });
