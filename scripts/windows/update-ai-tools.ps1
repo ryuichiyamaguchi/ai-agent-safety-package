@@ -49,6 +49,7 @@ Line " 更新するもの（入っているものだけ）:"
 Line "   ・Codex CLI    → 最新版"
 Line "   ・Claude Code  → 最新版"
 Line "   ・OpenCode     → 最新版"
+Line "   ・Playwright   → d-claude / OpenCode のブラウザ操作の部品（決まった版を先に入れておく）"
 Line " 更新しないもの:"
 Line "   ・agy (AntiGravity) → 公式の自動更新に任せます（作業フォルダの docs\09_各AIのインストール.md を参照）"
 Line ""
@@ -112,6 +113,23 @@ Update-Tool "Codex CLI" "codex" "@openai/codex@latest"
 Update-Tool "Claude Code" "claude" ("@anthropic-ai/claude-code@" + $claudePin)
 
 Update-Tool "OpenCode" "opencode" "opencode-ai@latest"
+
+# --- Playwright（d-claude / OpenCode のブラウザ操作）を先に入れておく ------------------
+# 入れておかないと d-claude / OpenCode の最初の起動でダウンロードが走り、教室で一斉に
+# 起動すると時間切れになる（2026-10 実機）。版は tested-tool-versions.json の playwrightMcp。
+$prefetch = Join-Path $PSScriptRoot "..\common\playwright-prefetch.js"
+Line ""
+Line "── Playwright（ブラウザ操作の部品）を準備します"
+if ((Test-Path -LiteralPath $prefetch) -and (Get-Command node -ErrorAction SilentlyContinue)) {
+    & node $prefetch
+    if ($LASTEXITCODE -eq 0) {
+        [void]$results.Add("Playwright: 準備OK（起動時にダウンロードしません）")
+    } else {
+        [void]$results.Add("Playwright: 失敗（起動時に取りに行きます。もう一度押すとやり直せます）")
+    }
+} else {
+    [void]$results.Add("Playwright: スキップ（部品が見つかりません）")
+}
 
 Line ""
 Line "── agy (AntiGravity) はこのボタンでは更新しません。"

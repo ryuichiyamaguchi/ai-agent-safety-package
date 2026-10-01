@@ -140,6 +140,10 @@ if [ "${DS_CLAUDE_MODE:-}" = "1" ]; then
       fs.writeFileSync(process.argv[1],JSON.stringify({mcpServers:servers}));
     ' "$_mcp_cfg" "$([ $_use_search -eq 1 ] && printf '%s' "$_search_mcp")" "$([ $_use_image -eq 1 ] && printf '%s' "$_image_mcp")" "$([ $_use_agy -eq 1 ] && printf '%s' "$_agy_mcp")" "$([ $_use_vision -eq 1 ] && printf '%s' "$_vision_mcp")" "$([ $_use_playwright -eq 1 ] && printf '%s' "$_playwright_mcp")" "$([ $_use_codex_img -eq 1 ] && printf '%s' "$_codex_img_mcp")" 2>/dev/null; then
       claude_args+=(--mcp-config "$_mcp_cfg")
+      # 補助ツール（MCP）の起動待ちを長めにする。Playwright を事前に入れていない PC の
+      # 最初の起動はダウンロードを待つので、既定の待ち時間だと時間切れになる（教室一斉起動・2026-10）。
+      # 利用者が MCP_TIMEOUT を指定していればそれを優先する。単位はミリ秒（Claude Code 公式）。
+      export MCP_TIMEOUT="${MCP_TIMEOUT:-90000}"
     fi
   fi
 fi

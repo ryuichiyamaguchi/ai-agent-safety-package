@@ -251,6 +251,10 @@ fs.writeFileSync(process.argv[2], JSON.stringify({ mcpServers: servers }));
             }
             if ($writeOk) {
                 $argsList = $argsList + @("--mcp-config", $mcpCfgPath)
+                # 補助ツール（MCP）の起動待ちを長めにする。Playwright を事前に入れていない PC の
+                # 最初の起動はダウンロードを待つので、既定の待ち時間だと時間切れになる（教室一斉起動・2026-10）。
+                # 利用者が MCP_TIMEOUT を指定していればそれを優先する。単位はミリ秒（Claude Code 公式）。
+                if (-not $env:MCP_TIMEOUT) { $env:MCP_TIMEOUT = '90000' }
             } else {
                 Write-Warning "d-claude の補助ツール設定（検索/画像読取）を書けませんでした。"
             }

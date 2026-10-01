@@ -50,6 +50,7 @@ echo " 更新するもの（入っているものだけ）:"
 echo "   ・Codex CLI    → 最新版"
 echo "   ・Claude Code  → 最新版"
 echo "   ・OpenCode     → 最新版"
+echo "   ・Playwright   → d-claude / OpenCode のブラウザ操作の部品（決まった版を先に入れておく）"
 echo " 更新しないもの:"
 echo "   ・agy (AntiGravity) → 公式の自動更新に任せます（作業フォルダの docs/09_各AIのインストール.md を参照）"
 echo ""
@@ -111,6 +112,22 @@ update_tool "Codex CLI" "codex" "@openai/codex@latest"
 update_tool "Claude Code" "claude" "@anthropic-ai/claude-code@$claude_pin"
 
 update_tool "OpenCode" "opencode" "opencode-ai@latest"
+
+# --- Playwright（d-claude / OpenCode のブラウザ操作）を先に入れておく ------------------
+# 入れておかないと d-claude / OpenCode の最初の起動でダウンロードが走り、教室で一斉に
+# 起動すると時間切れになる（2026-10 実機）。版は tested-tool-versions.json の playwrightMcp。
+prefetch="$script_dir/../common/playwright-prefetch.js"
+echo ""
+echo "── Playwright（ブラウザ操作の部品）を準備します"
+if [ -f "$prefetch" ] && command -v node >/dev/null 2>&1; then
+  if node "$prefetch"; then
+    add_result "Playwright: 準備OK（起動時にダウンロードしません）"
+  else
+    add_result "Playwright: 失敗（起動時に取りに行きます。もう一度押すとやり直せます）"
+  fi
+else
+  add_result "Playwright: スキップ（部品が見つかりません）"
+fi
 
 echo ""
 echo "── agy (AntiGravity) はこのボタンでは更新しません。"

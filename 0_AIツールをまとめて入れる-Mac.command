@@ -38,6 +38,17 @@ for pkg in "@openai/codex" "@anthropic-ai/claude-code@latest" "opencode-ai"; do
   echo ""
 done
 
+# Playwright（d-claude / OpenCode のブラウザ操作の部品）を先に入れておく。入れておかないと
+# 最初の起動でダウンロードが走り、教室で一斉に起動すると時間切れになる（2026-10 実機）。
+echo "------------------------------------------------------------"
+echo "準備中: Playwright（d-claude / OpenCode のブラウザ操作の部品）"
+PKG_HERE="$(cd "$(dirname "$0")" && pwd)"
+if command -v node >/dev/null 2>&1 && [ -f "$PKG_HERE/scripts/common/playwright-prefetch.js" ]; then
+  node "$PKG_HERE/scripts/common/playwright-prefetch.js" || echo "  （Playwright の準備に失敗しました。あとでやり直せます）"
+else
+  echo "  （Playwright の部品が見つからないため、とばします）"
+fi
+echo ""
 echo "------------------------------------------------------------"
 echo "AntiGravity（agy）は入れ方が違います。"
 echo "  スタート.html の「0-2」の案内（公式ページ）に従ってください。"
