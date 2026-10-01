@@ -104,9 +104,13 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - name: Prefetch and start Playwright MCP from a clean home with a space in its path
+      # GitHub は run: の中身を BOM なしの .ps1 にして PowerShell 5.1 に渡すため、日本語を直接書くと
+      # 読み違えて構文エラーになる（2026-10 実測）。run: の中は ASCII だけにし、日本語のフォルダ名
+      # （テスト）は文字コードで組み立てる。
+      - name: Prefetch and start Playwright MCP from a clean home with a space and Japanese in its path
         run: |
-          $home2 = Join-Path $env:RUNNER_TEMP 'pw home テスト'
+          $jp = -join ([char]0x30C6, [char]0x30B9, [char]0x30C8)
+          $home2 = Join-Path $env:RUNNER_TEMP ('pw home ' + $jp)
           New-Item -ItemType Directory -Force -Path $home2 | Out-Null
           $env:USERPROFILE = $home2
           $env:HOME = $home2
