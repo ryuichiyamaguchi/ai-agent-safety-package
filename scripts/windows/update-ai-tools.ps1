@@ -54,6 +54,7 @@ function Find-Agy {
     $cmd = Get-Command agy -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
     $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "agy\bin\agy.exe"),   # 公式インストーラーの現在の置き場所（2026-10 確認）
         (Join-Path $env:LOCALAPPDATA "Antigravity\agy.exe"),
         (Join-Path $env:USERPROFILE ".local\bin\agy.exe"),
         (Join-Path $env:USERPROFILE ".local\bin\agy")

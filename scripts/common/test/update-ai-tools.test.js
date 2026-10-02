@@ -175,6 +175,10 @@ test('update-ai-tools.ps1: 内容が mac 版と対称で、PowerShell 5.1 の作
   const psCode = ps.split(/\r?\n/).filter((l) => !/^\s*#/.test(l)).join('\n');
   assert.doesNotMatch(psCode, /\|\s*iex/i, 'ダウンロードしたものをそのまま実行しないこと（一度ファイルに保存する）');
   assert.match(ps, /Antigravity\\agy\.exe/, 'launch-agy-safe.ps1 と同じ場所も探すこと');
+  // 2026-10: 公式インストーラーの置き場所が %LOCALAPPDATA%\agy\bin に変わった（GitHub Actions の実機で判明）
+  assert.match(ps, /agy\\bin\\agy\.exe/, '公式インストーラーの現在の置き場所を探すこと');
+  assert.match(read('scripts/windows/launch-agy-safe.ps1'), /agy\\bin\\agy\.exe/, 'agy の起動スクリプトも新しい置き場所を探すこと');
+  assert.match(read('scripts/common/agy-image-mcp.js'), /'agy', 'bin', 'agy\.exe'/, 'agy の画像生成も新しい置き場所を探すこと');
   assert.match(ps, /agy \(AntiGravity\) はこのボタンでは更新しません/);
   assert.match(ps, /結果まとめ/, '最後にまとめを表示すること');
   assert.match(ps, /9_困ったとき診断/);

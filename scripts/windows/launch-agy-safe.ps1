@@ -33,6 +33,7 @@ $env:AI_SAFE_LOG_DIR = Join-Path $HOME ".ai-safety\logs"
 $Agy = $env:AGY
 if (-not $Agy) {
     $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "agy\bin\agy.exe"),   # 公式インストーラーの現在の置き場所（2026-10 確認）
         (Join-Path $env:LOCALAPPDATA "Antigravity\agy.exe"),
         (Join-Path $env:USERPROFILE ".local\bin\agy.exe"),
         (Join-Path $env:USERPROFILE ".local\bin\agy")
@@ -57,7 +58,7 @@ Antigravity CLI (agy) が見つかりません。
   irm https://antigravity.google/cli/install.ps1 | iex
 
 インストール後、以下のいずれかを満たしてください:
-  - %LOCALAPPDATA%\Antigravity\ が `$env:PATH` に含まれている
+  - %LOCALAPPDATA%\agy\bin\ が `$env:PATH` に含まれている（公式インストーラーの置き場所。入れた直後は PowerShell を開き直す）
   - 環境変数 `AGY` に agy バイナリのフルパスをセット
 "@
     exit 2

@@ -378,6 +378,7 @@ function Test-AgyDeclaration([string]$Engine) {
     $agy = $env:AGY
     if (-not $agy) {
         $candidates = @(
+            (Join-Path $env:LOCALAPPDATA 'agy\bin\agy.exe'),
             (Join-Path $env:LOCALAPPDATA 'Antigravity\agy.exe'),
             (Join-Path $env:USERPROFILE '.local\bin\agy.exe'),
             (Join-Path $env:USERPROFILE '.local\bin\agy')

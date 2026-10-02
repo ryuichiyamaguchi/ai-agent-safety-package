@@ -92,6 +92,20 @@ function resolveAgyBin() {
       try { if (fs.statSync(p).isFile()) return p; } catch { /* next */ }
     }
   }
+  // PATH に無いとき（入れた直後で PATH が古い画面から起動された等）は、公式インストーラーの
+  // 置き場所を探す。Windows = %LOCALAPPDATA%\agy\bin\agy.exe（2026-10 確認）・旧 %LOCALAPPDATA%\Antigravity、
+  // mac = ~/.local/bin/agy。
+  const home = os.homedir();
+  const known = IS_WIN
+    ? [
+        process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'agy', 'bin', 'agy.exe'),
+        process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Antigravity', 'agy.exe'),
+        path.join(home, '.local', 'bin', 'agy.exe'),
+      ]
+    : [path.join(home, '.local', 'bin', 'agy')];
+  for (const p of known.filter(Boolean)) {
+    try { if (fs.statSync(p).isFile()) return p; } catch { /* next */ }
+  }
   return 'agy'; // 見つからなければ PATH 解決に任せる
 }
 

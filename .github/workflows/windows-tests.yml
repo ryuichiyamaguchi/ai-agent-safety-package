@@ -143,7 +143,7 @@ jobs:
           foreach ($c in @('codex', 'claude', 'opencode')) {
             if (-not (Get-Command $c -ErrorAction SilentlyContinue)) { $missing += $c }
           }
-          $agyFiles = @((Join-Path $env:LOCALAPPDATA 'Antigravity\agy.exe'), (Join-Path $env:USERPROFILE '.local\bin\agy.exe')) | Where-Object { Test-Path -LiteralPath $_ }
+          $agyFiles = @((Join-Path $env:LOCALAPPDATA 'agy\bin\agy.exe'), (Join-Path $env:LOCALAPPDATA 'Antigravity\agy.exe'), (Join-Path $env:USERPROFILE '.local\bin\agy.exe')) | Where-Object { Test-Path -LiteralPath $_ }
           if (-not (Get-Command agy -ErrorAction SilentlyContinue) -and -not $agyFiles) { $missing += 'agy' }
           if ($missing.Count -gt 0) { Write-Host ('missing after install: ' + ($missing -join ', ')); exit 1 }
           Write-Host 'codex, claude, opencode and agy are installed'
