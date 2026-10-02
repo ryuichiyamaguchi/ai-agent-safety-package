@@ -38,6 +38,26 @@ function Set-AiSafeConsoleUtf8 {
     }
 }
 
+# 2 つのファイルの中身が同じかどうか（SHA-256 で比べる）。読めなければ「違う」とみなす。
+function Test-AiSafeSameFileContent([string]$Path, [string[]]$Others) {
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $mine = [Convert]::ToBase64String($sha.ComputeHash([System.IO.File]::ReadAllBytes($Path)))
+            foreach ($other in @($Others)) {
+                if (-not $other) { continue }
+                $theirs = [Convert]::ToBase64String($sha.ComputeHash([System.IO.File]::ReadAllBytes($other)))
+                if ($mine -eq $theirs) { return $true }
+            }
+        } finally {
+            $sha.Dispose()
+        }
+    } catch {
+        return $false
+    }
+    return $false
+}
+
 function Get-SafetyPolicyPath {
     # 同梱ポリシー: このスクリプト自身の置き場所から決まる唯一の基準点。
     # 環境変数では動かせないため、deny 床をまるごと差し替える攻撃の足場にならない。
@@ -62,6 +82,11 @@ function Get-SafetyPolicyPath {
         if ($candidate -and (Test-Path -LiteralPath $candidate)) {
             $resolved = (Resolve-Path -LiteralPath $candidate).Path
             if ($trusted -contains $resolved) { return $resolved }
+            # 置き場所が違うだけで中身が同梱のものと同じなら、何も言わずに同梱のほうを使う（結果は同じ）。
+            # PC 全体のガード（~/.ai-safety/global）は、ランチャーが作業フォルダ側の安全ルールを
+            # 環境変数で指したまま動くので、ここで毎回警告していた。フックが別の理由で止まったときに
+            # この警告まで画面に出て、AI も人も「ルールが食い違っている」と原因を取り違えた（v1.19.6）。
+            if (Test-AiSafeSameFileContent $resolved $trusted) { continue }
             Set-AiSafeConsoleUtf8
             [Console]::Error.WriteLine("AI Safety Guard: 環境変数で指定された安全ルール (" + $candidate + ") は同梱のものと違うため無視しました。")
         }
@@ -483,6 +508,97 @@ function Set-AuditLogAcl([string]$Path) {
     }
 }
 
+# ---------------------------------------------------------------------------
+# 監査ログへの追記（v1.19.6）
+# ---------------------------------------------------------------------------
+# ⚠️ Add-Content は使わない。Windows PowerShell 5.1 の Add-Content は「書くだけ」でよいときも
+#    いったん「読み書き」でファイルを開き、別のプロセスが同じファイルを開いていて失敗すると
+#    「書くだけ」で開き直す。ところがそのあと読み取り用の部品を作ろうとして
+#    「ストリームを読み取れませんでした（Stream was not readable）」で落ちる
+#    （PowerShell 本体の不具合: PowerShell/PowerShell#27947）。
+#    Claude Code は 1 回の操作に対してフックを並べて同時に動かす。作業フォルダで WebFetch を
+#    使うと guard-observe（作業フォルダ）・guard-webfetch（作業フォルダ）・guard-webfetch
+#    （PC 全体）の 3 本が同じ監査ログへ同時に書くので、受講者の Windows 実機で
+#    「AI Safety Guard FAILED CLOSED (webfetch): ストリームを読み取れませんでした。」が出て
+#    Web 取得が止まった（PC 全体のガードが既定で有効になった v1.19.0 から 3 本になった）。
+# 直し方: 「追記だけ」の権限（FILE_APPEND_DATA）で、ほかのプロセスの読み書きを妨げない
+#    共有モードで開き、1 行を 1 回の書き込みで出す。追記だけのハンドルへの書き込みは OS が
+#    必ずファイルの末尾に置くので、同時に書いても行が重なったり混ざったりしない
+#    （Serilog の shared ファイル出力と同じやり方）。
+function Get-AuditLogAppendCtor {
+    # .NET Framework（Windows PowerShell 5.1）にだけある、権限を細かく指定できるコンストラクタ。
+    try {
+        return [System.IO.FileStream].GetConstructor([type[]]@(
+            [string], [System.IO.FileMode], [System.Security.AccessControl.FileSystemRights],
+            [System.IO.FileShare], [int], [System.IO.FileOptions]))
+    } catch {
+        return $null
+    }
+}
+
+function Test-AiSafeIoException([object]$ErrorRecord) {
+    $e = $ErrorRecord.Exception
+    while ($null -ne $e) {
+        if ($e -is [System.IO.IOException]) { return $true }
+        $e = $e.InnerException
+    }
+    return $false
+}
+
+function Write-AuditLogBytes([string]$Path, [byte[]]$Bytes) {
+    $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+    $ctor = Get-AuditLogAppendCtor
+    if ($null -ne $ctor) {
+        # バッファ 1 = 溜めずにそのまま書く（1 行 = 1 回の書き込み）。
+        $fs = $ctor.Invoke(@($Path, [System.IO.FileMode]::Append,
+                [System.Security.AccessControl.FileSystemRights]::AppendData, $share, 1,
+                [System.IO.FileOptions]::None))
+        try { $fs.Write($Bytes, 0, $Bytes.Length); $fs.Flush() } finally { $fs.Dispose() }
+        return
+    }
+    # .NET Core（PowerShell 7）には上のコンストラクタが無い。FileMode.Append は「開いたときの末尾」に
+    # 書くだけなので、同時に書くと行が上書きされて消える（mac の pwsh で 240 行中 6 行消えた）。
+    # 名前付きミューテックスでプロセス間の書き込みを 1 本ずつにする。
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $key = [BitConverter]::ToString($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Path.ToLowerInvariant()))).Replace('-', '').Substring(0, 16)
+    } finally {
+        $sha.Dispose()
+    }
+    $mutex = New-Object System.Threading.Mutex($false, ('ai-safety-audit-' + $key))
+    $owned = $false
+    try {
+        try {
+            $owned = $mutex.WaitOne(5000)
+        } catch [System.Threading.AbandonedMutexException] {
+            $owned = $true   # 前の持ち主が落ちただけ。所有権はこちらに移っている。
+        }
+        if (-not $owned) { throw (New-Object System.IO.IOException('audit log is busy: ' + $Path)) }
+        $fs = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, $share)
+        try { $fs.Write($Bytes, 0, $Bytes.Length); $fs.Flush() } finally { $fs.Dispose() }
+    } finally {
+        if ($owned) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+
+function Add-AuditLogLine([string]$Path, [string]$Line) {
+    $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($Line + [Environment]::NewLine)
+    $attempt = 0
+    while ($true) {
+        try {
+            Write-AuditLogBytes $Path $bytes
+            return
+        } catch {
+            # 共有の衝突（ほかのアプリが書き込みを許さずに開いている等）だけ、少し待ってやり直す。
+            # アクセス拒否（UnauthorizedAccessException）は IOException ではないので、待たずにそのまま止まる。
+            $attempt++
+            if ($attempt -ge 10 -or -not (Test-AiSafeIoException $_)) { throw }
+            Start-Sleep -Milliseconds (20 * $attempt)
+        }
+    }
+}
+
 function Write-AuditLog([object]$HookInput, [string]$Mode, [string]$Decision, [string]$Reason, [string]$ObservedText, [object]$Policy) {
     $logDir = $env:AI_SAFE_LOG_DIR
     if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
@@ -491,9 +607,23 @@ function Write-AuditLog([object]$HookInput, [string]$Mode, [string]$Decision, [s
     }
     $day = Get-Date -Format "yyyy-MM-dd"
     $path = Join-Path $logDir ("events-" + $day + ".jsonl")
-    $isNew = -not (Test-Path -LiteralPath $path)
+    # その日最初の 1 行だけ、ファイルを作って ACL を絞る。同時に動いたフックどうしで
+    # New-Item -Force を使うと、後から来た側が先の行ごと空のファイルで上書きしたり、
+    # 書き込み中のファイルにぶつかって落ちたりする。「無いときだけ作る」で開き、
+    # 先を越されたら（もう有る）作った側に任せる。
+    $isNew = $false
+    if (-not (Test-Path -LiteralPath $path)) {
+        $created = $null
+        try {
+            $created = New-Object System.IO.FileStream($path, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+            $isNew = $true
+        } catch {
+            if (-not (Test-Path -LiteralPath $path)) { throw }
+        } finally {
+            if ($null -ne $created) { $created.Dispose() }
+        }
+    }
     if ($isNew) {
-        $null = New-Item -ItemType File -Force -Path $path
         Set-AuditLogAcl $path
     }
     $entry = [PSCustomObject]@{
@@ -509,7 +639,7 @@ function Write-AuditLog([object]$HookInput, [string]$Mode, [string]$Decision, [s
         observed = (ConvertTo-RedactedText $ObservedText $Policy)
         packageVersion = $Policy.packageVersion
     }
-    ($entry | ConvertTo-Json -Depth 8 -Compress) | Add-Content -LiteralPath $path -Encoding UTF8
+    Add-AuditLogLine $path ($entry | ConvertTo-Json -Depth 8 -Compress)
 }
 
 function Test-IsDomainMatch([string]$HostName, [string]$Pattern) {
