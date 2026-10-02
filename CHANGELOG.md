@@ -7,6 +7,7 @@ AI エージェント安全運用パッケージの変更履歴です。新し�
 - 「2_AIツールをまとめて入れる」（`update-ai-tools.{sh,ps1}`）が、入っていない Codex CLI・Claude Code・OpenCode を npm で、agy を公式インストーラーで新しく入れるようにしました（入っているものは従来どおり更新。agy の更新は公式の自動更新に任せる）
 - agy の公式インストーラーは HTTPS で一度ファイルに保存してから実行します。Node.js が無くても agy は入ります
 - パッケージ直下の「0_AIツールをまとめて入れる」は同じ処理を呼ぶだけにしました（導入処理を 1 本にまとめた）
+- Windows の agy の公式インストーラーが `%LOCALAPPDATA%\agy\bin\agy.exe` に入れるようになっていたので、agy の起動（`launch-agy-safe.ps1`）・画像生成（`agy-image-mcp.js`）・このボタンが新しい場所も探すようにしました（GitHub Actions の実機で判明）
 - 自動テスト用に `AI_SAFE_NO_PROMPT=1` で最初の確認を飛ばせるようにしました。Windows の自動テスト（GitHub Actions）に、4 つのツールを本当に新しく入れるジョブを足しました
 
 ## v1.19.4：Gemini の混雑対策・画像生成は agy が標準・参考画像・DeepSeek が画像を直接見る
