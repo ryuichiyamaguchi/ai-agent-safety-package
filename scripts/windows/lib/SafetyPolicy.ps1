@@ -179,8 +179,12 @@ function Read-HookInput {
     $stdinStream = [Console]::OpenStandardInput()
     $stdinReader = New-Object System.IO.StreamReader($stdinStream, [System.Text.Encoding]::UTF8)
     try { $raw = $stdinReader.ReadToEnd() } finally { $stdinReader.Dispose() }
+    # 上限（256KB）を超える入力は検査しないで止める（mac の read_hook_input と同じ）。
+    # 無害な文字で水増しして危険な後半を検査から押し出す攻撃を防ぐための上限なので、緩めない。
+    # 以前は途中で切ってから JSON として読もうとして「JSON として読めない」系の分かりにくい
+    # エラーで止まっていた。何が起きたか分かる文面にする（v1.19.7）。
     if ($raw.Length -gt 262144) {
-        $raw = $raw.Substring(0, 262144)
+        throw "内容が大きすぎて（上限 256KB）安全確認ができませんでした。分割して実行してください。"
     }
     if ([string]::IsNullOrWhiteSpace($raw)) {
         return "{}" | ConvertFrom-Json
@@ -599,7 +603,24 @@ function Add-AuditLogLine([string]$Path, [string]$Line) {
     }
 }
 
+# 監査ログは「判定のあとの記録」。書けなくても判定（許可・確認・ブロック）は変えない（v1.19.7）。
+# 以前は書き込みの失敗がそのまま例外になって Fail-Closed へ落ち、許可した操作まで止めていた
+# （v1.19.1 の「毎日最初の操作が止まる」、v1.19.6 で直した「Web 取得が止まる」）。mac の audit_log も
+# 書けないときは警告を出すだけで判定を続ける。ここで揃える。
 function Write-AuditLog([object]$HookInput, [string]$Mode, [string]$Decision, [string]$Reason, [string]$ObservedText, [object]$Policy) {
+    try {
+        Write-AuditLogEntry $HookInput $Mode $Decision $Reason $ObservedText $Policy
+    } catch {
+        $inner = $_.Exception
+        while ($null -ne $inner.InnerException) { $inner = $inner.InnerException }
+        try {
+            Set-AiSafeConsoleUtf8
+            [Console]::Error.WriteLine("warn: 記録ファイルに書けませんでした（判定はそのまま続けます）: " + $inner.Message)
+        } catch { }
+    }
+}
+
+function Write-AuditLogEntry([object]$HookInput, [string]$Mode, [string]$Decision, [string]$Reason, [string]$ObservedText, [object]$Policy) {
     $logDir = $env:AI_SAFE_LOG_DIR
     if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
     if (-not (Test-Path -LiteralPath $logDir)) {
@@ -637,7 +658,7 @@ function Write-AuditLog([object]$HookInput, [string]$Mode, [string]$Decision, [s
         hook_event_name = (Get-JsonValue $HookInput @("hook_event_name", "eventName", "event"))
         tool_name = Get-ToolName $HookInput
         observed = (ConvertTo-RedactedText $ObservedText $Policy)
-        packageVersion = $Policy.packageVersion
+        packageVersion = (Get-JsonValue $Policy @("packageVersion"))
     }
     Add-AuditLogLine $path ($entry | ConvertTo-Json -Depth 8 -Compress)
 }
@@ -706,6 +727,13 @@ function Ask-Action([object]$HookInput, [string]$Mode, [string]$Reason, [string]
     Set-AiSafeConsoleUtf8
     [Console]::Out.WriteLine(($obj | ConvertTo-Json -Depth 6 -Compress))
     exit 0
+}
+
+# 解説カード（now.html）を出す。解説は判定の付録なので、部品（Explainer.ps1）が読めなくても、
+# 途中で失敗しても、判定は続ける（v1.19.7。以前は部品が読めないと Fail-Closed していた）。
+function Invoke-AiSafeExplain([object]$HookInput, [string]$Mode, [object]$Policy) {
+    if (-not (Get-Command Invoke-Explain -CommandType Function -ErrorAction SilentlyContinue)) { return }
+    try { Invoke-Explain -HookInput $HookInput -Mode $Mode -Policy $Policy } catch { }
 }
 
 function Fail-Closed([string]$Mode, [string]$Message) {

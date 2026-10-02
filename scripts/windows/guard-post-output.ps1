@@ -5,7 +5,10 @@ try {
     # 日本語のメッセージを出す前に、hook の出力を UTF-8 に固定する。
     # （PowerShell 5.1 の既定は CP932 で、Claude Code / Codex は UTF-8 として読むため）
     Set-AiSafeConsoleUtf8
-    . (Join-Path $PSScriptRoot "lib\Explainer.ps1")
+    # 解説カードの部品は判定に使わない。読めなくても判定は続ける（v1.19.7）。
+    try { . (Join-Path $PSScriptRoot "lib\Explainer.ps1") } catch {
+        [Console]::Error.WriteLine("warn: 解説カードの部品を読み込めませんでした（判定はそのまま続けます）: " + $_.Exception.Message)
+    }
     $policy = Get-SafetyPolicy
     $inputObj = Read-HookInput
     # 注: post-output はカードを書かない。書くと、ターン終了の Stop イベントで

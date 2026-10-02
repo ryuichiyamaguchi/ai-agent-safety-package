@@ -5,10 +5,13 @@ try {
     # 日本語のメッセージを出す前に、hook の出力を UTF-8 に固定する。
     # （PowerShell 5.1 の既定は CP932 で、Claude Code / Codex は UTF-8 として読むため）
     Set-AiSafeConsoleUtf8
-    . (Join-Path $PSScriptRoot "lib\Explainer.ps1")
+    # 解説カードの部品は判定に使わない。読めなくても判定は続ける（v1.19.7）。
+    try { . (Join-Path $PSScriptRoot "lib\Explainer.ps1") } catch {
+        [Console]::Error.WriteLine("warn: 解説カードの部品を読み込めませんでした（判定はそのまま続けます）: " + $_.Exception.Message)
+    }
     $policy = Get-SafetyPolicy
     $inputObj = Read-HookInput
-    Invoke-Explain -HookInput $inputObj -Mode "write" -Policy $policy
+    Invoke-AiSafeExplain $inputObj "write" $policy
     $cwd = Get-HookCwd $inputObj
     $target = Get-WriteTarget $inputObj
     $content = Get-WriteContent $inputObj
@@ -49,7 +52,13 @@ try {
         Block-Action $inputObj "write" ("sensitive pattern in generated file: " + $secret.Name) $observed $policy
     }
 
-    $generated = Find-RegexMatch $content $policy.generatedCodeDenyRegex "generated code deny"
+    # 古い安全ルールにはこの項目が無い。mac と同じく、無ければこの検査だけ飛ばす
+    # （StrictMode で無い項目を読むと例外になり、すべての書き込みが Fail-Closed していた）。
+    $generatedList = Get-JsonValue $policy @("generatedCodeDenyRegex")
+    $generated = $null
+    if ($null -ne $generatedList) {
+        $generated = Find-RegexMatch $content @($generatedList) "generated code deny"
+    }
     if ($generated) {
         Block-Action $inputObj "write" "generated code contains blocked read or exfil pattern" $observed $policy
     }
