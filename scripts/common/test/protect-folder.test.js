@@ -13,6 +13,31 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const PKG = path.resolve(__dirname, '..', '..', '..');
+
+// 危険判定を通過したフォルダには install まで走りうる。install は HOME 配下
+// （~/.ai-safety/bin の起動コマンド・~/.zshrc・~/.claude.json）を書き換えるので、通過しうる
+// テストは必ず使い捨ての HOME で動かす（2026-10-02、このテストが利用者の oc-safe などに
+// 検証用フォルダを焼き込んでいた。install.sh を直接起動する呼び出しだけを見張る
+// oc-safe.test.js の検査では、protect-folder.sh 経由の install に気づけなかった）。
+function makeFakeHome() {
+  // macOS の tmpdir は /private/var 配下で「システムフォルダ」扱いになるため、実 HOME の
+  // ~/.cache の下に作る（受講者が実際に使う「ホームの中の普通のフォルダ」に近い場所）。
+  const base = path.join(os.homedir(), '.cache');
+  fs.mkdirSync(base, { recursive: true });
+  return fs.mkdtempSync(path.join(base, 'asp-protect-folder-home-'));
+}
+
+// 実 HOME の ~/.ai-safety/bin（起動コマンドの置き場）を読み込み時点で記録しておき、
+// 最後のテストで「変わっていない」ことを確かめる。
+const REAL_BIN = path.join(os.homedir(), '.ai-safety', 'bin');
+function snapshotBin() {
+  const out = {};
+  try {
+    for (const n of fs.readdirSync(REAL_BIN)) out[n] = fs.readFileSync(path.join(REAL_BIN, n), 'utf8');
+  } catch { /* 置き場が無い環境 */ }
+  return out;
+}
+const REAL_BIN_BEFORE = snapshotBin();
 const SCRIPT = path.join(PKG, 'scripts', 'macos', 'protect-folder.sh');
 
 function run(target, extraEnv = {}) {
@@ -64,22 +89,26 @@ test('存在しないフォルダはエラーになる', () => {
 test('普通の空フォルダは危険判定を通過する（install の直前まで進む）', () => {
   // macOS の tmpdir は /private/var 配下 = システムフォルダ扱いになるので、
   // 受講者が実際に作る場所（ホームの中の普通のフォルダ）で試す。
-  const base = path.join(process.env.HOME, '.sena-tmp');
-  fs.mkdirSync(base, { recursive: true });
-  const dir = fs.mkdtempSync(path.join(base, 'ai-safety-newfolder-'));
-  // AI_SAFE_PACKAGE_ROOT をわざと壊し、install 本体を走らせずに
-  // 「危険判定は通った」ことだけを見る（install 自体は別の実測で確認する）。
-  const r = spawnSync('bash', [SCRIPT, dir], {
-    env: { ...process.env, AI_SAFE_ASSUME_YES: '1', AI_SAFE_PACKAGE_ROOT: '/nonexistent-package' },
-    encoding: 'utf8',
-    timeout: 60000,
-    cwd: os.tmpdir(),
-  });
-  const out = (r.stdout || '') + (r.stderr || '');
-  // パッケージがパスで見つかる環境では 0（install 成功）、そうでなければ 2（案内して中止）。
-  // どちらでも「対象にできません」は出てはいけない。
-  assert.ok(!out.includes('対象にできません'), '普通のフォルダが危険扱いされた:\n' + out);
-  fs.rmSync(dir, { recursive: true, force: true });
+  const home = makeFakeHome();
+  try {
+    const base = path.join(home, '.sena-tmp');
+    fs.mkdirSync(base, { recursive: true });
+    const dir = fs.mkdtempSync(path.join(base, 'ai-safety-newfolder-'));
+    // AI_SAFE_PACKAGE_ROOT をわざと壊しても、パッケージが自分の置き場から見つかる環境では
+    // install まで走る。だから HOME を使い捨てにして、書き換えはその中に閉じ込める。
+    const r = spawnSync('bash', [SCRIPT, dir], {
+      env: { ...process.env, HOME: home, AI_SAFE_ASSUME_YES: '1', AI_SAFE_PACKAGE_ROOT: '/nonexistent-package' },
+      encoding: 'utf8',
+      timeout: 60000,
+      cwd: os.tmpdir(),
+    });
+    const out = (r.stdout || '') + (r.stderr || '');
+    // パッケージがパスで見つかる環境では 0（install 成功）、そうでなければ 2（案内して中止）。
+    // どちらでも「対象にできません」は出てはいけない。
+    assert.ok(!out.includes('対象にできません'), '普通のフォルダが危険扱いされた:\n' + out);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -125,13 +154,15 @@ test('一時領域（/tmp 配下・/private/tmp 配下）は拒否される', ()
 });
 
 test('確認を取れない実行方法（端末でない標準入力）では中止する', () => {
-  const base = path.join(process.env.HOME, '.sena-tmp');
+  const home = makeFakeHome();
+  const base = path.join(home, '.sena-tmp');
   fs.mkdirSync(base, { recursive: true });
   const dir = fs.mkdtempSync(path.join(base, 'ai-safety-notty-'));
   try {
     // AI_SAFE_ASSUME_YES を付けない = 明示の同意が無い。stdin はパイプ（端末ではない）。
+    // 万一確認を素通りしても install が利用者の HOME を書かないよう、HOME も使い捨てにする。
     const r = spawnSync('bash', [SCRIPT, dir], {
-      env: { ...process.env, AI_SAFE_ASSUME_YES: '0' },
+      env: { ...process.env, HOME: home, AI_SAFE_ASSUME_YES: '0' },
       encoding: 'utf8',
       input: '',
       timeout: 60000,
@@ -141,7 +172,7 @@ test('確認を取れない実行方法（端末でない標準入力）では�
     assert.match(out, /中止しました（確認を取れない実行方法です）/);
     assert.ok(!fs.existsSync(path.join(dir, '.ai-safety')), '確認なしで install が走った');
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
@@ -155,4 +186,12 @@ test('Windows 版も一時領域とドライブ直下を拒否する', () => {
   assert.match(ps1, /確認を取れない実行方法です/);
   assert.doesNotMatch(ps1, /\$skipConfirm = \$Yes -or \(\$env:AI_SAFE_ASSUME_YES -eq "1"\) -or \(-not \[Environment\]::UserInteractive\)/,
     '対話不可を「確認スキップ」に倒したままになっている');
+});
+
+// 最後に流れるテスト（node:test はファイル内のトップレベルのテストを順に実行する）。
+test('このテストファイルは利用者の ~/.ai-safety/bin を書き換えない', () => {
+  const after = snapshotBin();
+  const changed = Object.keys({ ...REAL_BIN_BEFORE, ...after })
+    .filter((n) => REAL_BIN_BEFORE[n] !== after[n]);
+  assert.deepStrictEqual(changed, [], '実 HOME の起動コマンドが書き換えられた: ' + changed.join(', '));
 });
