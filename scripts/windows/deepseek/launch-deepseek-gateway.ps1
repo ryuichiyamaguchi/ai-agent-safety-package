@@ -1,7 +1,11 @@
 ﻿# launch-deepseek-gateway.ps1
 # ds-gateway を起動し health 確認後に ANTHROPIC_BASE_URL をプロキシへ向け、
 # ガード付き Claude Code を起動。終了時に gateway を確実停止（fail-closed）。
-param([string]$Workspace = "$env:USERPROFILE\Documents\my-ai-workspace")
+param(
+  [string]$Workspace = "$env:USERPROFILE\Documents\my-ai-workspace",
+  # 長時間おまかせモード（v1.19.9）。launch-integrated.ps1 から渡され、launch-claude-safe.ps1 へ引き継ぐ。
+  [switch]$LongRun
+)
 
 $ErrorActionPreference = 'Stop'
 $hooks = Join-Path $Workspace '.ai-safety\hooks'
@@ -300,7 +304,11 @@ try {
   # モニターへ d-claude 目印を置く（AI コーチが Gemini へコマンド本文を送らないように）。
   try { New-Item -ItemType Directory -Force -Path $coachLogDir | Out-Null; Set-Content -NoNewline -Encoding ascii -LiteralPath $coachMarker -Value 'd-claude' } catch {}
   Write-Host "送信検査 Gateway 稼働中 (127.0.0.1:$port)。DeepSeek へは検査後に転送されます。"
-  & $launchClaude -Workspace $Workspace
+  if ($LongRun) {
+    & $launchClaude -Workspace $Workspace -LongRun
+  } else {
+    & $launchClaude -Workspace $Workspace
+  }
 } finally {
   if ($gw -and -not $gw.HasExited) { Stop-Process -Id $gw.Id -Force -ErrorAction SilentlyContinue }
   # coach マーカーは d-claude と OpenCode が同じパスを共有する。並行起動時に片方の終了で

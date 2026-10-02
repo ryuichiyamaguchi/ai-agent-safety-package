@@ -67,9 +67,16 @@ fi
 for _flag in "$extra" "$extra2"; do
   case "$_flag" in
     "") ;;
-    --websearch|--longrun|--resume|--free|--plan|--project=*)
+    --longrun)
+      # 長時間おまかせモード: OpenCode と d-claude（v1.19.9）。どちらも launch-longrun.sh から渡される。
+      if [ "$agent" != "opencode" ] && [ "$agent" != "d-claude" ]; then
+        echo "--longrun は OpenCode と d-claude だけで指定できます（ほかの AI は launch-longrun.sh から起動してください）。" >&2
+        exit 2
+      fi
+      ;;
+    --websearch|--resume|--free|--plan|--project=*)
       if [ "$agent" != "opencode" ]; then
-        echo "--websearch / --longrun / --resume / --free / --plan / --project は OpenCode だけで指定できます。" >&2
+        echo "--websearch / --resume / --free / --plan / --project は OpenCode だけで指定できます。" >&2
         exit 2
       fi
       ;;
@@ -392,6 +399,10 @@ case "$agent:$profile" in
     export ANTHROPIC_CUSTOM_MODEL_OPTION="deepseek-v4-pro"
     export ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="DeepSeek V4 Pro"
     export ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="むずかしい作業向け。V4.1 Flash より料金が高くなります"
-    bash "$gateway" "$workspace"
+    if [ "$extra" = "--longrun" ] || [ "$extra2" = "--longrun" ]; then
+      bash "$gateway" "$workspace" --longrun
+    else
+      bash "$gateway" "$workspace"
+    fi
     ;;
 esac

@@ -10,7 +10,14 @@ set -u
 # 拒否するので床は残る。ここは二重の保険。
 unset AI_SAFE_POLICY AI_SAFE_ROOT
 
-WORKSPACE="${1:-$HOME/Documents/my-ai-workspace}"
+# --longrun（v1.19.9）: 長時間おまかせモード。launch-integrated.sh から渡され、そのまま
+# launch-claude-safe.sh へ引き継ぐ（一時設定づくりは向こうで行う）。位置引数の作業フォルダとは別に拾う。
+_gw_longrun=0
+_gw_pos=()
+for _a in "$@"; do
+  if [ "$_a" = "--longrun" ]; then _gw_longrun=1; else _gw_pos+=("$_a"); fi
+done
+WORKSPACE="${_gw_pos[0]:-$HOME/Documents/my-ai-workspace}"
 HOOKS_DIR="$WORKSPACE/.ai-safety/hooks"
 GATEWAY_JS="$HOOKS_DIR/common/ds-gateway.js"
 GATEWAY_TOKEN_JS="$HOOKS_DIR/common/gateway-token.js"
@@ -258,4 +265,8 @@ fi
 # モニターへ d-claude 目印を置く（AI コーチが Gemini へコマンド本文を送らないように）。
 mkdir -p "$(dirname "$COACH_MARKER")" 2>/dev/null && printf 'd-claude' > "$COACH_MARKER" 2>/dev/null || true
 echo "送信検査 Gateway 稼働中（127.0.0.1:${PORT}）。DeepSeek へは検査後に転送されます。"
-bash "$LAUNCH_CLAUDE" "$WORKSPACE"
+if [ "$_gw_longrun" = "1" ]; then
+  bash "$LAUNCH_CLAUDE" "$WORKSPACE" --longrun
+else
+  bash "$LAUNCH_CLAUDE" "$WORKSPACE"
+fi

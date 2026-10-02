@@ -7,8 +7,8 @@
 #   確認だけを省く。
 #
 # 対応:
-#   Claude / Codex / OpenCode / AntiGravity(agy) の 4 つ。mac / Windows の両方で使える
-#   （Windows 側の実体は scripts/windows/launch-longrun.ps1）。
+#   Claude / Codex / OpenCode / AntiGravity(agy) / d-claude（DeepSeek で動かす Claude Code。v1.19.9）
+#   の 5 つ。mac / Windows の両方で使える（Windows 側の実体は scripts/windows/launch-longrun.ps1）。
 #
 # 「壁」の有無（この判定がこのモードの中心）:
 #   壁 = OS が作業フォルダの外への書き込みを強制的に止める仕組み（サンドボックス）。
@@ -34,8 +34,10 @@
 #   **deny 側へ寄せる**（git push / sudo / 対話前提のランチャー起動など）。
 #   必要になったら通常のボタン（2〜5）で人が見ながらやる。
 #
-# 使い方: bash launch-longrun.sh [workspace] [claude|codex|opencode|agy] [prompt]
+# 使い方: bash launch-longrun.sh [workspace] [claude|codex|opencode|agy|d-claude] [prompt]
 set -euo pipefail
+# このスクリプト自身の置き場所（途中で cd しても変わらないよう、最初に一度だけ求める）。
+_self_dir="$(cd "$(dirname "$0")" && pwd)"
 
 unset AI_SAFE_POLICY AI_SAFE_ROOT
 
@@ -85,6 +87,7 @@ engine_label() {
     codex) printf 'Codex' ;;
     opencode) printf 'OpenCode' ;;
     agy) printf 'AntiGravity' ;;
+    d-claude) printf 'd-claude（DeepSeek）' ;;
   esac
 }
 
@@ -92,8 +95,9 @@ engine_label() {
 claude_settings="$workspace/.claude/settings.json"
 has_wall() {
   case "$1" in
-    claude)
+    claude|d-claude)
       # 実体（sandbox-exec）と、この作業フォルダの設定（sandbox.enabled）の両方を見る。
+      # d-claude も Claude Code なので同じ壁が効く（launch-claude-safe.sh --longrun が同じ条件で判定する）。
       [ -x /usr/bin/sandbox-exec ] || return 1
       [ -f "$claude_settings" ] || return 1
       command -v node >/dev/null 2>&1 || return 1
@@ -159,6 +163,7 @@ if [ -z "$engine" ]; then
     2) Codex        （$(wall_text codex)）
     3) OpenCode     （$(wall_text opencode)）
     4) AntiGravity  （$(wall_text agy)）
+    5) d-claude（DeepSeek）（$(wall_text d-claude)）
 
     0) やめる
 
@@ -173,14 +178,15 @@ EOF
     2) engine="codex" ;;
     3) engine="opencode" ;;
     4) engine="agy" ;;
+    5) engine="d-claude" ;;
     0|"") echo "やめました。"; exit 0 ;;
-    *) echo "1〜4 の番号を入れてください。" >&2; exit 2 ;;
+    *) echo "1〜5 の番号を入れてください。" >&2; exit 2 ;;
   esac
 fi
 
 case "$engine" in
-  claude|codex|opencode|agy) ;;
-  *) echo "使い方: bash launch-longrun.sh [workspace] [claude|codex|opencode|agy] [prompt]" >&2; exit 2 ;;
+  claude|codex|opencode|agy|d-claude) ;;
+  *) echo "使い方: bash launch-longrun.sh [workspace] [claude|codex|opencode|agy|d-claude] [prompt]" >&2; exit 2 ;;
 esac
 
 # --- 起動前の説明（対象フォルダ・壁の有無・止まるもの/止まらないもの） ---------------
@@ -213,6 +219,15 @@ else
   壁（OS による書き込み制限）が使えないため、AI が作業フォルダの外の
   ファイルを書き換えることを OS の力で止めることはできません。
   止まるのは危険コマンドの禁止リストだけです。
+
+EOF
+fi
+
+if [ "$engine" = "d-claude" ]; then
+  cat <<EOF
+  d-claude は DeepSeek のキーで動きます。作業の内容は、送信内容の検査（Gateway）を
+  通してから DeepSeek へ送られます。危険とまでは言えないコマンドは、AI が判定して
+  通します（d-claude のふだんの起動と同じです）。
 
 EOF
 fi
@@ -281,6 +296,12 @@ case "$engine" in
     # 控えはここで取り終えたので、統合ランチャー側では取らない（目印は向こうで消える）。
     AI_SAFE_SNAPSHOT_ALREADY="$workspace" exec bash "$hooks/launch-integrated.sh" "$workspace" opencode standard --longrun
     ;;
+  d-claude)
+    # d-claude も統合ランチャー経由（キーの確認・DeepSeek へ送ることへの同意・モデルの指定・送信検査
+    # ゲートウェイの起動を、ふだんの d-claude と同じ道筋で行う）。--longrun はゲートウェイを通って
+    # launch-claude-safe.sh まで届き、そこでこのモード用の一時設定（ask → deny・acceptEdits・壁）を作る。
+    AI_SAFE_SNAPSHOT_ALREADY="$workspace" exec bash "$hooks/launch-integrated.sh" "$workspace" d-claude standard --longrun
+    ;;
 esac
 
 # --- ここから Claude 専用の経路 -------------------------------------------------------
@@ -309,39 +330,20 @@ cleanup() { rm -rf "$tmp_dir"; }
 trap cleanup EXIT INT TERM HUP
 tmp_settings="$tmp_dir/settings.json"
 
-AI_SAFE_LONGRUN_WALL="$wall" run_limited 30 node -e '
-  const fs = require("fs");
-  const src = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-  const wall = process.env.AI_SAFE_LONGRUN_WALL === "1";
-  const p = src.permissions || (src.permissions = {});
-  const ask = Array.isArray(p.ask) ? p.ask : [];
-  const deny = Array.isArray(p.deny) ? p.deny.slice() : [];
-  // ask に残っていたものは「無人では答えられない」ので deny 側へ寄せる。緩める方向へは動かさない。
-  for (const rule of ask) if (!deny.includes(rule)) deny.push(rule);
-  p.ask = [];
-  p.deny = deny;
-  // 承認は自動で通すが「全部素通し」ではない。bypassPermissions は封じたまま。
-  p.defaultMode = "acceptEdits";
-  p.disableBypassPermissionsMode = "disable";
-  if (wall) {
-    // 壁と記録は 1 つも外さない（そのまま持ち込む）。念のため壁を明示的に立て直す。
-    //
-    // failIfUnavailable: 壁（Seatbelt）を立ち上げられなかったとき、素通しで走らずに失敗させる。
-    // 壁がある前提で承認を省く経路なので、宣言（settings の sandbox.enabled）だけでなく
-    // 実起動そのものを条件にしないと前提が崩れる。
-    // 実測（Claude Code 2.1.236 のバイナリ内文字列）:
-    //   "Sandbox required but unavailable: " / "Error: sandbox required but unavailable: "
-    //   ". Set sandbox.failIfUnavailable=false to allow unsandboxed execution."
-    // 恒久設定（configs/claude/settings.mac.json）には入れない。通常起動で詰まないように
-    // するためであり、承認を全部外すこのモードだけの条件として一時設定にのみ立てる。
-    src.sandbox = Object.assign({}, src.sandbox, {
-      enabled: true,
-      autoAllowBashIfSandboxed: true,
-      failIfUnavailable: true,
-    });
-  }
-  fs.writeFileSync(process.argv[2], JSON.stringify(src, null, 2));
-' "$claude_settings" "$tmp_settings"
+# 変換は scripts/common/longrun-claude-settings.js（d-claude の長時間おまかせモードと共通。v1.19.9 で
+# ここに書いていた同じ変換を移した）: ask は deny へ寄せる・承認は acceptEdits・bypass は封じたまま・
+# 壁があるときは壁を必須にする（failIfUnavailable。立ち上げられなければ素通しで走らずに失敗させる）。
+_lr_builder="$(cd "$_self_dir/.." && pwd)/common/longrun-claude-settings.js"
+if [ ! -f "$_lr_builder" ]; then
+  echo "このモードの設定づくりが見つかりません: $_lr_builder" >&2
+  echo "「1_安全パッケージを最新版にする」を実行してください。" >&2
+  exit 2
+fi
+if [ "$wall" -eq 1 ]; then
+  run_limited 30 node "$_lr_builder" "$claude_settings" "$tmp_settings" --wall
+else
+  run_limited 30 node "$_lr_builder" "$claude_settings" "$tmp_settings"
+fi
 chmod 600 "$tmp_settings"
 
 claude_args=(--settings "$tmp_settings" --setting-sources user,project,local)

@@ -239,8 +239,10 @@ test('OpenCode ランチャーは --resume を受けて opencode --continue を�
 test('統合ランチャーは「続きから」を OpenCode へ渡す', () => {
   const mac = read('scripts/macos/launch-integrated.sh');
   // v1.17.1 で --longrun、v1.18.0 で --free / --plan（モデル切り替え）を追加した。
-  assert.match(mac, /--websearch\|--longrun\|--resume\|--free\|--plan\|--project=\*\)/,
-    'mac: --longrun / --resume / --free / --plan / --project= を受け付けること');
+  // v1.19.9 で --longrun は d-claude にも許すため、別の行（--longrun)）に分けた。
+  assert.match(mac, /--websearch\|--resume\|--free\|--plan\|--project=\*\)/,
+    'mac: --resume / --free / --plan / --project= を受け付けること');
+  assert.match(mac, /\n\s*--longrun\)\n/, 'mac: --longrun を受け付けること');
   assert.match(mac, /oc_launcher="\$hooks\/opencode\/launch-opencode-deepseek\.sh"/);
   assert.match(mac, /bash "\$oc_launcher" "\$workspace" "\$extra" "\$extra2"/);
 

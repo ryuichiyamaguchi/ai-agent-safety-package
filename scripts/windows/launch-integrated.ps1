@@ -9,7 +9,8 @@
     [Alias('Profile')]
     [string]$SafetyProfile = 'standard',
     [switch]$WebSearch,
-    # OpenCode のみ。長時間おまかせモード（確認を出さない代わりに ask を deny 側へ倒す）。
+    # OpenCode と d-claude（v1.19.9）。長時間おまかせモード（確認を出さない代わりに ask を deny 側へ倒す）。
+    # どちらも launch-longrun.ps1 から渡される。
     [switch]$LongRun,
     # OpenCode のみ。前回のセッションを開き直す。
     [switch]$Resume,
@@ -208,7 +209,7 @@ if ($Agent -eq 'codex' -and $SafetyProfile -ne 'standard') { throw 'Codex は st
 if ($Agent -eq 'opencode' -and $SafetyProfile -ne 'standard') { throw 'OpenCode は standard モードで起動してください。' }
 if ($Agent -eq 'd-claude' -and $SafetyProfile -ne 'standard') { throw 'd-claude は standard モードで起動してください。' }
 if ($WebSearch -and $Agent -ne 'opencode') { throw '-WebSearch は OpenCode だけで指定できます。' }
-if ($LongRun -and $Agent -ne 'opencode') { throw '-LongRun は OpenCode だけで指定できます。' }
+if ($LongRun -and $Agent -ne 'opencode' -and $Agent -ne 'd-claude') { throw '-LongRun は OpenCode と d-claude だけで指定できます。' }
 if ($Resume -and $Agent -ne 'opencode') { throw '-Resume は OpenCode だけで指定できます。' }
 if ($Free -and $Agent -ne 'opencode') { throw '-Free は OpenCode だけで指定できます。' }
 if ($Plan -and $Agent -ne 'opencode') { throw '-Plan は OpenCode だけで指定できます。' }
@@ -348,7 +349,9 @@ try {
             $env:ANTHROPIC_CUSTOM_MODEL_OPTION = 'deepseek-v4-pro'
             $env:ANTHROPIC_CUSTOM_MODEL_OPTION_NAME = 'DeepSeek V4 Pro'
             $env:ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION = 'むずかしい作業向け。V4.1 Flash より料金が高くなります'
-            & $powerShell.Source -NoProfile -ExecutionPolicy Bypass -File $deepseekGateway -Workspace $Workspace
+            $gwArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $deepseekGateway, '-Workspace', $Workspace)
+            if ($LongRun) { $gwArgs += '-LongRun' }
+            & $powerShell.Source @gwArgs
             $exitCode = $LASTEXITCODE
         }
     }

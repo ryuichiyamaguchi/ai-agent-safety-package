@@ -261,6 +261,7 @@ for _sec in \
   "scripts/common/apply-global-opencode.js" \
   "scripts/common/apply-global-deny.js" \
   "scripts/common/workspace-snapshot.js" \
+  "scripts/common/longrun-claude-settings.js" \
   "scripts/common/stage-global-runtime.js" \
   "scripts/macos/apply-global-guard.sh" \
   "scripts/macos/uninstall-global-guard.sh" \

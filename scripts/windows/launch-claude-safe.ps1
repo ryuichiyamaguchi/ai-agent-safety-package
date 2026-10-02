@@ -2,7 +2,10 @@
     [string]$Workspace = (Get-Location).Path,
     [string]$Prompt = "",
     # --assisted 相当: AI グレーゾーン自動承認を有効化（既定 OFF）。mac の launch-claude-safe.sh と対称。
-    [switch]$Assisted
+    [switch]$Assisted,
+    # 長時間おまかせモード（v1.19.9）。d-claude を launch-longrun.ps1 から起動するとき、
+    # launch-integrated.ps1 → launch-deepseek-gateway.ps1 を通って渡ってくる。下の「長時間おまかせモード」を参照。
+    [switch]$LongRun
 )
 
 # 事前に AI_SAFE_ASSISTED_APPROVAL=1 が立っていればそのまま尊重し、-Assisted 指定時は立てる。
@@ -94,6 +97,33 @@ if (-not $Claude) {
     exit 1
 }
 
+# 長時間おまかせモード（v1.19.9）: 恒久的な設定ファイルは書き換えず、このモードの差分だけを当てた
+# 一時設定（ask は deny へ寄せる・承認は acceptEdits・bypass は封じたまま）を作って渡し、終了時に消す。
+# 変換は launch-longrun.ps1（Claude）と同じ scripts\common\longrun-claude-settings.js。
+# Windows には壁（Claude Code の OS サンドボックス）が無いので --wall は付けない（宣言だけして守れて
+# いるように見せない）。壁が無いことの同意は launch-longrun.ps1 で取ってある。
+$permissionMode = "default"
+$longRunDir = $null
+if ($LongRun) {
+    $lrBuilder = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, '..', 'common', 'longrun-claude-settings.js'))
+    if (-not (Test-Path -LiteralPath $lrBuilder -PathType Leaf)) {
+        throw ("長時間おまかせモードの設定づくりが見つかりません: " + $lrBuilder + "（「1_安全パッケージを最新版にする」を実行してください）")
+    }
+    $lrNode = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $lrNode) { throw "node コマンドが見つかりません（このモードの設定づくりに必要です）。" }
+    $longRunDir = Join-Path ([System.IO.Path]::GetTempPath()) ('ai-safe-longrun-' + [System.Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $longRunDir | Out-Null
+    $lrSettings = Join-Path $longRunDir 'settings.json'
+    $lrRun = Invoke-NativeQuiet -File $lrNode.Source -Arguments @($lrBuilder, $settings, $lrSettings)
+    if ($lrRun.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $lrSettings -PathType Leaf)) {
+        Remove-Item -LiteralPath $longRunDir -Recurse -Force -ErrorAction SilentlyContinue
+        throw ("このモード用の設定を作れませんでした。" + $lrRun.Error)
+    }
+    $settings = $lrSettings
+    $permissionMode = "acceptEdits"
+    Write-Host '（長時間おまかせモード。終了すると一時設定は自動で消えます）'
+}
+
 $argsList = @("--settings", $settings, "--setting-sources", "user,project,local")
 # claude --help で --permission-mode が存在するか確認してから付ける
 $helpText = ""
@@ -102,7 +132,7 @@ try {
     $helpText = ($helpRun.Output + "`n" + $helpRun.Error)
 } catch { $helpText = "" }
 if ($helpText -match "--permission-mode") {
-    $argsList = @("--permission-mode", "default") + $argsList
+    $argsList = @("--permission-mode", $permissionMode) + $argsList
 }
 
 # C: Claude Code の版チェック（素の claude-safe / d-claude 共通）。動作確認済みの版
@@ -266,9 +296,15 @@ fs.writeFileSync(process.argv[2], JSON.stringify({ mcpServers: servers }));
     }
 }
 
-if ($Prompt -and $Prompt.Trim().Length -gt 0) {
-    & $Claude @argsList $Prompt
-} else {
-    & $Claude @argsList
+$claudeExit = 0
+try {
+    if ($Prompt -and $Prompt.Trim().Length -gt 0) {
+        & $Claude @argsList $Prompt
+    } else {
+        & $Claude @argsList
+    }
+    $claudeExit = $LASTEXITCODE
+} finally {
+    if ($longRunDir) { Remove-Item -LiteralPath $longRunDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
-exit $LASTEXITCODE
+exit $claudeExit

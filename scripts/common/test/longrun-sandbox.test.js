@@ -37,11 +37,11 @@ test('長時間おまかせモードの実体が mac / Windows の両方にあ�
     'Claude 専用だった旧実体が残っている');
 });
 
-test('4 エンジンから選べる（Claude 専用に戻っていない）', () => {
+test('5 エンジンから選べる（Claude 専用に戻っていない。d-claude は v1.19.9 から）', () => {
   const sh = fs.readFileSync(SCRIPT, 'utf8');
   const ps1 = fs.readFileSync(SCRIPT_WIN, 'utf8');
   for (const src of [sh, ps1]) {
-    for (const engine of ['claude', 'codex', 'opencode', 'agy']) {
+    for (const engine of ['claude', 'codex', 'opencode', 'agy', 'd-claude']) {
       assert.ok(src.includes(engine), `エンジン ${engine} の選択肢がない`);
     }
   }
@@ -52,7 +52,10 @@ test('Windows 版が「起動を拒否するだけ」に戻っていない', () 
   assert.ok(ps1.includes('launch-codex-safe.ps1'), 'Windows の Codex 経路がない');
   assert.ok(ps1.includes('launch-agy-safe.ps1'), 'Windows の agy 経路がない');
   assert.ok(ps1.includes('launch-integrated.ps1'), 'Windows の OpenCode 経路がない');
-  assert.ok(ps1.includes('disableBypassPermissionsMode'), 'Windows の Claude 経路の封印がない');
+  // 封印（disableBypassPermissionsMode）は共通の変換（longrun-claude-settings.js）が立てる（v1.19.9）。
+  assert.ok(ps1.includes('longrun-claude-settings.js'), 'Windows の Claude 経路が共通の変換を使っていない');
+  assert.ok(fs.readFileSync(path.join(PKG, 'scripts', 'common', 'longrun-claude-settings.js'), 'utf8')
+    .includes('disableBypassPermissionsMode'), '共通の変換に封印がない');
   assert.ok(!/いまは Mac でだけ使えます/.test(ps1), 'Windows で起動を拒否する旧仕様が残っている');
 });
 

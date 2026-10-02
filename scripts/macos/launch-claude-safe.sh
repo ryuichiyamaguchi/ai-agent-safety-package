@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# このスクリプト自身の置き場所（途中で cd しても変わらないよう、最初に一度だけ求める）。
+_self_dir="$(cd "$(dirname "$0")" && pwd)"
 
 # 受講者のシェルに残っていた AI_SAFE_POLICY / AI_SAFE_ROOT で deny 床ごと差し替えられる
 # のを防ぐため、起動時に必ず捨てる（このあと同梱ポリシーを自分で設定する）。
@@ -15,10 +17,15 @@ unset AI_SAFE_POLICY AI_SAFE_ROOT
 # --assisted opt-in: AI グレーゾーン自動承認を有効化（既定 OFF）。フラグを引数列から
 # 取り除いてから従来の位置引数（workspace / prompt）を解釈する。事前に環境変数
 # AI_SAFE_ASSISTED_APPROVAL=1 が立っている場合もそのまま尊重して引き継ぐ。
+# --longrun: 長時間おまかせモード（v1.19.9）。d-claude を launch-longrun.sh から起動するとき、
+# launch-integrated.sh → launch-deepseek-gateway.sh を通って渡ってくる。下の「長時間おまかせモード」を参照。
 _args=()
+_longrun=0
 for _a in "$@"; do
   if [ "$_a" = "--assisted" ]; then
     export AI_SAFE_ASSISTED_APPROVAL=1
+  elif [ "$_a" = "--longrun" ]; then
+    _longrun=1
   else
     _args+=("$_a")
   fi
@@ -74,10 +81,41 @@ if [ -n "$_expected_cc_ver" ]; then
   fi
 fi
 
+# 長時間おまかせモード（v1.19.9）: 恒久的な設定ファイルは書き換えず、このモードの差分だけを当てた
+# 一時設定（ask は deny へ寄せる・承認は acceptEdits・bypass は封じたまま）を作って渡し、終了時に消す。
+# 変換は launch-longrun.sh（Claude）と同じ scripts/common/longrun-claude-settings.js。
+# 壁（sandbox-exec ＋ 作業フォルダの sandbox.enabled）があるときは、壁を必須にする（--wall）。
+# 判定の条件は launch-longrun.sh の has_wall claude と同じ。
+_permission_mode="default"
+if [ "$_longrun" = "1" ]; then
+  _lr_builder="$(cd "$_self_dir/.." && pwd)/common/longrun-claude-settings.js"
+  [ -f "$_lr_builder" ] || { echo "長時間おまかせモードの設定づくりが見つかりません: $_lr_builder" >&2; echo "「1_安全パッケージを最新版にする」を実行してください。" >&2; exit 2; }
+  command -v node >/dev/null 2>&1 || { echo "node コマンドが見つかりません（このモードの設定づくりに必要です）。" >&2; exit 1; }
+  _lr_wall=""
+  if [ -x /usr/bin/sandbox-exec ] && node -e '
+      const fs=require("fs");
+      const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+      process.exit(s && s.sandbox && s.sandbox.enabled === true ? 0 : 1);
+    ' "$settings" >/dev/null 2>&1; then
+    _lr_wall="--wall"
+  fi
+  _lr_dir="$(mktemp -d "${TMPDIR:-/tmp}/ai-safe-longrun.XXXXXX")"
+  chmod 700 "$_lr_dir"
+  trap 'rm -rf "$_lr_dir"' EXIT INT TERM HUP
+  if [ -n "$_lr_wall" ]; then
+    node "$_lr_builder" "$settings" "$_lr_dir/settings.json" --wall || { echo "このモード用の設定を作れませんでした。" >&2; exit 1; }
+  else
+    node "$_lr_builder" "$settings" "$_lr_dir/settings.json" || { echo "このモード用の設定を作れませんでした。" >&2; exit 1; }
+  fi
+  settings="$_lr_dir/settings.json"
+  _permission_mode="acceptEdits"
+  echo "（長時間おまかせモード。終了すると一時設定は自動で消えます）"
+fi
+
 # --permission-mode の対応有無を help で判定（非対応の Claude Code でも壊れないように）
 claude_args=(--settings "$settings" --setting-sources user,project,local)
 if claude --help 2>&1 | grep -q -- "--permission-mode"; then
-  claude_args=(--permission-mode default "${claude_args[@]}")
+  claude_args=(--permission-mode "$_permission_mode" "${claude_args[@]}")
 fi
 
 # d-claude（DeepSeek 駆動）のときだけ、正直さ・身元の上書き指示を system prompt に追記する。

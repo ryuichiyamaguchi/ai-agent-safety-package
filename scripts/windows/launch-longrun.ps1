@@ -6,7 +6,7 @@
 #   確認だけを省く。
 #
 # 対応:
-#   Claude / Codex / OpenCode / AntiGravity(agy) の 4 つ。
+#   Claude / Codex / OpenCode / AntiGravity(agy) / d-claude（DeepSeek で動かす Claude Code。v1.19.9）の 5 つ。
 #   （mac 側の実体は scripts/macos/launch-longrun.sh）
 #
 # 「壁」の有無:
@@ -27,7 +27,7 @@
 #     記録（hooks / 監査ログ）も外さない、恒久的な設定ファイルは書き換えない。
 param(
     [string]$Workspace = "$env:USERPROFILE\Documents\my-ai-workspace",
-    [ValidateSet('', 'claude', 'codex', 'opencode', 'agy')]
+    [ValidateSet('', 'claude', 'codex', 'opencode', 'agy', 'd-claude')]
     [string]$Engine = '',
     [string]$Prompt = ''
 )
@@ -134,6 +134,7 @@ function Engine-Label {
         'codex' { 'Codex' }
         'opencode' { 'OpenCode' }
         'agy' { 'AntiGravity' }
+        'd-claude' { 'd-claude（DeepSeek）' }
         default { $Name }
     }
 }
@@ -153,6 +154,7 @@ if (-not $Engine) {
     Write-Host ('    2) Codex        （' + (Wall-Text 'codex') + '）')
     Write-Host ('    3) OpenCode     （' + (Wall-Text 'opencode') + '）')
     Write-Host ('    4) AntiGravity  （' + (Wall-Text 'agy') + '）')
+    Write-Host ('    5) d-claude（DeepSeek）（' + (Wall-Text 'd-claude') + '）')
     Write-Host ''
     Write-Host '    0) やめる'
     Write-Host ''
@@ -165,6 +167,7 @@ if (-not $Engine) {
         '2' { $Engine = 'codex' }
         '3' { $Engine = 'opencode' }
         '4' { $Engine = 'agy' }
+        '5' { $Engine = 'd-claude' }
         '0' { Write-Host 'やめました。'; exit 0 }
         default { Write-Host 'やめました。'; exit 0 }
     }
@@ -195,6 +198,12 @@ if ($wall) {
     Write-Host '  止まるのは危険コマンドの禁止リストだけです。'
 }
 Write-Host ''
+if ($Engine -eq 'd-claude') {
+    Write-Host '  d-claude は DeepSeek のキーで動きます。作業の内容は、送信内容の検査（Gateway）を'
+    Write-Host '  通してから DeepSeek へ送られます。危険とまでは言えないコマンドは、AI が判定して'
+    Write-Host '  通します（d-claude のふだんの起動と同じです）。'
+    Write-Host ''
+}
 Write-Host '  それでも止まるもの（外していません）:'
 Write-Host '    ・再帰削除（rm -rf など）'
 Write-Host '    ・秘密ファイルの読み取り（.env / SSH 鍵 / クラウドの資格情報）'
@@ -256,6 +265,14 @@ if ($Engine -eq 'opencode') {
     & (Join-Path $hooks 'launch-integrated.ps1') -Workspace $Workspace -Agent opencode -SafetyProfile standard -LongRun
     exit $LASTEXITCODE
 }
+if ($Engine -eq 'd-claude') {
+    # d-claude も統合ランチャー経由（キーの確認・DeepSeek へ送ることへの同意・モデルの指定・送信検査
+    # ゲートウェイの起動を、ふだんの d-claude と同じ道筋で行う）。-LongRun はゲートウェイを通って
+    # launch-claude-safe.ps1 まで届き、そこでこのモード用の一時設定（ask → deny・acceptEdits）を作る。
+    $env:AI_SAFE_SNAPSHOT_ALREADY = $Workspace
+    & (Join-Path $hooks 'launch-integrated.ps1') -Workspace $Workspace -Agent d-claude -SafetyProfile standard -LongRun
+    exit $LASTEXITCODE
+}
 
 # --- ここから Claude 専用の経路 -------------------------------------------------------
 # 恒久的な設定ファイルは書き換えない。このモード用の差分だけを当てた JSON を一時フォルダへ
@@ -284,26 +301,17 @@ $tmpSettings = Join-Path $tmpDir 'settings.json'
 try {
     # Windows には壁が無いので sandbox 節は足さない（宣言だけして守れているように見せない）。
     # ask は空にし、そこにあったものは deny 側へ寄せる。緩める方向へは動かさない。
-    # このプログラムは「node build-settings.js 元の設定 書き出し先」の形でファイルとして実行する。
-    # その形では process.argv[1] がこのファイル自身になるので、引数は argv[2]・argv[3]。
-    # （v1.17.1〜v1.19.5 は argv[1]・argv[2] を読んでいて、自分自身を JSON として読み
-    #   「このモード用の設定を作れませんでした」で必ず止まっていた。2026-10 受講者 PC で判明）
-    $builder = @'
-const fs = require("fs");
-const src = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const p = src.permissions || (src.permissions = {});
-const ask = Array.isArray(p.ask) ? p.ask : [];
-const deny = Array.isArray(p.deny) ? p.deny.slice() : [];
-for (const rule of ask) if (!deny.includes(rule)) deny.push(rule);
-p.ask = [];
-p.deny = deny;
-p.defaultMode = "acceptEdits";
-p.disableBypassPermissionsMode = "disable";
-fs.writeFileSync(process.argv[3], JSON.stringify(src, null, 2));
-'@
-    $builderFile = Join-Path $tmpDir 'build-settings.js'
-    [System.IO.File]::WriteAllText($builderFile, $builder, (New-Object System.Text.UTF8Encoding($false)))
-    & $node.Source $builderFile $claudeSettings $tmpSettings
+    # 変換は scripts\common\longrun-claude-settings.js（mac の launch-longrun.sh・d-claude の長時間おまかせ
+    # モードと共通。v1.19.9 でここに書いていた同じ変換を移した）。
+    # （v1.17.1〜v1.19.5 はここで書き出したプログラムが argv[1]＝自分自身を JSON として読み、
+    #   「このモード用の設定を作れませんでした」で必ず止まっていた。2026-10 受講者 PC で判明・v1.19.6 で修正）
+    $lrBuilder = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, '..', 'common', 'longrun-claude-settings.js'))
+    if (-not (Test-Path -LiteralPath $lrBuilder -PathType Leaf)) {
+        Write-Host ('このモードの設定づくりが見つかりません: ' + $lrBuilder)
+        Write-Host '「1_安全パッケージを最新版にする」を実行してください。'
+        exit 2
+    }
+    & $node.Source $lrBuilder $claudeSettings $tmpSettings
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tmpSettings -PathType Leaf)) {
         Write-Host 'このモード用の設定を作れませんでした。'
         exit 1
