@@ -1,0 +1,30 @@
+# ガード 1 回にかかる時間の内訳を、本物の Windows PowerShell 5.1 で測る（手動実行のみ・合否なし）
+#
+# 受講者の PC で動くのは Windows PowerShell 5.1。mac の pwsh とは比率が違いうるので、ガードを
+# 速くする前後でここを流して比べる（scripts\windows\test\guard-timing.ps1）。
+# run: の中は ASCII だけにする（BOM なしの .ps1 として PowerShell 5.1 に渡されるため）。
+name: guard-timing
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  timing:
+    name: Guard timing on Windows PowerShell 5.1
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Keep committed line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Measure
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\test\guard-timing.ps1 -Repeat 7
