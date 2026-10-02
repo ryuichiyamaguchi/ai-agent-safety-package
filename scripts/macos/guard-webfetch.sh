@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -u
 AI_SAFE_MODE="webfetch"
-. "$(dirname "$0")/lib/safety_policy.sh"
+# 共通部品が読めないと、この先の関数呼び出しが「見つからない」(127) で終わり、Claude / Codex /
+# Gemini はそれを「止めない」と扱う（＝素通し）。読めなければ、ここで止める（v1.19.8）。
+. "$(dirname "$0")/lib/safety_policy.sh" && declare -F read_hook_input >/dev/null 2>&1 || {
+  printf 'AI Safety Guard FAILED CLOSED: 安全ガードの共通部品（lib/safety_policy.sh）を読み込めませんでした。導入（インストール）をやり直してください。\n' >&2
+  exit 2
+}
 read_hook_input
 . "$(dirname "$0")/lib/explainer.sh"
 explain

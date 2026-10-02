@@ -1,6 +1,7 @@
 ﻿# fail-closed-scope.test.ps1 — 「判定できないときだけ止める」範囲の回帰テスト（v1.19.7）
 #
 # Windows のガードは、判定と関係のない付随処理の失敗でも Fail-Closed（exit 2）して操作を止めていた。
+# 逆に、共通部品そのものが読めないときは止められずに素通しになっていた（4 で確認。v1.19.8）。
 #   ・記録ファイル（監査ログ）が書けない → 許可した操作まで止まる（v1.19.1・v1.19.7 の実害）
 #   ・解説カードの部品（lib\Explainer.ps1）が読めない → すべての判定が止まる
 #   ・古い安全ルールに無い項目（generatedCodeDenyRegex / packageVersion）を読む → StrictMode で例外
@@ -131,6 +132,21 @@ $null = ExpectBlock "壊れた入力は止める" $guardBash 'this is not json a
 $big = 'echo ' + ('a' * 300000)
 $null = ExpectBlock "上限超えの入力は分かる文面で止める" $guardWrite (WriteJson $okFile ('a' * 300000)) $goodLogs "256KB"
 $null = ExpectBlock "上限まで水増しして危険な後半を押し出しても止まる" $guardBash (BashJson ($big + '; ' + $danger)) $goodLogs "FAILED CLOSED"
+
+# --- 4) 共通部品が読めないときは止める（v1.19.8）-------------------------------
+# 部品が読めないと Fail-Closed そのものが無く、以前は exit 0（許可）で終わっていた。
+# Codex / Gemini / AntiGravity は -File で直接起動するので、そのまま素通しになっていた。
+$broken = New-PackageCopy "pkg-broken-lib"
+$bLib = Join-Path $broken "scripts\windows\lib\SafetyPolicy.ps1"
+$bw = Join-Path $broken "scripts\windows"
+$postJson = '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"echo hi"},"tool_response":{"stdout":"hi"}}'
+[System.IO.File]::WriteAllText($bLib, "function Broken( {`n", (New-Object System.Text.UTF8Encoding($true)))
+$null = ExpectBlock "共通部品が壊れていたらコマンドを止める" (Join-Path $bw "guard-bash.ps1") (BashJson 'npm test') $goodLogs "FAILED CLOSED"
+$null = ExpectBlock "共通部品が壊れていたら書き込みを止める" (Join-Path $bw "guard-write.ps1") (WriteJson $okFile 'hello') $goodLogs "FAILED CLOSED"
+$null = ExpectBlock "共通部品が壊れていたら Web 取得を止める" (Join-Path $bw "guard-webfetch.ps1") (FetchJson "https://github.com/example/repo") $goodLogs "FAILED CLOSED"
+$null = ExpectBlock "共通部品が壊れていたら出力の確認も止める" (Join-Path $bw "guard-post-output.ps1") $postJson $goodLogs "FAILED CLOSED"
+Remove-Item -LiteralPath $bLib -Force
+$null = ExpectBlock "共通部品が無ければコマンドを止める" (Join-Path $bw "guard-bash.ps1") (BashJson 'npm test') $goodLogs "FAILED CLOSED"
 
 Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host ""

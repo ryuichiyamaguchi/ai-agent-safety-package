@@ -1,7 +1,20 @@
 ﻿param()
 
+# 共通部品（lib\SafetyPolicy.ps1）は Fail-Closed そのものを定義している。読み込めないまま下の
+# catch へ落ちると Fail-Closed を呼べず、エラーを 1 行出して exit 0（＝許可）で終わっていた。
+# Codex / Gemini / AntiGravity はガードを -File で直接起動するので、部品が壊れたり消えたりすると
+# 危険なコマンドまで素通しになる（v1.19.8 で実測して修正）。読めなければ、ここで止める。
+$ErrorActionPreference = "Stop"
 try {
     . (Join-Path $PSScriptRoot "lib\SafetyPolicy.ps1")
+    Set-AiSafeConsoleUtf8
+} catch {
+    try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }
+    [Console]::Error.WriteLine("AI Safety Guard FAILED CLOSED: 安全ガードの共通部品（lib\SafetyPolicy.ps1）を読み込めませんでした。導入（インストール）をやり直してください: " + $_.Exception.Message)
+    exit 2
+}
+
+try {
     # 日本語のメッセージを出す前に、hook の出力を UTF-8 に固定する。
     # （PowerShell 5.1 の既定は CP932 で、Claude Code / Codex は UTF-8 として読むため）
     Set-AiSafeConsoleUtf8
