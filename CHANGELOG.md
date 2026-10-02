@@ -2,6 +2,15 @@
 
 AI エージェント安全運用パッケージの変更履歴です。新しい版が上にあります。最新版の要点は [README.md](README.md) にもあります。
 
+## v1.19.8：共通部品が読めないときに、安全ガードが素通しにならないように
+
+- 安全ガードは共通部品（mac `lib/safety_policy.sh`・Windows `lib\SafetyPolicy.ps1`）を読み込んでから判定します。この部品が壊れたり消えたりしていると、ガードは「止める」処理を呼べずに終わり、危険なコマンドまで素通しになっていました
+  - Windows: 許可（exit 0）で終わっていた。ガードを直接起動する Codex・Gemini・AntiGravity で素通し（Claude Code は外側の包みが止めていた）
+  - mac: 127 で終わっていた。Claude Code・Codex・Gemini とも「止めない」扱いで素通し
+- 操作を止める役のガード 4 本（コマンド・書き込み・Web 取得・出力の確認）で、共通部品を読み込めなかったら、その場で「FAILED CLOSED」を出して止めるようにしました。ふつうの判定は変わりません
+- 回帰テスト `scripts/macos/test/lib-load-fail-closed.test.sh` を足し、`fail-closed-scope.test.ps1` に同じ確認を足しました（修正前のコードでは mac 12 項目・Windows 5 項目が失敗）
+- 残る弱点: ガード本体のファイルそのものが無い・壊れている場合は、Codex・Gemini・AntiGravity ではまだ素通しになりえます（フックの呼び方を変える必要があるため別途）
+
 ## v1.19.7：Windows の安全ガードが、判定と関係のない失敗で止まらないように
 
 - Windows のガード（`guard-bash` / `guard-write` / `guard-webfetch` / `guard-post-output`）は、許可・確認・ブロックの判定が済んだあとでも、付随処理が失敗しただけで操作を止めていました（Fail-Closed）。mac と同じく、判定はそのまま出し、失敗は警告にしました
