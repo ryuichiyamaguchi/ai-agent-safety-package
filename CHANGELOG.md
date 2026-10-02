@@ -2,6 +2,11 @@
 
 AI エージェント安全運用パッケージの変更履歴です。新しい版が上にあります。最新版の要点は [README.md](README.md) にもあります。
 
+## v1.19.6：Windows で長時間おまかせモードが起動しない不具合の修正
+
+- Windows の長時間おまかせモード（Claude）が「このモード用の設定を作れませんでした」で必ず止まっていた不具合を直しました（v1.17.1 から）。`launch-longrun.ps1` が書き出す設定づくりのプログラムは「node build-settings.js 元の設定 書き出し先」で実行されるのに、`process.argv[1]`（＝プログラム自身）を設定として読んでいました。`argv[2]`・`argv[3]` に直しました
+- 回帰テスト `scripts/common/test/longrun-windows-builder.test.js` を足しました（.ps1 からプログラムを取り出し、Windows と同じ呼び方で本物の設定から一時設定を作る）
+
 ## v1.19.5：「AIツールをまとめて入れる」で、入っていないツールも新しく入る
 
 - 「2_AIツールをまとめて入れる」（`update-ai-tools.{sh,ps1}`）が、入っていない Codex CLI・Claude Code・OpenCode を npm で、agy を公式インストーラーで新しく入れるようにしました（入っているものは従来どおり更新。agy の更新は公式の自動更新に任せる）

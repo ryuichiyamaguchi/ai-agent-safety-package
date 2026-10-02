@@ -284,9 +284,13 @@ $tmpSettings = Join-Path $tmpDir 'settings.json'
 try {
     # Windows には壁が無いので sandbox 節は足さない（宣言だけして守れているように見せない）。
     # ask は空にし、そこにあったものは deny 側へ寄せる。緩める方向へは動かさない。
+    # このプログラムは「node build-settings.js 元の設定 書き出し先」の形でファイルとして実行する。
+    # その形では process.argv[1] がこのファイル自身になるので、引数は argv[2]・argv[3]。
+    # （v1.17.1〜v1.19.5 は argv[1]・argv[2] を読んでいて、自分自身を JSON として読み
+    #   「このモード用の設定を作れませんでした」で必ず止まっていた。2026-10 受講者 PC で判明）
     $builder = @'
 const fs = require("fs");
-const src = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const src = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const p = src.permissions || (src.permissions = {});
 const ask = Array.isArray(p.ask) ? p.ask : [];
 const deny = Array.isArray(p.deny) ? p.deny.slice() : [];
@@ -295,7 +299,7 @@ p.ask = [];
 p.deny = deny;
 p.defaultMode = "acceptEdits";
 p.disableBypassPermissionsMode = "disable";
-fs.writeFileSync(process.argv[2], JSON.stringify(src, null, 2));
+fs.writeFileSync(process.argv[3], JSON.stringify(src, null, 2));
 '@
     $builderFile = Join-Path $tmpDir 'build-settings.js'
     [System.IO.File]::WriteAllText($builderFile, $builder, (New-Object System.Text.UTF8Encoding($false)))
