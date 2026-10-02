@@ -5,7 +5,8 @@
 //   1. スタートフォルダが新番号体系（基本 1..12・上級 1..8+9、重複なし）で揃っている
 //   2. AI ツール更新ボタンが mac/win 両方にあり、Codex / Claude Code / OpenCode の
 //      3 つとも latest 追従になっている (2026-08-20 に Claude Code の固定を撤廃)
-//   3. agy はボタン更新の対象外（公式の自動更新に任せる）
+//   3. 入っていないツールは新しく入れる（v1.19.5〜）。agy は npm ではなく公式インストーラーで
+//      入れ、入っているときの更新は公式の自動更新に任せる
 //   4. install が旧名ボタンを掃除する（旧新併存による番号重複を再発させない）。
 //      掃除対象は既知の旧名だけで、受講者の自作ファイルは消さない
 const { test } = require('node:test');
@@ -122,7 +123,6 @@ test('tested-tool-versions.json が SSOT として存在し、全ツールが最
   for (const file of [
     'scripts/macos/launch-claude-safe.sh',
     'scripts/windows/launch-claude-safe.ps1',
-    '0_AIツールをまとめて入れる-Mac.command',
   ]) {
     const text = read(file);
     assert.ok(text.includes('claude-code@latest'), `${file} が @latest を指していない`);
@@ -137,17 +137,21 @@ test('tested-tool-versions.json が SSOT として存在し、全ツールが最
 // ── 3. AI ツール更新スクリプト（mac / win 対称） ─────────────────────────
 // 2026-08-20: Claude Code の固定版インストールを撤廃したので、期待値を
 // 「pin 版で入れる／latest にしてはいけない」から「3 ツールとも latest 追従」へ変更した。
-test('update-ai-tools.sh: Codex/Claude/OpenCode は latest・agy は対象外', () => {
+test('update-ai-tools.sh: 入っていないものは新しく入れ、Codex/Claude/OpenCode は latest・agy は公式インストーラー', () => {
   const sh = read('scripts/macos/update-ai-tools.sh');
   assert.match(sh, /@openai\/codex@latest/);
   assert.match(sh, /opencode-ai@latest/);
   assert.match(sh, /@anthropic-ai\/claude-code@\$claude_pin/, 'Claude Code は SSOT の値で入れること');
-  assert.ok(!/claude_pin="\$\(json_value claudeCode\)"[\s\S]{0,400}?Claude Code の更新はスキップ/.test(sh),
-    '表が無いときに Claude Code の更新を丸ごとスキップする分岐は撤廃済み（latest にフォールバックする）');
   assert.match(sh, /claude_pin="latest"/, '表が読めないときは latest にフォールバックすること');
-  assert.match(sh, /command -v/, '未インストールのツールは存在確認でスキップすること');
-  assert.ok(!/npm install -g\s+(agy|antigravity)/i.test(sh), 'agy をボタンから入れ直さないこと');
-  assert.match(sh, /agy \(AntiGravity\) はこのボタンでは更新しません/);
+  assert.match(sh, /入っていないので、新しく入れます/, '未インストールのツールも新しく入れること（v1.19.5〜）');
+  assert.doesNotMatch(sh, /新規インストールはしません/, '旧方針（未インストールはスキップ）の文言が残っていないこと');
+  assert.ok(!/npm install -g\s+(agy|antigravity)/i.test(sh), 'agy は npm では入れないこと');
+  assert.match(sh, /https:\/\/antigravity\.google\/cli\/install\.sh/, 'agy は公式インストーラーで入れること');
+  assert.match(sh, /--proto '=https'/, 'agy のインストーラーは https だけで取得すること');
+  const shCode = sh.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.doesNotMatch(shCode, /curl[^\n|]*\|\s*(ba)?sh/, 'ダウンロードしたものをそのままシェルに流さないこと（一度ファイルに保存する）');
+  assert.match(sh, /agy \(AntiGravity\) はこのボタンでは更新しません/, '入っている agy は更新せず公式の自動更新に任せること');
+  assert.match(sh, /\.local\/bin\/agy/, 'launch-agy-safe.sh と同じ場所も探すこと');
   assert.match(sh, /結果まとめ/, '最後にまとめを表示すること');
   assert.match(sh, /9_困ったとき診断/, '失敗時の案内が診断ボタンへ誘導すること');
   assert.match(sh, /スタート\.html の Step 0/, 'npm 不在時は Step 0 へ案内すること');
@@ -164,12 +168,30 @@ test('update-ai-tools.ps1: 内容が mac 版と対称で、PowerShell 5.1 の作
   assert.match(ps, /@anthropic-ai\/claude-code@/, 'Claude Code は SSOT の値で入れること');
   assert.match(ps, /\$claudePin = "latest"/, '表が読めないときは latest にフォールバックすること');
   assert.ok(!/claude-code@\d+\.\d+\.\d+/.test(ps), '固定版の直書きが残っていないこと');
-  assert.match(ps, /Get-Command/, '未インストールのツールは存在確認でスキップすること');
-  assert.ok(!/npm install -g\s+(agy|antigravity)/i.test(ps), 'agy をボタンから入れ直さないこと');
+  assert.match(ps, /入っていないので、新しく入れます/, '未インストールのツールも新しく入れること（v1.19.5〜）');
+  assert.doesNotMatch(ps, /新規インストールはしません/);
+  assert.ok(!/npm install -g\s+(agy|antigravity)/i.test(ps), 'agy は npm では入れないこと');
+  assert.match(ps, /https:\/\/antigravity\.google\/cli\/install\.ps1/, 'agy は公式インストーラーで入れること');
+  const psCode = ps.split(/\r?\n/).filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.doesNotMatch(psCode, /\|\s*iex/i, 'ダウンロードしたものをそのまま実行しないこと（一度ファイルに保存する）');
+  assert.match(ps, /Antigravity\\agy\.exe/, 'launch-agy-safe.ps1 と同じ場所も探すこと');
   assert.match(ps, /agy \(AntiGravity\) はこのボタンでは更新しません/);
   assert.match(ps, /結果まとめ/, '最後にまとめを表示すること');
   assert.match(ps, /9_困ったとき診断/);
   assert.match(ps, /スタート\.html の Step 0/);
+});
+
+test('0_AIツールをまとめて入れる は update-ai-tools を呼ぶだけ（処理を 1 本にまとめた）', () => {
+  const cmd = read('0_AIツールをまとめて入れる-Mac.command');
+  assert.match(cmd, /scripts\/macos\/update-ai-tools\.sh/);
+  assert.doesNotMatch(cmd, /npm install -g/, '導入処理の写しを持たないこと');
+  const batBytes = fs.readFileSync(path.join(root, '0_AIツールをまとめて入れる-Windows.bat'));
+  assert.ok(batBytes[0] !== 0xef, '.bat に BOM を付けない');
+  const bat = readSjis('0_AIツールをまとめて入れる-Windows.bat');
+  assert.match(bat, /chcp 932/);
+  assert.match(bat, /scripts\\windows\\update-ai-tools\.ps1/);
+  assert.doesNotMatch(bat, /npm install -g/);
+  assert.ok(bat.includes('\r\n'), '.bat は CRLF であること');
 });
 
 // ── 4. ボタン（薄いラッパー）────────────────────────────────────────────

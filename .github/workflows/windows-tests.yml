@@ -10,8 +10,10 @@
 #   install-doctor   : 日本語名の作業フォルダへ導入 → 診断（出荷条件 C の足がかり）
 #   playwright       : Playwright MCP を事前に入れ、ネットワーク無しで起動できること
 #                      （教室一斉起動の時間切れ対策・2026-10。npm.cmd / 空白入りのホームも通す）
+#   ai-tools         : 「AIツールをまとめて入れる」が、入っていない Codex CLI / Claude Code /
+#                      OpenCode / agy を本当に新しく入れること（v1.19.5。本物の npm と公式インストーラー）
 #
-# 4 本とも必須（落ちたら赤になる）。最初の 3 本は v1.19.1 で様子見を外し、playwright は 2026-10 に追加した。
+# 5 本とも必須（落ちたら赤になる）。最初の 3 本は v1.19.1 で様子見を外し、playwright と ai-tools は 2026-10 に追加した。
 #
 # 改行: Windows の git は既定で LF を CRLF に変換して取り出すため、導入時のハッシュ照合が
 # 配布 ZIP（git archive = コミットしたバイト列そのまま）と食い違う。checkout 前に変換を止める。
@@ -116,3 +118,32 @@ jobs:
           $env:HOME = $home2
           node scripts\common\test\ci-playwright-startup.js
           exit $LASTEXITCODE
+
+  ai-tools:
+    name: AI tools button installs missing tools (real install)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Keep committed line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      # run: の中は ASCII だけにする（BOM なしの .ps1 として PowerShell 5.1 に渡されるため）。
+      - name: Run update-ai-tools.ps1 and check that all four tools are installed
+        env:
+          AI_SAFE_NO_PROMPT: '1'
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\update-ai-tools.ps1 -Workspace $env:GITHUB_WORKSPACE
+          $missing = @()
+          foreach ($c in @('codex', 'claude', 'opencode')) {
+            if (-not (Get-Command $c -ErrorAction SilentlyContinue)) { $missing += $c }
+          }
+          $agyFiles = @((Join-Path $env:LOCALAPPDATA 'Antigravity\agy.exe'), (Join-Path $env:USERPROFILE '.local\bin\agy.exe')) | Where-Object { Test-Path -LiteralPath $_ }
+          if (-not (Get-Command agy -ErrorAction SilentlyContinue) -and -not $agyFiles) { $missing += 'agy' }
+          if ($missing.Count -gt 0) { Write-Host ('missing after install: ' + ($missing -join ', ')); exit 1 }
+          Write-Host 'codex, claude, opencode and agy are installed'
