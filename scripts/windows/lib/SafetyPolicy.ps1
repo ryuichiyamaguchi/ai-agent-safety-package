@@ -58,6 +58,14 @@ function Test-AiSafeSameFileContent([string]$Path, [string[]]$Others) {
     return $false
 }
 
+# ---------------------------------------------------------------------------
+# 判定の道筋では、ファイル操作に Join-Path / Test-Path / Resolve-Path / Get-Content などを使わない（v1.19.9）。
+# これらは Microsoft.PowerShell.Management モジュールの命令で、起動後に初めて使うときにモジュールの
+# 読み込みが走る（本物の Windows PowerShell 5.1 で約 90 ms・mac の pwsh で約 190 ms。
+# scripts\windows\test\guard-timing.ps1 で計測）。フックは操作のたびに新しいプロセスなので、毎回
+# この準備を払っていた。同じことを .NET の機能で直接行う。パスは区切り文字を書かずに要素ごとに
+# 渡す（mac の pwsh で動かすテストでも同じパスになるように）。
+# ---------------------------------------------------------------------------
 function Get-SafetyPolicyPath {
     # 同梱ポリシー: このスクリプト自身の置き場所から決まる唯一の基準点。
     # 環境変数では動かせないため、deny 床をまるごと差し替える攻撃の足場にならない。
@@ -65,11 +73,11 @@ function Get-SafetyPolicyPath {
     $root = $PSScriptRoot
     for ($i = 0; $i -lt 5; $i++) {
         if ($root) {
-            $candidate = Join-Path $root "policy\safety-policy.json"
-            if (Test-Path -LiteralPath $candidate) {
-                $trusted += (Resolve-Path -LiteralPath $candidate).Path
+            $candidate = [System.IO.Path]::Combine($root, 'policy', 'safety-policy.json')
+            if ([System.IO.File]::Exists($candidate)) {
+                $trusted += [System.IO.Path]::GetFullPath($candidate)
             }
-            $root = Split-Path -Parent $root
+            $root = [System.IO.Path]::GetDirectoryName($root)
         }
     }
 
@@ -77,10 +85,10 @@ function Get-SafetyPolicyPath {
     # 別の（無害な正規表現に差し替えた）ポリシーを指していたら黙って無視する。
     $external = @()
     if ($env:AI_SAFE_POLICY) { $external += $env:AI_SAFE_POLICY }
-    if ($env:AI_SAFE_ROOT) { $external += (Join-Path $env:AI_SAFE_ROOT "policy\safety-policy.json") }
+    if ($env:AI_SAFE_ROOT) { $external += [System.IO.Path]::Combine($env:AI_SAFE_ROOT, 'policy', 'safety-policy.json') }
     foreach ($candidate in $external) {
-        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
-            $resolved = (Resolve-Path -LiteralPath $candidate).Path
+        if ($candidate -and [System.IO.File]::Exists($candidate)) {
+            $resolved = [System.IO.Path]::GetFullPath($candidate)
             if ($trusted -contains $resolved) { return $resolved }
             # 置き場所が違うだけで中身が同梱のものと同じなら、何も言わずに同梱のほうを使う（結果は同じ）。
             # PC 全体のガード（~/.ai-safety/global）は、ランチャーが作業フォルダ側の安全ルールを
@@ -165,7 +173,7 @@ function Assert-SafetyFloor([object]$Policy, [string]$Path) {
 
 function Get-SafetyPolicy {
     $path = Get-SafetyPolicyPath
-    $json = Get-Content -LiteralPath $path -Raw -Encoding UTF8
+    $json = [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)
     $policy = $json | ConvertFrom-Json
     # 読み込めただけでは不十分。床が実際に効くことを確認してから返す（fail-closed）。
     Assert-SafetyFloor $policy $path
@@ -226,7 +234,7 @@ function Get-ToolInput([object]$HookInput) {
 function Get-HookCwd([object]$HookInput) {
     $v = Get-JsonValue $HookInput @("cwd", "workspace", "workspace_root")
     if ($v) { return [string]$v }
-    return (Get-Location).Path
+    return $PWD.Path
 }
 
 function Get-CommandText([object]$HookInput) {
@@ -406,7 +414,10 @@ function Resolve-SafePath([string]$Path, [string]$Cwd) {
     if ([System.IO.Path]::IsPathRooted($Path)) {
         return [System.IO.Path]::GetFullPath($Path)
     }
-    return [System.IO.Path]::GetFullPath((Join-Path $Cwd $Path))
+    # Join-Path と同じく、mac の pwsh（テスト）では \ も区切りとして扱う。
+    $rel = $Path
+    if ([System.IO.Path]::DirectorySeparatorChar -eq '/') { $rel = $rel.Replace('\', '/') }
+    return [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($Cwd, $rel))
 }
 
 function Test-IsPathInside([string]$TargetPath, [string]$RootPath) {
@@ -455,7 +466,8 @@ function Set-AuditLogAcl([string]$Path) {
     #    その日最初の監査ログを作るときに呼ばれるため、5.1 では毎日最初のフックが 1 回
     #    fail-closed していた（v1.17.2〜v1.19.0。GitHub Actions の Windows PowerShell 5.1 で判明）。
     #    5.1 は Windows でしか動かないので、変数が無ければ Windows とみなす。
-    if ((Test-Path -LiteralPath 'variable:IsWindows') -and -not $IsWindows) { return }
+    #    （v1.19.9: 判定のたびに Management モジュールを読み込まないよう、Test-Path variable: の代わりに .NET で判定）
+    if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) { return }
     try {
         $sections = [System.Security.AccessControl.AccessControlSections]::Access
         $fi = New-Object System.IO.FileInfo $Path
@@ -622,24 +634,24 @@ function Write-AuditLog([object]$HookInput, [string]$Mode, [string]$Decision, [s
 
 function Write-AuditLogEntry([object]$HookInput, [string]$Mode, [string]$Decision, [string]$Reason, [string]$ObservedText, [object]$Policy) {
     $logDir = $env:AI_SAFE_LOG_DIR
-    if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
-    if (-not (Test-Path -LiteralPath $logDir)) {
-        New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    if (-not $logDir) { $logDir = [System.IO.Path]::Combine($HOME, '.ai-safety', 'logs') }
+    if (-not [System.IO.Directory]::Exists($logDir)) {
+        [void][System.IO.Directory]::CreateDirectory($logDir)
     }
-    $day = Get-Date -Format "yyyy-MM-dd"
-    $path = Join-Path $logDir ("events-" + $day + ".jsonl")
+    $day = [System.DateTime]::Now.ToString("yyyy-MM-dd", [System.Globalization.CultureInfo]::InvariantCulture)
+    $path = [System.IO.Path]::Combine($logDir, ("events-" + $day + ".jsonl"))
     # その日最初の 1 行だけ、ファイルを作って ACL を絞る。同時に動いたフックどうしで
     # New-Item -Force を使うと、後から来た側が先の行ごと空のファイルで上書きしたり、
     # 書き込み中のファイルにぶつかって落ちたりする。「無いときだけ作る」で開き、
     # 先を越されたら（もう有る）作った側に任せる。
     $isNew = $false
-    if (-not (Test-Path -LiteralPath $path)) {
+    if (-not [System.IO.File]::Exists($path)) {
         $created = $null
         try {
             $created = New-Object System.IO.FileStream($path, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
             $isNew = $true
         } catch {
-            if (-not (Test-Path -LiteralPath $path)) { throw }
+            if (-not [System.IO.File]::Exists($path)) { throw }
         } finally {
             if ($null -ne $created) { $created.Dispose() }
         }
@@ -648,7 +660,7 @@ function Write-AuditLogEntry([object]$HookInput, [string]$Mode, [string]$Decisio
         Set-AuditLogAcl $path
     }
     $entry = [PSCustomObject]@{
-        ts = (Get-Date).ToString("o")
+        ts = [System.DateTime]::Now.ToString("o")
         user = $env:USERNAME
         computer = $env:COMPUTERNAME
         mode = $Mode
@@ -731,9 +743,17 @@ function Ask-Action([object]$HookInput, [string]$Mode, [string]$Reason, [string]
 
 # 解説カード（now.html）を出す。解説は判定の付録なので、部品（Explainer.ps1）が読めなくても、
 # 途中で失敗しても、判定は続ける（v1.19.7。以前は部品が読めないと Fail-Closed していた）。
+# v1.19.9: 解説カードは待たない。explainer.js を切り離して起動し（Start-ExplainerJs）、すぐ判定へ戻る。
+# 起動できないとき（node が無い等）だけ、これまでどおり待つ形（Invoke-Explain の代わりの表示）で書く。
 function Invoke-AiSafeExplain([object]$HookInput, [string]$Mode, [object]$Policy) {
-    if (-not (Get-Command Invoke-Explain -CommandType Function -ErrorAction SilentlyContinue)) { return }
-    try { Invoke-Explain -HookInput $HookInput -Mode $Mode -Policy $Policy } catch { }
+    try {
+        if (Get-Command Start-ExplainerJs -CommandType Function -ErrorAction SilentlyContinue) {
+            if (Start-ExplainerJs $HookInput $Mode $Policy) { return }
+        }
+        if (Get-Command Invoke-Explain -CommandType Function -ErrorAction SilentlyContinue) {
+            Invoke-Explain -HookInput $HookInput -Mode $Mode -Policy $Policy
+        }
+    } catch { }
 }
 
 function Fail-Closed([string]$Mode, [string]$Message) {

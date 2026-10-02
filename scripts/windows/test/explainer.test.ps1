@@ -146,6 +146,51 @@ finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 
+# ---- 7) ガードの入口は解説カードを待たない（v1.19.9） ----
+# Invoke-AiSafeExplain は explainer.js を切り離して起動し、すぐ戻る。カードと監査の explain 行は
+# 少しあとに explainer.js が書く。入力の一時ファイルは読んだら消える。
+if (-not (Get-Command Invoke-AiSafeExplain -CommandType Function -ErrorAction SilentlyContinue)) {
+    . ([System.IO.Path]::Combine($repo, 'scripts', 'windows', 'lib', 'SafetyPolicy.ps1'))
+    Set-StrictMode -Off
+    $ErrorActionPreference = 'Continue'
+}
+if (Resolve-ExplainerNode) {
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("expltest-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    $env:AI_SAFE_LOG_DIR = $tmp
+    $env:AI_SAFE_CARDS_DIR = Join-Path $repo "configs\safety\cards"
+    $events = Join-Path $tmp ("events-" + [System.DateTime]::Now.ToString("yyyy-MM-dd", [System.Globalization.CultureInfo]::InvariantCulture) + ".jsonl")
+    [System.IO.File]::WriteAllText($events, "")
+    try {
+        $hook = '{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":"C:\\work","tool_input":{"command":"Get-ChildItem -Path C:\\Temp\\資料"}}' | ConvertFrom-Json
+        $pol = [PSCustomObject]@{ packageVersion = "9.9.9-test" }
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        Invoke-AiSafeExplain $hook "bash" $pol
+        $sw.Stop()
+        if ($sw.ElapsedMilliseconds -lt 2000) { Ok ("async: 入口は待たずに戻る（" + $sw.ElapsedMilliseconds + " ms）") } else { Ng ("async: 入口が " + $sw.ElapsedMilliseconds + " ms かかった") }
+        $deadline = [System.DateTime]::Now.AddSeconds(20)
+        $line = $null
+        while ([System.DateTime]::Now -lt $deadline) {
+            $text = [System.IO.File]::ReadAllText($events, [System.Text.Encoding]::UTF8)
+            $line = @($text -split "`n" | Where-Object { $_ -match '"decision":"explain"' }) | Select-Object -First 1
+            if ($line -and (Test-Path -LiteralPath (Join-Path $tmp "now.html"))) { break }
+            Start-Sleep -Milliseconds 200
+        }
+        $html = ""
+        if (Test-Path -LiteralPath (Join-Path $tmp "now.html")) { $html = [System.IO.File]::ReadAllText((Join-Path $tmp "now.html"), [System.Text.Encoding]::UTF8) }
+        if ($html -match "一覧を見ようとしています" -and $html -match "資料") { Ok "async: あとから now.html に具体解説が出る（日本語も化けない）" } else { Ng "async: now.html ができない、または中身が違う" }
+        if ($line) {
+            $o = $line | ConvertFrom-Json
+            if ($o.reason -match '^card=\S+ risk=\S+$' -and $o.packageVersion -eq "9.9.9-test" -and $o.tool_name -eq "Bash" -and $o.mode -eq "bash") { Ok "async: 監査ログに explain 行（カード・危険度・版・ツール名）が足される" } else { Ng ("async: explain 行の中身が違う: " + $line) }
+        } else { Ng "async: 監査ログに explain 行が足されない" }
+        $left = @(Get-ChildItem -LiteralPath $tmp -Force -Filter '.explain-in-*' -ErrorAction SilentlyContinue)
+        if ($left.Count -eq 0) { Ok "async: 入力の一時ファイルは残らない" } else { Ng ("async: 一時ファイルが残った: " + ($left | ForEach-Object { $_.Name }) -join ', ') }
+    } catch { Ng "async で例外: $($_.Exception.Message)" }
+    finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+} else {
+    Write-Host "SKIP async: node が見つからない"
+}
+
 Write-Host ""
 Write-Host "explainer.test.ps1 summary: pass=$pass fail=$fail"
 if ($fail -gt 0) { exit 1 } else { exit 0 }

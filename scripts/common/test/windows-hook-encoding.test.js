@@ -64,7 +64,8 @@ test('日本語を出す共有関数は、書き出す前に UTF-8 へ切り替�
 test('各 hook は lib を読み込んだ直後に UTF-8 へ切り替える', () => {
   for (const name of HOOKS) {
     const src = read(path.join('scripts', 'windows', `${name}.ps1`));
-    assert.match(src, /SafetyPolicy\.ps1"\)\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*Set-AiSafeConsoleUtf8/,
+    // v1.19.9 から読み込みは . ([System.IO.Path]::Combine($PSScriptRoot, "lib", "SafetyPolicy.ps1")) の形（閉じかっこが 2 つ）。
+    assert.match(src, /SafetyPolicy\.ps1"\)+\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*Set-AiSafeConsoleUtf8/,
       `${name}.ps1: lib 読み込み直後に Set-AiSafeConsoleUtf8 が無い`);
     // 取りこぼし防止のため、そのファイル内の最初の Console 書き出しより前にあること。
     const at = src.indexOf('Set-AiSafeConsoleUtf8');

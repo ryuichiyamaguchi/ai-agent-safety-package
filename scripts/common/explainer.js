@@ -17,6 +17,7 @@
 //
 // CLI:
 //   node explainer.js explain --mode <bash|write|webfetch|observe|prompt|post-output> [--log-dir D] [--cards-dir D]
+//        [--input-file F --audit 1 --package-version V]   ← Windows のガードが待たずに返すときの呼び方（v1.19.9）
 //        stdin = フック入力（JSON 文字列そのまま）。成功時 stdout に "<card_id>\t<risk>" を 1 行出す。
 //   node explainer.js placeholder [--log-dir D]
 //        now.html がまだ無いときだけ「見守り中です」の待機画面を書く。
@@ -817,6 +818,52 @@ function readStdin() {
   try { return fs.readFileSync(0, 'utf8').replace(/^\uFEFF/, ''); } catch { return ''; }
 }
 
+// 切り離して動かすとき（Windows のガードが待たずに返すため。v1.19.9）の入力。
+// ガードは explainer.js を自分から切り離して起動する（出力の通り道を引き継がせると、Claude Code が
+// 結局この処理の終わりまで待つため）。標準入力は使えないので、入力は一時ファイルで受け取り、読んだら消す。
+function readInputFile(file) {
+  let raw = '';
+  try { raw = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''); } catch { raw = ''; }
+  try { fs.unlinkSync(file); } catch { /* 既に無い */ }
+  return raw;
+}
+
+// ISO 8601（その PC の時刻と時差つき）。PowerShell の (Get-Date).ToString("o") と同じ見え方にそろえる。
+function localIsoWithOffset(d = new Date()) {
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  const oh = p(Math.floor(Math.abs(off) / 60));
+  const om = p(Math.abs(off) % 60);
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}${sign}${oh}:${om}`;
+}
+
+// 監査ログに decision="explain" の行を足す（Windows の Write-AuditLog と同じ形）。以前はガードが
+// 解説の結果を待ってから自分で書いていた。待たなくなったので、作り終えたこちらが書く。
+// その日のログがまだ無いときは書かない（最初の 1 行はガードが作り、本人だけが読めるように絞るため）。
+function appendExplainAudit(logDir, raw, mode, result, packageVersion) {
+  if (!logDir) return;
+  const file = path.join(logDir, `events-${localDate()}.jsonl`);
+  if (!fs.existsSync(file)) return;
+  let input = {};
+  try { input = JSON.parse(raw) || {}; } catch { input = {}; }
+  const pick = (...keys) => { for (const k of keys) { if (input[k] != null && input[k] !== '') return input[k]; } return null; };
+  const entry = {
+    ts: localIsoWithOffset(),
+    user: process.env.USERNAME || process.env.USER || '',
+    computer: process.env.COMPUTERNAME || os.hostname(),
+    mode,
+    decision: 'explain',
+    reason: result ? `card=${result.cardId} risk=${result.risk}` : 'card=fallback risk=low',
+    cwd: String(pick('cwd', 'workspace', 'workspace_root') || process.cwd()),
+    hook_event_name: pick('hook_event_name', 'eventName', 'event'),
+    tool_name: String(pick('tool_name', 'toolName', 'name') || ''),
+    observed: '',
+    packageVersion: packageVersion || null,
+  };
+  fs.appendFileSync(file, JSON.stringify(entry) + os.EOL);
+}
+
 function parseArgs(argv) {
   const a = {};
   for (let i = 0; i < argv.length; i++) {
@@ -830,8 +877,14 @@ function main() {
   const a = parseArgs(rest);
   try {
     if (cmd === 'explain') {
-      const r = explain({ mode: a.mode || '', raw: readStdin(), logDir: a['log-dir'], cardsDir: a['cards-dir'], forceCard: a['force-card'] });
-      if (r) process.stdout.write(`${r.cardId}\t${r.risk}\n`);
+      const raw = a['input-file'] ? readInputFile(a['input-file']) : readStdin();
+      const r = explain({ mode: a.mode || '', raw, logDir: a['log-dir'], cardsDir: a['cards-dir'], forceCard: a['force-card'] });
+      if (a.audit) {
+        // 切り離して動いているので、結果は標準出力ではなく監査ログへ（出力先はもう誰も読んでいない）。
+        appendExplainAudit(a['log-dir'], raw, a.mode || '', r, a['package-version']);
+      } else if (r) {
+        process.stdout.write(`${r.cardId}\t${r.risk}\n`);
+      }
     } else if (cmd === 'placeholder') {
       writePlaceholder(a['log-dir']);
     } else if (cmd === 'explain-command') {

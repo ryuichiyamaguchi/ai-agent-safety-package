@@ -50,16 +50,15 @@ Write-Host ('3) 3 本を同時に（1 回の操作の実際）    : 中央値 ' 
 $inner = @'
 param($Repo, $LogDir, $InFile)
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-$p = [System.IO.Path]::Combine($Repo, 'scripts\windows\lib\SafetyPolicy.ps1'); $a0 = $sw.ElapsedMilliseconds
-$sw.Restart(); $null = Test-Path -LiteralPath $p; $a = $sw.ElapsedMilliseconds
-$sw.Restart(); . $p; $b = $sw.ElapsedMilliseconds
+. ([System.IO.Path]::Combine($Repo, 'scripts', 'windows', 'lib', 'SafetyPolicy.ps1')); $b = $sw.ElapsedMilliseconds
 $sw.Restart(); $pol = Get-SafetyPolicy; $c = $sw.ElapsedMilliseconds
-$sw.Restart(); . ([System.IO.Path]::Combine($Repo, 'scripts\windows\lib\Explainer.ps1')); $d = $sw.ElapsedMilliseconds
+$sw.Restart(); . ([System.IO.Path]::Combine($Repo, 'scripts', 'windows', 'lib', 'Explainer.ps1')); $d = $sw.ElapsedMilliseconds
 $env:AI_SAFE_LOG_DIR = $LogDir
 $hi = [System.IO.File]::ReadAllText($InFile) | ConvertFrom-Json
 $sw.Restart(); Invoke-AiSafeExplain $hi 'bash' $pol; $e = $sw.ElapsedMilliseconds
 $sw.Restart(); Write-AuditLog $hi 'bash' 'allow' 'timing' 'npm test' $pol; $f = $sw.ElapsedMilliseconds
-'4) 内訳: 命令の初回準備(Test-Path) ' + $a + ' ms / 共通部品の読み込み ' + $b + ' ms / 安全ルール ' + $c + ' ms / 解説の部品 ' + $d + ' ms / 解説カード(node) ' + $e + ' ms / 記録 ' + $f + ' ms'
+$mods = (@(Get-Module | ForEach-Object { $_.Name }) -join ',')
+'4) 内訳: 共通部品の読み込み ' + $b + ' ms / 安全ルール ' + $c + ' ms / 解説の部品 ' + $d + ' ms / 解説カード（待たない） ' + $e + ' ms / 記録 ' + $f + ' ms / 読み込まれた部品: ' + $mods
 '@
 $innerFile = Join-Path $logDir 'inner.ps1'
 [System.IO.File]::WriteAllText($innerFile, $inner, (New-Object System.Text.UTF8Encoding($true)))

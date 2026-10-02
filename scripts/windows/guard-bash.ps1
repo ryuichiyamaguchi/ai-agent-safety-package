@@ -137,9 +137,14 @@ function Invoke-AssistedApproval([object]$HookInput, [string]$Command, [object]$
         }
         $proc = [System.Diagnostics.Process]::Start($psi)
         $bytes = $utf8.GetBytes($payload)
-        $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
-        $proc.StandardInput.BaseStream.Flush()
-        $proc.StandardInput.Close()
+        # 判定プロセスが入力を読む前に終わっていると（異常終了など）、書き込みが「パイプが閉じている」
+        # 例外になる。起動はできているので「起動に失敗」ではなく、何も返さなかった扱い（下で
+        # status=unavailable →「実行できませんでした」）にする。mac の guard-bash.sh と同じ見え方（v1.19.9）。
+        try {
+            $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+            $proc.StandardInput.BaseStream.Flush()
+        } catch { }
+        try { $proc.StandardInput.Close() } catch { }
         if (-not $proc.WaitForExit(30000)) {
             try { $proc.Kill() } catch { }
             Emit-AssistedDecision "ask" "AI 判定がタイムアウトしました（安全側で確認します）"
@@ -223,7 +228,7 @@ function Test-IsScopedGeneratedCleanup([string]$Command) {
 # 危険なコマンドまで素通しになる（v1.19.8 で実測して修正）。読めなければ、ここで止める。
 $ErrorActionPreference = "Stop"
 try {
-    . (Join-Path $PSScriptRoot "lib\SafetyPolicy.ps1")
+    . ([System.IO.Path]::Combine($PSScriptRoot, "lib", "SafetyPolicy.ps1"))
     Set-AiSafeConsoleUtf8
 } catch {
     try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }
@@ -236,7 +241,7 @@ try {
     # （PowerShell 5.1 の既定は CP932 で、Claude Code / Codex は UTF-8 として読むため）
     Set-AiSafeConsoleUtf8
     # 解説カードの部品は判定に使わない。読めなくても判定は続ける（v1.19.7）。
-    try { . (Join-Path $PSScriptRoot "lib\Explainer.ps1") } catch {
+    try { . ([System.IO.Path]::Combine($PSScriptRoot, "lib", "Explainer.ps1")) } catch {
         [Console]::Error.WriteLine("warn: 解説カードの部品を読み込めませんでした（判定はそのまま続けます）: " + $_.Exception.Message)
     }
     $policy = Get-SafetyPolicy

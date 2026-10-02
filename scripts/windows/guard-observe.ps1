@@ -21,11 +21,11 @@
 $ErrorActionPreference = "SilentlyContinue"
 
 try {
-    . (Join-Path $PSScriptRoot "lib\SafetyPolicy.ps1")
+    . ([System.IO.Path]::Combine($PSScriptRoot, "lib", "SafetyPolicy.ps1"))
     # 日本語のメッセージを出す前に、hook の出力を UTF-8 に固定する。
     # （PowerShell 5.1 の既定は CP932 で、Claude Code / Codex は UTF-8 として読むため）
     Set-AiSafeConsoleUtf8
-    . (Join-Path $PSScriptRoot "lib\Explainer.ps1")
+    . ([System.IO.Path]::Combine($PSScriptRoot, "lib", "Explainer.ps1"))
     # Explainer/SafetyPolicy は StrictMode 2.0 を設定するが、observe では緩める。
     Set-StrictMode -Off
     $ErrorActionPreference = "SilentlyContinue"
@@ -43,7 +43,7 @@ try {
     # 可視化対象 tool: explain がカードを書く。
     $policy = $null
     try { $policy = Get-SafetyPolicy } catch { $policy = $null }
-    try { Invoke-Explain -HookInput $inputObj -Mode "observe" -Policy $policy } catch { }
+    try { Invoke-AiSafeExplain $inputObj "observe" $policy } catch { }
 
     # 監査 trace（best-effort）。decision="observe" は deny でも allow でもない可視化マーカー。
     # ObservedText には hook 入力(tool_name + tool_input)を JSON で入れる。monitor-server の

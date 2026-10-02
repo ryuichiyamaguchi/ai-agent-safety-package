@@ -17,23 +17,24 @@ Set-StrictMode -Version 2.0
 function Get-CardsDir {
     if ($env:AI_SAFE_CARDS_DIR) { return $env:AI_SAFE_CARDS_DIR }
     $here = $PSScriptRoot
-    $guess = Join-Path $here "..\..\..\cards"
-    if (Test-Path -LiteralPath $guess) { return (Resolve-Path -LiteralPath $guess).Path }
-    $dev = Join-Path $here "..\..\..\configs\safety\cards"
-    if (Test-Path -LiteralPath $dev) { return (Resolve-Path -LiteralPath $dev).Path }
+    # v1.19.9: Join-Path / Test-Path / Resolve-Path は使わない（SafetyPolicy.ps1 の Get-SafetyPolicyPath の説明を参照）。
+    $guess = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($here, '..', '..', '..', 'cards'))
+    if ([System.IO.Directory]::Exists($guess)) { return $guess }
+    $dev = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($here, '..', '..', '..', 'configs', 'safety', 'cards'))
+    if ([System.IO.Directory]::Exists($dev)) { return $dev }
     return ""
 }
 
 function Get-ExplainLogDir {
     $logDir = $env:AI_SAFE_LOG_DIR
-    if (-not $logDir) { $logDir = Join-Path $HOME ".ai-safety\logs" }
+    if (-not $logDir) { $logDir = [System.IO.Path]::Combine($HOME, '.ai-safety', 'logs') }
     return $logDir
 }
 
 # explainer.js を動かす node。テスト用に AI_SAFE_EXPLAINER_NODE が設定されていればそれだけを使う。
 function Resolve-ExplainerNode {
     if ($null -ne $env:AI_SAFE_EXPLAINER_NODE) {
-        if ($env:AI_SAFE_EXPLAINER_NODE -and (Test-Path -LiteralPath $env:AI_SAFE_EXPLAINER_NODE)) { return $env:AI_SAFE_EXPLAINER_NODE }
+        if ($env:AI_SAFE_EXPLAINER_NODE -and [System.IO.File]::Exists($env:AI_SAFE_EXPLAINER_NODE)) { return $env:AI_SAFE_EXPLAINER_NODE }
         return $null
     }
     $cands = New-Object System.Collections.Generic.List[string]
@@ -45,12 +46,12 @@ function Resolve-ExplainerNode {
     foreach ($base in @($env:ProgramFiles, $env:APPDATA)) {
         if (-not $base) { continue }
         try {
-            [void]$cands.Add((Join-Path $base "nodejs\node.exe"))
-            [void]$cands.Add((Join-Path $base "npm\node.exe"))
+            [void]$cands.Add([System.IO.Path]::Combine($base, 'nodejs', 'node.exe'))
+            [void]$cands.Add([System.IO.Path]::Combine($base, 'npm', 'node.exe'))
         } catch { }
     }
     foreach ($c in $cands) {
-        if ($c -and (Test-Path -LiteralPath $c)) { return $c }
+        if ($c -and [System.IO.File]::Exists($c)) { return $c }
     }
     return $null
 }
@@ -210,8 +211,8 @@ function Write-ExplainFallback([object]$HookInput, [string]$Mode) {
 function Invoke-ExplainerJs([object]$HookInput, [string]$Mode) {
     $node = Resolve-ExplainerNode
     if (-not $node) { return "" }
-    $js = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..\common\explainer.js"))
-    if (-not (Test-Path -LiteralPath $js)) { return "" }
+    $js = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, '..', '..', 'common', 'explainer.js'))
+    if (-not [System.IO.File]::Exists($js)) { return "" }
     $payload = ""
     try { $payload = ($HookInput | ConvertTo-Json -Depth 20 -Compress) } catch { return "" }
     $cards = Get-CardsDir
@@ -239,6 +240,45 @@ function Invoke-ExplainerJs([object]$HookInput, [string]$Mode) {
     try { $null = $proc.StandardError.ReadToEnd() } catch { }
     if ($null -eq $out) { return "" }
     return ([string]$out).Trim()
+}
+
+# 解説カードを「待たずに」作らせる（v1.19.9。ガードの入口 Invoke-AiSafeExplain から使う）。
+# 判定とは関係のない表示なので、ガードは explainer.js の終わりを待たずに判定へ戻る（1 回あたり約 0.17 秒。
+# 本物の Windows PowerShell 5.1 で計測）。注意点が 2 つある:
+#   ・ふつうに子プロセスを起動すると、ガードが Claude Code から受け取った出力の通り道（パイプ）まで
+#     子が引き継ぎ、Claude Code は子が終わるまで待ってしまう（速くならない）。そこで Windows では
+#     ShellExecute（UseShellExecute）で起動する。こちらは何も引き継がない。
+#   ・標準入力は渡せないので、入力は一時ファイルで渡す（explainer.js が読んだら消す）。置き場は
+#     監査ログと同じフォルダ（本人だけが読める場所。中身はガードの入力そのもの）。
+#   ・解説の結果（カードの種類と危険度）の監査行は、explainer.js が書き終えてから自分で足す。
+# 起動できなかったら $false を返す（呼び出し側が、これまでどおり待つ形で表示する）。
+function Start-ExplainerJs([object]$HookInput, [string]$Mode, [object]$Policy) {
+    $node = Resolve-ExplainerNode
+    if (-not $node) { return $false }
+    $js = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, '..', '..', 'common', 'explainer.js'))
+    if (-not [System.IO.File]::Exists($js)) { return $false }
+    $payload = ""
+    try { $payload = ($HookInput | ConvertTo-Json -Depth 20 -Compress) } catch { return $false }
+    $cards = Get-CardsDir
+    $logDir = Get-ExplainLogDir
+    $inFile = $null
+    try {
+        if (-not [System.IO.Directory]::Exists($logDir)) { [void][System.IO.Directory]::CreateDirectory($logDir) }
+        $inFile = [System.IO.Path]::Combine($logDir, ('.explain-in-' + [guid]::NewGuid().ToString('N') + '.json'))
+        [System.IO.File]::WriteAllText($inFile, [string]$payload, (New-Object System.Text.UTF8Encoding($false)))
+        $ver = ""
+        try { $ver = [string](Get-JsonValue $Policy @("packageVersion")) } catch { $ver = "" }
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $node
+        $psi.Arguments = "`"$js`" explain --mode `"$Mode`" --log-dir `"$logDir`" --cards-dir `"$cards`" --input-file `"$inFile`" --audit 1 --package-version `"$ver`""
+        $psi.UseShellExecute = $true
+        $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+        [void][System.Diagnostics.Process]::Start($psi)
+        return $true
+    } catch {
+        if ($inFile) { try { [System.IO.File]::Delete($inFile) } catch { } }
+        return $false
+    }
 }
 
 function Invoke-Explain {
