@@ -1,0 +1,61 @@
+# 最新の AI ツールで起動前点検を通す（週 1 回・受講者より先に上流の変更に気づくため）
+#
+# パッケージは OpenCode を「常に最新版」で入れる。OpenCode 側の変更で起動前点検が止まると、
+# 受講者の PC で OpenCode が突然起動しなくなる（v1.19.2: 1.18.26 から設定の一部が *** で
+# 伏せて表示されるようになり、起動前点検が止まった）。こちらが何も push しない週にも気づける
+# よう、毎週月曜 9:00（日本時間）に最新版を入れて、本物のランチャーを最後まで流す。
+#
+# ジョブ:
+#   opencode-windows : 最新の OpenCode × Windows PowerShell 5.1 のランチャー（scripts\windows\test\ci-opencode-latest.ps1）
+#   opencode-mac     : 最新の OpenCode × mac のランチャー（scripts/macos/test/ci-opencode-latest.sh）
+#
+# どちらも OPENCODE_BIN を代役に差し替え、「版の確認」と「設定の出力」だけを本物に答えさせる。
+# 画面（TUI）は起動せず、起動まで進んだ印で合否を決める。DeepSeek のキーは要らない（-Free / --free）。
+# 落ちたら GitHub から通知メールが届く。手動で流すときは Actions 画面の「Run workflow」。
+#
+# run: の中は ASCII だけにする（BOM なしの .ps1 として PowerShell 5.1 に渡されるため）。
+name: latest-tools
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  opencode-windows:
+    name: Latest OpenCode passes the pre-launch check (Windows PowerShell 5.1)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Keep committed line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install the latest OpenCode
+        run: npm install -g opencode-ai@latest
+      - name: Run the OpenCode launcher against the latest OpenCode
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\test\ci-opencode-latest.ps1
+          exit $LASTEXITCODE
+
+  opencode-mac:
+    name: Latest OpenCode passes the pre-launch check (mac)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install the latest OpenCode
+        run: npm install -g opencode-ai@latest
+      - name: Run the OpenCode launcher against the latest OpenCode
+        run: bash scripts/macos/test/ci-opencode-latest.sh "$(npm prefix -g)/bin/opencode"

@@ -24,6 +24,10 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # 週 1 回（月曜 9:00 日本時間）。ai-tools は毎回「最新の」Codex / Claude Code / OpenCode / agy を
+  # 入れるので、こちらが push しない週でも、上流の変更で導入が壊れたら気づける（latest-tools.yml と同じ時刻）。
+  schedule:
+    - cron: '0 0 * * 1'
 
 permissions:
   contents: read
