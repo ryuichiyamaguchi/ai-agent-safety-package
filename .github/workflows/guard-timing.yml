@@ -7,6 +7,11 @@ name: guard-timing
 
 on:
   workflow_dispatch:
+    inputs:
+      compare_ref:
+        description: 'Optional commit to compare against on the same runner (both are measured twice, alternating)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -26,5 +31,20 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      # 比べる版があるときは、同じマシンで交互に 2 回ずつ測る（マシンごとの速さの差を消すため）。
       - name: Measure
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\test\guard-timing.ps1 -Repeat 7
+        env:
+          COMPARE_REF: ${{ inputs.compare_ref }}
+        run: |
+          if ($env:COMPARE_REF -and $env:COMPARE_REF -match '^[0-9a-f]{7,40}$') {
+            git fetch --no-tags origin $env:COMPARE_REF
+            git worktree add ..\compare FETCH_HEAD
+            foreach ($round in 1..2) {
+              Write-Host ('=== current, round ' + $round + ' ===')
+              powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\test\guard-timing.ps1 -Repeat 7
+              Write-Host ('=== ' + $env:COMPARE_REF + ', round ' + $round + ' ===')
+              powershell -NoProfile -ExecutionPolicy Bypass -File ..\compare\scripts\windows\test\guard-timing.ps1 -Repeat 7
+            }
+          } else {
+            powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\test\guard-timing.ps1 -Repeat 7
+          }
