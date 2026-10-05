@@ -191,12 +191,6 @@ assisted_emit_allow() {
   exit 0
 }
 assisted_emit_ask() {
-  # 長時間おまかせモード（AI_SAFE_LONGRUN=1）では、AI 判定が「確認」と言ったもの（判定できなかったときを
-  # 含む）を、確認ではなく止める（v1.20.0）。止める向きにしか変わらない。
-  if [ "${AI_SAFE_LONGRUN:-0}" = "1" ]; then
-    printf 'AI Safety Guard BLOCKED: 長時間おまかせモードでは確認できないため止めました: %s\n' "$1" >&2
-    exit 2
-  fi
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s"}}\n' \
     "$(json_escape "$1")"
   exit 0

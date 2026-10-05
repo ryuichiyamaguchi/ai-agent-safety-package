@@ -728,11 +728,6 @@ function Allow-Action([object]$HookInput, [string]$Mode, [string]$Reason, [strin
 # permissionDecision JSON を stdout に出して exit 0（exit 0 のときだけ JSON が処理される）。
 # defaultMode=acceptEdits でも hook の permissionDecision が優先される。
 function Ask-Action([object]$HookInput, [string]$Mode, [string]$Reason, [string]$ObservedText, [object]$Policy) {
-    # 長時間おまかせモード（AI_SAFE_LONGRUN=1。launch-longrun が立てる）では、人が見ていないので確認を
-    # 出さず、止める側に倒す（v1.20.0）。止める向きにしか変わらないので、この印が誤って立っても守りは緩まない。
-    if ($env:AI_SAFE_LONGRUN -eq '1') {
-        Block-Action $HookInput $Mode ("長時間おまかせモードでは確認できないため止めました: " + $Reason) $ObservedText $Policy
-    }
     Write-AuditLog $HookInput $Mode "ask" $Reason $ObservedText $Policy
     $obj = [PSCustomObject]@{
         hookSpecificOutput = [PSCustomObject]@{

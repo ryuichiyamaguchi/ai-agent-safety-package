@@ -1,13 +1,15 @@
 'use strict';
-// longrun-no-prompt.test.js — 長時間おまかせモードで確認ダイアログを出さない作り（v1.20.0）の回帰テスト。
+// longrun-no-prompt.test.js — 長時間おまかせモードで「ふだんの操作は確認なし・確認が要る操作は確認を出す」
+// 作り（v1.20.0 / v1.20.1）の回帰テスト。
 //
 // 方針（2026-10-05 依頼者の判断）:
 //   ・Claude（Anthropic）の長時間おまかせモードは auto モード（Claude Code 公式の判定役が裏で確かめる）
-//   ・d-claude（DeepSeek）は全承認（bypassPermissions）＋安全パッケージの AI 判定（Gemini）
-//   ・どちらも、安全パッケージの禁止の規則・ガード・作業フォルダの控えはそのまま
-//   ・ガードが返していた「確認」は、長時間おまかせモード（AI_SAFE_LONGRUN=1）では「止める」に置き換える
-//     （止める向きにしか変わらないので、印が誤って立っても守りは緩まない）
-//   ・学習用のふだんの起動は変えない（印が無ければ、これまでどおり確認を出す）
+//   ・d-claude（DeepSeek）は、AI 判定（Gemini）が通したコマンドをガードが許可する（d-claude のテストは longrun-dclaude.test.js）
+//   ・どちらも、安全パッケージの禁止の規則・ガード・作業フォルダの控えはそのまま。全承認は使わない
+//   ・確認が要る操作（ガードの確認・規則の確認）は確認を出す（v1.20.1）。v1.20.0 は長時間の印（AI_SAFE_LONGRUN=1）
+//     でガードの確認を「止める」に置き換えていたが、勝手に断るより聞くほうが分かりやすく安全なためやめた。
+//     ここでは、その印が環境に残っていても確認が出ること（置き換えが残っていないこと）を確かめる
+//   ・学習用のふだんの起動は変えない
 // 本物の AI ツールの代わりに偽物を使い、本物のホームフォルダには触らない。
 const test = require('node:test');
 const assert = require('node:assert');
@@ -21,7 +23,6 @@ const macOnly = process.platform === 'darwin' ? false : 'macOS 専用の経路�
 const pwshCheck = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8' });
 const HAS_PWSH = pwshCheck.status === 0 && process.platform !== 'win32';
 const pwshSkip = HAS_PWSH ? false : 'pwsh が無い環境（Windows 実機では CI で確認）';
-const BLOCK_TEXT = /長時間おまかせモードでは確認できないため止めました/;
 
 function makeSandbox(t) {
   const base = path.join(os.homedir(), '.cache');
@@ -66,7 +67,6 @@ function runWin(sb, guard, input, extraEnv = {}) {
   });
 }
 const isAsk = (r) => r.status === 0 && /"permissionDecision"\s*:\s*"ask"/.test(r.stdout);
-const isLongrunBlock = (r) => r.status === 2 && BLOCK_TEXT.test(r.stderr);
 
 // 「判定できない AI」を作る: 何も出さずに異常終了する偽の node を PATH の先頭に置く。
 function fakeBrokenNode(sb) {
@@ -76,28 +76,28 @@ function fakeBrokenNode(sb) {
 }
 
 // --- ガード: mac ----------------------------------------------------------------------------
-test('mac: 作業フォルダの外への書き込みは、ふだんは確認・長時間モードでは止める', { skip: macOnly }, (t) => {
+test('mac: 作業フォルダの外への書き込みは、長時間モードでも確認を出す', { skip: macOnly }, (t) => {
   const sb = makeSandbox(t);
   assert.ok(isAsk(runMac(sb, 'guard-write.sh', writeOutside(sb))), 'ふだんは確認を出すこと');
   const r = runMac(sb, 'guard-write.sh', writeOutside(sb), { AI_SAFE_LONGRUN: '1' });
-  assert.ok(isLongrunBlock(r), `長時間モードでは止めること: ${r.status} ${r.stdout} ${r.stderr}`);
+  assert.ok(isAsk(r), `長時間モードでも確認を出すこと: ${r.status} ${r.stdout} ${r.stderr}`);
 });
 
-test('mac: 生成物のまとめ削除は、ふだんは確認・長時間モードでは止める', { skip: macOnly }, (t) => {
+test('mac: 生成物のまとめ削除は、長時間モードでも確認を出す', { skip: macOnly }, (t) => {
   const sb = makeSandbox(t);
   const cmd = 'rm -rf node_modules';
   assert.ok(isAsk(runMac(sb, 'guard-bash.sh', bashInput(sb, cmd))), 'ふだんは確認を出すこと');
   const r = runMac(sb, 'guard-bash.sh', bashInput(sb, cmd), { AI_SAFE_LONGRUN: '1' });
-  assert.ok(isLongrunBlock(r), `長時間モードでは止めること: ${r.status} ${r.stdout} ${r.stderr}`);
+  assert.ok(isAsk(r), `長時間モードでも確認を出すこと: ${r.status} ${r.stdout} ${r.stderr}`);
 });
 
-test('mac: AI 判定が使えないグレーなコマンドは、ふだんは確認・長時間モードでは止める', { skip: macOnly }, (t) => {
+test('mac: AI 判定が使えないグレーなコマンドは、長時間モードでも確認を出す', { skip: macOnly }, (t) => {
   const sb = makeSandbox(t);
   const env = { ...fakeBrokenNode(sb), AI_SAFE_ASSISTED_APPROVAL: '1', GEMINI_API_KEY: '', GOOGLE_API_KEY: '' };
   const cmd = 'python3 tools/convert.py data.csv';
   assert.ok(isAsk(runMac(sb, 'guard-bash.sh', bashInput(sb, cmd), env)), 'ふだんは確認を出すこと');
   const r = runMac(sb, 'guard-bash.sh', bashInput(sb, cmd), { ...env, AI_SAFE_LONGRUN: '1' });
-  assert.ok(isLongrunBlock(r), `長時間モードでは止めること: ${r.status} ${r.stdout} ${r.stderr}`);
+  assert.ok(isAsk(r), `長時間モードでも確認を出すこと: ${r.status} ${r.stdout} ${r.stderr}`);
 });
 
 test('mac: 危険なコマンドは、ふだんも長時間モードも止める（印で緩まない）', { skip: macOnly }, (t) => {
@@ -109,28 +109,28 @@ test('mac: 危険なコマンドは、ふだんも長時間モードも止める
 });
 
 // --- ガード: Windows（mac の pwsh で検証） -------------------------------------------------------
-test('Windows: 作業フォルダの外への書き込みは、ふだんは確認・長時間モードでは止める', { skip: pwshSkip }, (t) => {
+test('Windows: 作業フォルダの外への書き込みは、長時間モードでも確認を出す', { skip: pwshSkip }, (t) => {
   const sb = makeSandbox(t);
   assert.ok(isAsk(runWin(sb, 'guard-write.ps1', writeOutside(sb))), 'ふだんは確認を出すこと');
   const r = runWin(sb, 'guard-write.ps1', writeOutside(sb), { AI_SAFE_LONGRUN: '1' });
-  assert.ok(isLongrunBlock(r), `長時間モードでは止めること: ${r.status} ${r.stdout} ${r.stderr}`);
+  assert.ok(isAsk(r), `長時間モードでも確認を出すこと: ${r.status} ${r.stdout} ${r.stderr}`);
 });
 
-test('Windows: 生成物のまとめ削除は、ふだんは確認・長時間モードでは止める', { skip: pwshSkip }, (t) => {
+test('Windows: 生成物のまとめ削除は、長時間モードでも確認を出す', { skip: pwshSkip }, (t) => {
   const sb = makeSandbox(t);
   const cmd = 'rm -rf node_modules';
   assert.ok(isAsk(runWin(sb, 'guard-bash.ps1', bashInput(sb, cmd))), 'ふだんは確認を出すこと');
   const r = runWin(sb, 'guard-bash.ps1', bashInput(sb, cmd), { AI_SAFE_LONGRUN: '1' });
-  assert.ok(isLongrunBlock(r), `長時間モードでは止めること: ${r.status} ${r.stdout} ${r.stderr}`);
+  assert.ok(isAsk(r), `長時間モードでも確認を出すこと: ${r.status} ${r.stdout} ${r.stderr}`);
 });
 
-test('Windows: AI 判定が使えないグレーなコマンドは、ふだんは確認・長時間モードでは止める', { skip: pwshSkip }, (t) => {
+test('Windows: AI 判定が使えないグレーなコマンドは、長時間モードでも確認を出す', { skip: pwshSkip }, (t) => {
   const sb = makeSandbox(t);
   const env = { ...fakeBrokenNode(sb), AI_SAFE_ASSISTED_APPROVAL: '1', GEMINI_API_KEY: '', GOOGLE_API_KEY: '' };
   const cmd = 'python3 tools/convert.py data.csv';
   assert.ok(isAsk(runWin(sb, 'guard-bash.ps1', bashInput(sb, cmd), env)), 'ふだんは確認を出すこと');
   const r = runWin(sb, 'guard-bash.ps1', bashInput(sb, cmd), { ...env, AI_SAFE_LONGRUN: '1' });
-  assert.ok(isLongrunBlock(r), `長時間モードでは止めること: ${r.status} ${r.stdout} ${r.stderr}`);
+  assert.ok(isAsk(r), `長時間モードでも確認を出すこと: ${r.status} ${r.stdout} ${r.stderr}`);
 });
 
 // --- 起動: Claude の長時間おまかせモードは auto モード -------------------------------------------
@@ -144,6 +144,11 @@ function writeFakeClaude(sb, { auto }) {
     'if [ "${1:-}" = "--version" ]; then echo "2.1.999 (Claude Code)"; exit 0; fi',
     `printf '%s\\n' "$@" > ${JSON.stringify(argsFile)}`,
     `printf '%s' "\${AI_SAFE_LONGRUN:-}" > ${JSON.stringify(envFile)}`,
+    'prev=""',
+    'for a in "$@"; do',
+    `  if [ "$prev" = "--settings" ]; then cp "$a" ${JSON.stringify(path.join(sb.root, 'claude-settings.json'))}; fi`,
+    '  prev="$a"',
+    'done',
     'exit 0',
   ].join('\n') + '\n', { mode: 0o755 });
   return { argsFile, envFile };
@@ -153,7 +158,7 @@ const permissionModeOf = (argsFile) => {
   return a[a.indexOf('--permission-mode') + 1];
 };
 
-test('mac: Claude の長時間おまかせモードは auto モードで起動し、ガードに長時間の印を渡す', { skip: macOnly }, (t) => {
+test('mac: Claude の長時間おまかせモードは auto モードで起動し、確認の規則は確認のまま残す', { skip: macOnly }, (t) => {
   const sb = makeSandbox(t);
   fs.copyFileSync(path.join(PKG, 'configs', 'claude', 'settings.mac.json'), path.join(sb.ws, '.claude', 'settings.json'));
   const cap = writeFakeClaude(sb, { auto: true });
@@ -163,7 +168,10 @@ test('mac: Claude の長時間おまかせモードは auto モードで起動�
   });
   assert.strictEqual(r.status, 0, r.stdout + r.stderr);
   assert.strictEqual(permissionModeOf(cap.argsFile), 'auto');
-  assert.strictEqual(fs.readFileSync(cap.envFile, 'utf8'), '1', 'ガードへ長時間の印が渡っていない');
+  assert.strictEqual(fs.readFileSync(cap.envFile, 'utf8'), '', '確認を止めに変える印（v1.20.0）が残っている');
+  const settings = JSON.parse(fs.readFileSync(path.join(sb.root, 'claude-settings.json'), 'utf8'));
+  assert.ok(settings.permissions.ask.includes('Bash(git push*)'), '確認の規則（git push など）が確認のまま残っていない');
+  assert.ok(!settings.permissions.deny.includes('Bash(git push*)'), '確認の規則が禁止に寄せられている');
 });
 
 test('mac: auto モードが無い古い Claude Code では、これまでどおり acceptEdits', { skip: macOnly }, (t) => {
@@ -182,7 +190,7 @@ test('Windows: Claude の長時間おまかせモードは auto モードで起�
   const ps1 = fs.readFileSync(path.join(PKG, 'scripts', 'windows', 'launch-longrun.ps1'), 'utf8');
   assert.match(ps1, /\$help\.Contains\('"auto"'\)/);
   assert.match(ps1, /@\('--permission-mode', 'auto'\) \+ \$claudeArgs/);
-  assert.match(ps1, /\$env:AI_SAFE_LONGRUN = '1'/);
+  assert.doesNotMatch(ps1, /\$env:AI_SAFE_LONGRUN = '1'/, '確認を止めに変える印（v1.20.0）が残っている');
 });
 
 // --- 学習用のふだんの起動は変えない ----------------------------------------------------------------

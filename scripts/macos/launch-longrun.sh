@@ -23,8 +23,9 @@
 #
 # どの環境でも外さないもの:
 #   - **deny 床は 1 本も外さない**（再帰削除・秘密ファイルの読み取り・リモートコード実行など）。
-#   - Claude（Anthropic）は auto モード、d-claude は dontAsk（確認が要る操作は自動で断る。コマンドは AI 判定が
-#     通したものだけガードが許可する）（v1.20.0）。ガードの「確認」は AI_SAFE_LONGRUN=1 で「止める」に変わる。
+#   - ふだんの操作は確認なしで進める（v1.20.0）: Claude（Anthropic）は auto モード、d-claude はコマンドを
+#     AI 判定が通したものだけガードが許可する。確認が要る操作（ガードの確認・規則の確認・Claude Code 自身の
+#     確認）は、確認を出す（v1.20.1。v1.20.0 は確認の代わりに断っていた）。
 #   - どの経路でも **`disableBypassPermissionsMode: "disable"` を維持**する。「全部素通し」
 #     （bypassPermissions）は使わない。
 #   - 記録（hooks / 監査ログ）は 1 つも外さない。
@@ -55,9 +56,6 @@ workspace="$(cd "$workspace" && pwd)"
 export AI_SAFE_ROOT="$workspace/.ai-safety"
 export AI_SAFE_POLICY="$AI_SAFE_ROOT/policy/safety-policy.json"
 export AI_SAFE_LOG_DIR="$HOME/.ai-safety/logs"
-# 長時間おまかせモードの印（v1.20.0）。ガード（フック）はこれを見て、確認（ask）を出す代わりに止める。
-# 人が見ていない前提なので、確認ダイアログで止まったまま待たせない。止める向きにしか効かない印。
-export AI_SAFE_LONGRUN=1
 hooks="$AI_SAFE_ROOT/hooks/macos"
 
 if [ ! -f "$AI_SAFE_POLICY" ]; then
@@ -231,9 +229,9 @@ fi
 if [ "$engine" = "d-claude" ]; then
   cat <<EOF
   d-claude は DeepSeek のキーで動きます。作業の内容は、送信内容の検査（Gateway）を
-  通してから DeepSeek へ送られます。確認ダイアログは出さず、危険とまでは言えない
-  コマンドは AI が判定して通します（AI が「確認したい」と言ったものと、判定できな
-  かったものは止めます）。
+  通してから DeepSeek へ送られます。危険とまでは言えないコマンドは、AI が判定して
+  確認なしで通します（AI が「確認したい」と言ったものと、判定できなかったものは、
+  確認を出します）。
 
 EOF
 fi
@@ -243,15 +241,31 @@ cat <<EOF
     ・再帰削除（rm -rf など）
     ・秘密ファイルの読み取り（.env / SSH 鍵 / クラウドの資格情報）
     ・ダウンロードしたものをそのまま実行する形
-    ・sudo / git push / git reset / git checkout / git restore / git rebase
+EOF
+case "$engine" in
+  claude|d-claude) ;;
+  *) echo "    ・sudo / git push / git reset / git checkout / git restore / git rebase" ;;
+esac
+cat <<EOF
     ・「全部素通しモード」への切り替えそのもの
   記録（見張りと監査ログ）は、どの環境でも残ります。
 
-  確認ダイアログは出しません。ガードが「確認したい」と判断した操作
-  （作業フォルダの外への書き込みなど）は、確認の代わりに止めます。
-  AI はほかの方法を探して作業を続けます。
-  Claude は auto モード（判定役の AI が裏で確かめるモード）で動きます。
-
+EOF
+# Claude / d-claude（v1.20.1）: ふだんの操作は確認なしで進め、確認が要る操作だけ確認を出す。
+case "$engine" in
+  claude|d-claude)
+    cat <<EOF
+  確認を出すもの（返事をするまで、その操作で待ちます）:
+    ・sudo / git push / git reset / git checkout / git restore / git rebase
+    ・作業フォルダの外へのファイルの書き込み
+EOF
+    [ "$engine" = "d-claude" ] && echo "    ・AI 判定が「確認したい」と言ったコマンド、判定できなかったコマンド"
+    echo "  それ以外のふだんの操作は、確認なしで進みます。"
+    [ "$engine" = "claude" ] && echo "  Claude は auto モード（判定役の AI が裏で確かめるモード）で動きます。"
+    echo
+    ;;
+esac
+cat <<EOF
   止まらないもの（気をつけてください）:
     ・作業フォルダの中のファイルの読み取り・書き換え・削除
 EOF

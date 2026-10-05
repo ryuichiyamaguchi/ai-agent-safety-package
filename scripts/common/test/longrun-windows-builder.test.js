@@ -38,10 +38,9 @@ function runBuilder(settingsName, extra = []) {
 function assertFloor(original, out) {
   const ask = (original.permissions && original.permissions.ask) || [];
   const deny = (original.permissions && original.permissions.deny) || [];
-  assert.deepStrictEqual(out.permissions.ask, [], '確認（ask）は空にする');
-  for (const rule of [...deny, ...ask]) {
-    assert.ok(out.permissions.deny.includes(rule), `deny に残る／移ること: ${rule}`);
-  }
+  // v1.20.1: 確認の規則は確認のまま（v1.17.1〜v1.20.0 は deny へ寄せていた）。
+  assert.deepStrictEqual(out.permissions.ask, ask, '確認（ask）は確認のまま残す');
+  assert.deepStrictEqual(out.permissions.deny, deny, '禁止（deny）はそのまま（確認を禁止へ寄せない）');
   assert.strictEqual(out.permissions.defaultMode, 'acceptEdits');
   assert.strictEqual(out.permissions.disableBypassPermissionsMode, 'disable', '全許可モードは使わせない');
 }
@@ -63,9 +62,8 @@ test('mac の設定に --wall を付けると、壁を必須にする（failIfUn
 
 test('--dclaude（d-claude の長時間おまかせモード）: 全承認は封じたまま、Web 取得と補助ツールを許可し、壁の外での実行し直しは禁止', () => {
   const { original, out } = runBuilder('settings.mac.json', ['--wall', '--dclaude']);
-  const deny = (original.permissions && original.permissions.deny) || [];
-  for (const rule of deny) assert.ok(out.permissions.deny.includes(rule), `deny に残ること: ${rule}`);
-  assert.deepStrictEqual(out.permissions.ask, []);
+  assert.deepStrictEqual(out.permissions.deny, original.permissions.deny, 'deny はそのまま');
+  assert.deepStrictEqual(out.permissions.ask, original.permissions.ask, '確認の規則は確認のまま');
   assert.strictEqual(out.permissions.defaultMode, 'acceptEdits');
   assert.strictEqual(out.permissions.disableBypassPermissionsMode, 'disable', '全承認は封じたまま');
   for (const rule of ['WebFetch', 'mcp__gemini-search', 'mcp__pollinations-image', 'mcp__agy-image', 'mcp__codex-image', 'mcp__gemini-vision', 'mcp__playwright']) {

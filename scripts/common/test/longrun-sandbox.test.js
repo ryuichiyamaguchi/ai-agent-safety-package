@@ -133,7 +133,8 @@ test('壁がある経路（Claude / mac）: 一時設定に failIfUnavailable=tr
     assert.strictEqual(tmp.sandbox.enabled, true);
     assert.strictEqual(tmp.sandbox.autoAllowBashIfSandboxed, true);
     assert.strictEqual(tmp.sandbox.failIfUnavailable, true, '壁の実起動が保証されていない');
-    assert.deepStrictEqual(tmp.permissions.ask, [], 'ask は空にする（無人で答えられないため）');
+    // v1.20.1: 確認の規則は確認のまま残す（v1.17.1〜v1.20.0 は「無人で答えられない」として deny へ寄せていた）。
+    assert.ok(tmp.permissions.ask.includes('Bash(git push*)'), '確認の規則（git push など）は確認のまま残す');
     assert.strictEqual(tmp.permissions.defaultMode, 'acceptEdits');
     assert.strictEqual(tmp.permissions.disableBypassPermissionsMode, 'disable');
     assert.ok(tmp.permissions.deny.length >= 30, 'deny 床が減っている');

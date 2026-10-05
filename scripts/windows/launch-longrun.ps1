@@ -23,8 +23,9 @@
 #       安全側へ倒した設計で、依頼者の意図と違ったため v1.17.1 で撤廃した。
 #
 # どの環境でも外さないもの:
-#   - Claude（Anthropic）は auto モード、d-claude は dontAsk（確認が要る操作は自動で断る。コマンドは AI 判定が
-#     通したものだけガードが許可する）（v1.20.0）。ガードの「確認」は AI_SAFE_LONGRUN=1 で「止める」に変わる。
+#   - ふだんの操作は確認なしで進める（v1.20.0）: Claude（Anthropic）は auto モード、d-claude はコマンドを
+#     AI 判定が通したものだけガードが許可する。確認が要る操作（ガードの確認・規則の確認・Claude Code 自身の
+#     確認）は、確認を出す（v1.20.1。v1.20.0 は確認の代わりに断っていた）。
 #   - deny 床は 1 本も外さない、どの経路でも disableBypassPermissionsMode: "disable" を維持（全承認は使わない）、
 #     記録（hooks / 監査ログ）も外さない、恒久的な設定ファイルは書き換えない。
 param(
@@ -52,9 +53,6 @@ if (-not (Test-Path -LiteralPath $policy -PathType Leaf)) {
 $env:AI_SAFE_ROOT = $root
 $env:AI_SAFE_POLICY = $policy
 if (-not $env:AI_SAFE_LOG_DIR) { $env:AI_SAFE_LOG_DIR = Join-Path $env:USERPROFILE '.ai-safety\logs' }
-# 長時間おまかせモードの印（v1.20.0）。ガード（フック）はこれを見て、確認（ask）を出す代わりに止める。
-# 人が見ていない前提なので、確認ダイアログで止まったまま待たせない。止める向きにしか効かない印。
-$env:AI_SAFE_LONGRUN = '1'
 
 # 素の Claude（ログイン認証）で動かす。DeepSeek 連携の置き土産を持ち込まない。
 Remove-Item Env:\ANTHROPIC_AUTH_TOKEN, Env:\ANTHROPIC_BASE_URL, Env:\ANTHROPIC_MODEL, `
@@ -205,23 +203,31 @@ if ($wall) {
 Write-Host ''
 if ($Engine -eq 'd-claude') {
     Write-Host '  d-claude は DeepSeek のキーで動きます。作業の内容は、送信内容の検査（Gateway）を'
-    Write-Host '  通してから DeepSeek へ送られます。確認ダイアログは出さず、危険とまでは言えない'
-    Write-Host '  コマンドは AI が判定して通します（AI が「確認したい」と言ったものと、判定できな'
-    Write-Host '  かったものは止めます）。'
+    Write-Host '  通してから DeepSeek へ送られます。危険とまでは言えないコマンドは、AI が判定して'
+    Write-Host '  確認なしで通します（AI が「確認したい」と言ったものと、判定できなかったものは、'
+    Write-Host '  確認を出します）。'
     Write-Host ''
 }
 Write-Host '  それでも止まるもの（外していません）:'
 Write-Host '    ・再帰削除（rm -rf など）'
 Write-Host '    ・秘密ファイルの読み取り（.env / SSH 鍵 / クラウドの資格情報）'
 Write-Host '    ・ダウンロードしたものをそのまま実行する形'
-Write-Host '    ・sudo / git push / git reset / git checkout / git restore / git rebase'
+if ($Engine -ne 'claude' -and $Engine -ne 'd-claude') {
+    Write-Host '    ・sudo / git push / git reset / git checkout / git restore / git rebase'
+}
 Write-Host '    ・「全部素通しモード」への切り替えそのもの'
 Write-Host '  記録（見張りと監査ログ）は、どの環境でも残ります。'
 Write-Host ''
-Write-Host '  確認ダイアログは出しません。ガードが「確認したい」と判断した操作'
-Write-Host '  （作業フォルダの外への書き込みなど）は、確認の代わりに止めます。'
-Write-Host '  AI はほかの方法を探して作業を続けます。'
-Write-Host '  Claude は auto モード（判定役の AI が裏で確かめるモード）で動きます。'
+# Claude / d-claude（v1.20.1）: ふだんの操作は確認なしで進め、確認が要る操作だけ確認を出す。
+if ($Engine -eq 'claude' -or $Engine -eq 'd-claude') {
+    Write-Host '  確認を出すもの（返事をするまで、その操作で待ちます）:'
+    Write-Host '    ・sudo / git push / git reset / git checkout / git restore / git rebase'
+    Write-Host '    ・作業フォルダの外へのファイルの書き込み'
+    if ($Engine -eq 'd-claude') { Write-Host '    ・AI 判定が「確認したい」と言ったコマンド、判定できなかったコマンド' }
+    Write-Host '  それ以外のふだんの操作は、確認なしで進みます。'
+    if ($Engine -eq 'claude') { Write-Host '  Claude は auto モード（判定役の AI が裏で確かめるモード）で動きます。' }
+    Write-Host ''
+}
 Write-Host ''
 Write-Host '  止まらないもの（気をつけてください）:'
 Write-Host '    ・作業フォルダの中のファイルの読み取り・書き換え・削除'

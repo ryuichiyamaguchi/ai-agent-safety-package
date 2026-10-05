@@ -81,20 +81,20 @@ if [ -n "$_expected_cc_ver" ]; then
   fi
 fi
 
-# 長時間おまかせモード（d-claude。v1.19.9 で追加・v1.20.0 で確認なしに）: 恒久的な設定ファイルは書き換えず、
-# このモードの差分だけを当てた一時設定を作って渡し、終了時に消す。変換は scripts/common/longrun-claude-settings.js。
-#   ・dontAsk モードで起動する（確認が要る操作は自動で断り、入力を待って止まらない。Claude Code 公式）。
-#     実行されるのは「許可の規則に合うもの」と「ガード（フック）が許可したもの」だけ
-#   ・d-claude（DeepSeek）は Claude Code 公式の判定役（auto モード）を使えないので、コマンドは安全パッケージの
-#     AI 判定（Gemini）が見て、「通してよい」ならガードが許可する。「確認」と言ったもの・判定できなかったものは
-#     ガードが止める（AI_SAFE_LONGRUN=1）
-#   ・Web 取得と d-claude の補助ツールは、一時設定で許可の規則を足す（--dclaude）
-#   ・全承認（bypassPermissions）は使わない。ask は deny へ寄せる。禁止の規則とガードはそのまま
-#   ・壁（sandbox-exec ＋ 作業フォルダの sandbox.enabled）があるときは、壁を必須にし、壁の外での実行し直しも
-#     禁止する（--wall --dclaude → allowUnsandboxedCommands: false）
+# 長時間おまかせモード（d-claude。v1.19.9 で追加・v1.20.0 / v1.20.1 で確認を減らした）: 恒久的な設定ファイルは
+# 書き換えず、このモードの差分だけを当てた一時設定を作って渡し、終了時に消す。変換は scripts/common/longrun-claude-settings.js。
+#   ・ふだんの操作は確認なしで進める: d-claude（DeepSeek）は Claude Code 公式の判定役（auto モード）を使えないので、
+#     コマンドは安全パッケージの AI 判定（Gemini）が見て、「通してよい」ならガードが許可する（確認は出ない）。
+#     Web 取得と d-claude の補助ツールは、一時設定で許可の規則を足す（--dclaude）
+#   ・確認が要る操作は、確認を出す（v1.20.1）: AI 判定が「確認したい」と言ったもの・判定できなかったもの、
+#     ガードの確認（作業フォルダの外への書き込みなど）、規則の確認（git push など）、Claude Code 自身の確認。
+#     v1.20.0 は確認の代わりに断る dontAsk で起動していたが、勝手に断るより聞くほうが分かりやすく安全なため戻した
+#   ・全承認（bypassPermissions）は使わない。禁止の規則とガードはそのまま
+#   ・壁（sandbox-exec ＋ 作業フォルダの sandbox.enabled）があるときは、壁を必須にし、壁の外での実行し直しは
+#     禁止する（--wall --dclaude → allowUnsandboxedCommands: false。AI 判定が通したコマンドは確認なしで進むので、
+#     実行し直しを許すと壁の外へ確認なしで出られてしまうため）
 #   ・作業フォルダの .claude/settings.json は直接読まず（--setting-sources から project を外す）、その中身を写した
-#     一時設定（フック・禁止の規則を含む）だけを渡す（作業フォルダの ask を確認ではなく deny として効かせるため）
-#   ・dontAsk が無い古い Claude Code では acceptEdits で起動する（そのときは確認が出ることがある）
+#     一時設定（フック・禁止の規則・確認の規則を含む）だけを渡す
 _permission_mode="default"
 _setting_sources="user,project,local"
 if [ "$_longrun" = "1" ]; then
@@ -119,14 +119,12 @@ if [ "$_longrun" = "1" ]; then
   fi
   settings="$_lr_dir/settings.json"
   _permission_mode="acceptEdits"
-  if claude --help 2>&1 | grep -q '"dontAsk"'; then _permission_mode="dontAsk"; fi
   _setting_sources="user,local"
-  export AI_SAFE_LONGRUN=1
   # コマンドを通すかどうかは AI 判定（Gemini）が決めるので、このモードでは必ずオンにする。ふだんの d-claude では
   # AI_SAFE_ASSISTED_APPROVAL_OPTOUT=1 で外せるが、このモードでは外させない（外れていると、許可リストにない
-  # コマンドがすべて断られて作業が進まない）。
+  # コマンドのたびに確認が出て、長時間任せられない）。
   export AI_SAFE_ASSISTED_APPROVAL=1
-  echo "（長時間おまかせモード: 確認は出しません。危険な操作はガードが止め、グレーなコマンドは AI が判定します。終了すると一時設定は自動で消えます）"
+  echo "（長時間おまかせモード: ふだんの操作は確認なしで進みます。危険な操作はガードが止め、グレーなコマンドは AI が判定し、確認が要る操作だけ確認を出します。終了すると一時設定は自動で消えます）"
 fi
 
 # --permission-mode の対応有無を help で判定（非対応の Claude Code でも壊れないように）

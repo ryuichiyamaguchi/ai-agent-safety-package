@@ -3,11 +3,12 @@
 //
 // 道筋: launch-longrun（5 を選ぶ）→ launch-integrated（d-claude ＋ --longrun / -LongRun。キーの確認・
 // DeepSeek へ送ることへの同意・モデルの指定はここでふだんどおり）→ launch-deepseek-gateway（印を引き継ぐ）
-// → launch-claude-safe（長時間用の一時設定）。v1.20.0 から d-claude の長時間おまかせモードは dontAsk
-// （確認が要る操作は自動で断り、入力を待たない）: ask → deny・全承認は封じたまま・Web 取得と d-claude の
-// 補助ツールに許可の規則を足す・作業フォルダの設定は直接読まない（setting-sources から project を外す）・
-// mac は壁を必須にし壁の外での実行し直しも禁止・ガードへ長時間の印（AI_SAFE_LONGRUN=1）・AI 判定は必ずオン。
-// dontAsk が無い古い Claude Code では acceptEdits。d-claude 用の補助（正直さの指示・補助ツール）はそのまま効かせる。
+// → launch-claude-safe（長時間用の一時設定）。d-claude の長時間おまかせモード（v1.20.1）: acceptEdits で起動し、
+// コマンドは AI 判定（必ずオン）が通したものをガードが許可する（確認なし）。確認が要る操作は確認を出す（確認の規則は
+// 確認のまま・ガードの確認も確認のまま）。全承認は封じたまま・Web 取得と d-claude の補助ツールに許可の規則を足す・
+// 作業フォルダの設定は直接読まない（setting-sources から project を外す）・mac は壁を必須にし壁の外での実行し直しも禁止。
+// v1.20.0 の dontAsk（確認の代わりに断る）と長時間の印（AI_SAFE_LONGRUN=1）はやめた。
+// d-claude 用の補助（正直さの指示・補助ツール）はそのまま効かせる。
 //
 // 本物の Claude Code の代わりに、渡された設定と引数を控える偽物を使う。HOME は使い捨て（本物のホームには触らない）。
 const test = require('node:test');
@@ -88,10 +89,10 @@ function writeFakeClaude(sb, { dontAsk = true } = {}) {
   return { fake, captured, argsFile, settingsPathFile };
 }
 
-function assertLongrunSettings(cap, { wall, mode = 'dontAsk' }) {
+function assertLongrunSettings(cap, { wall, mode = 'acceptEdits' }) {
   assert.ok(fs.existsSync(cap.captured), '一時設定が渡されていない');
   const s = JSON.parse(fs.readFileSync(cap.captured, 'utf8'));
-  assert.deepStrictEqual(s.permissions.ask, [], 'ask は空にする（無人で答えられないため）');
+  assert.ok(s.permissions.ask.includes('Bash(git push*)'), '確認の規則（git push など）は確認のまま残す');
   assert.strictEqual(s.permissions.disableBypassPermissionsMode, 'disable', '全承認は封じたまま');
   assert.notStrictEqual(s.permissions.defaultMode, 'bypassPermissions');
   assert.ok(s.permissions.deny.length >= 30, 'deny 床が減っている');
@@ -109,7 +110,7 @@ function assertLongrunSettings(cap, { wall, mode = 'dontAsk' }) {
   assert.ok(!args.some((a) => /bypassPermissions|skip-permissions/i.test(a)), '全承認で起動している');
   const ss = args.indexOf('--setting-sources');
   assert.strictEqual(args[ss + 1], 'user,local', '作業フォルダの設定（ask を確認として持つ）を直接読んでいる');
-  assert.strictEqual(fs.readFileSync(cap.argsFile + '.longrun', 'utf8'), '1', 'ガードへ長時間の印が渡っていない');
+  assert.strictEqual(fs.readFileSync(cap.argsFile + '.longrun', 'utf8'), '', '確認を止めに変える印（v1.20.0）が残っている');
   assert.strictEqual(fs.readFileSync(cap.argsFile + '.assisted', 'utf8'), '1',
     'AI 判定がオフ（許可リストにないコマンドがすべて断られて作業が進まない）');
   assert.ok(args.includes('--append-system-prompt'), 'd-claude の正直さの指示が付いていない（d-claude の補助が外れている）');
@@ -152,7 +153,7 @@ test('mac: 安全起動は --longrun で長時間用の一時設定を使い、d
   assert.ok(permanent.permissions.ask.length > 0, '恒久設定の ask が書き換えられている');
 });
 
-test('mac: dontAsk が無い古い Claude Code では、長時間おまかせモードを acceptEdits で起動する', { skip: macOnly }, (t) => {
+test('mac: dontAsk が無い古い Claude Code でも、長時間おまかせモードは同じく acceptEdits で起動する', { skip: macOnly }, (t) => {
   const sb = makeSandbox(t);
   fs.copyFileSync(path.join(PKG, 'configs', 'claude', 'settings.mac.json'), path.join(sb.ws, '.claude', 'settings.json'));
   const cap = writeFakeClaude(sb, { dontAsk: false });
@@ -162,7 +163,7 @@ test('mac: dontAsk が無い古い Claude Code では、長時間おまかせモ
     timeout: 120000,
   });
   assert.strictEqual(r.status, 0, r.stdout + r.stderr);
-  assertLongrunSettings(cap, { wall: fs.existsSync('/usr/bin/sandbox-exec'), mode: 'acceptEdits' });
+  assertLongrunSettings(cap, { wall: fs.existsSync('/usr/bin/sandbox-exec') });
 });
 
 test('mac: --longrun が無ければ、ふだんの設定と --permission-mode default のまま', { skip: macOnly }, (t) => {
