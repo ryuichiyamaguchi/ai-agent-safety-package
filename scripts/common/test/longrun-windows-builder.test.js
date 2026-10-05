@@ -26,7 +26,7 @@ function runBuilder(settingsName, extra = []) {
     const output = path.join(dir, 'out.json');
     const original = JSON.parse(read('configs', 'claude', settingsName));
     // Windows の PowerShell 5.1 が書いた JSON は先頭に BOM が付くことがある。付いていても読めること。
-    fs.writeFileSync(input, '﻿' + JSON.stringify(original));
+    fs.writeFileSync(input, '\uFEFF' + JSON.stringify(original));
     const r = spawnSync(process.execPath, [BUILDER, input, output, ...extra], { encoding: 'utf8' });
     assert.strictEqual(r.status, 0, 'プログラムが失敗した: ' + r.stderr);
     return { original, out: JSON.parse(fs.readFileSync(output, 'utf8')) };
@@ -59,6 +59,18 @@ test('mac の設定に --wall を付けると、壁を必須にする（failIfUn
   assert.strictEqual(out.sandbox.enabled, true);
   assert.strictEqual(out.sandbox.autoAllowBashIfSandboxed, true);
   assert.strictEqual(out.sandbox.failIfUnavailable, true, '壁の実起動が保証されていない');
+});
+
+test('--bypass（d-claude の長時間おまかせモード）: 全承認の封印を外し、壁の外での実行し直しは禁止', () => {
+  const { original, out } = runBuilder('settings.mac.json', ['--wall', '--bypass']);
+  const deny = (original.permissions && original.permissions.deny) || [];
+  for (const rule of deny) assert.ok(out.permissions.deny.includes(rule), `deny に残ること: ${rule}`);
+  assert.deepStrictEqual(out.permissions.ask, []);
+  assert.strictEqual(out.permissions.defaultMode, 'bypassPermissions');
+  assert.ok(!('disableBypassPermissionsMode' in out.permissions));
+  assert.strictEqual(out.sandbox.failIfUnavailable, true);
+  assert.strictEqual(out.sandbox.allowUnsandboxedCommands, false);
+  assert.deepStrictEqual(out.hooks, original.hooks, 'ガード（フック）はそのまま');
 });
 
 test('引数は「元の設定 書き出し先」の 2 つを読む（argv[1] はファイル自身）', () => {

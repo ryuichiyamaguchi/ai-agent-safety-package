@@ -23,7 +23,9 @@
 #       安全側へ倒した設計で、依頼者の意図と違ったため v1.17.1 で撤廃した。
 #
 # どの環境でも外さないもの:
-#   - deny 床は 1 本も外さない、disableBypassPermissionsMode: "disable" を維持、
+#   - Claude（Anthropic）は auto モード（v1.20.0）。d-claude は全承認（bypassPermissions）だが、禁止の規則と
+#     ガード（フック）は全承認でも効く。ガードの「確認」は AI_SAFE_LONGRUN=1 で「止める」に変わる。
+#   - deny 床は 1 本も外さない、Claude の経路では disableBypassPermissionsMode: "disable" を維持、
 #     記録（hooks / 監査ログ）も外さない、恒久的な設定ファイルは書き換えない。
 param(
     [string]$Workspace = "$env:USERPROFILE\Documents\my-ai-workspace",
@@ -50,6 +52,9 @@ if (-not (Test-Path -LiteralPath $policy -PathType Leaf)) {
 $env:AI_SAFE_ROOT = $root
 $env:AI_SAFE_POLICY = $policy
 if (-not $env:AI_SAFE_LOG_DIR) { $env:AI_SAFE_LOG_DIR = Join-Path $env:USERPROFILE '.ai-safety\logs' }
+# 長時間おまかせモードの印（v1.20.0）。ガード（フック）はこれを見て、確認（ask）を出す代わりに止める。
+# 人が見ていない前提なので、確認ダイアログで止まったまま待たせない。止める向きにしか効かない印。
+$env:AI_SAFE_LONGRUN = '1'
 
 # 素の Claude（ログイン認証）で動かす。DeepSeek 連携の置き土産を持ち込まない。
 Remove-Item Env:\ANTHROPIC_AUTH_TOKEN, Env:\ANTHROPIC_BASE_URL, Env:\ANTHROPIC_MODEL, `
@@ -200,8 +205,9 @@ if ($wall) {
 Write-Host ''
 if ($Engine -eq 'd-claude') {
     Write-Host '  d-claude は DeepSeek のキーで動きます。作業の内容は、送信内容の検査（Gateway）を'
-    Write-Host '  通してから DeepSeek へ送られます。危険とまでは言えないコマンドは、AI が判定して'
-    Write-Host '  通します（d-claude のふだんの起動と同じです）。'
+    Write-Host '  通してから DeepSeek へ送られます。確認を出さない全承認で動き、危険とまでは言えない'
+    Write-Host '  コマンドは AI が判定して通します（AI が「確認したい」と言ったものと、判定できな'
+    Write-Host '  かったものは止めます）。'
     Write-Host ''
 }
 Write-Host '  それでも止まるもの（外していません）:'
@@ -211,6 +217,11 @@ Write-Host '    ・ダウンロードしたものをそのまま実行する形'
 Write-Host '    ・sudo / git push / git reset / git checkout / git restore / git rebase'
 Write-Host '    ・「全部素通しモード」への切り替えそのもの'
 Write-Host '  記録（見張りと監査ログ）は、どの環境でも残ります。'
+Write-Host ''
+Write-Host '  確認ダイアログは出しません。ガードが「確認したい」と判断した操作'
+Write-Host '  （作業フォルダの外への書き込みなど）は、確認の代わりに止めます。'
+Write-Host '  AI はほかの方法を探して作業を続けます。'
+Write-Host '  Claude は auto モード（判定役の AI が裏で確かめるモード）で動きます。'
 Write-Host ''
 Write-Host '  止まらないもの（気をつけてください）:'
 Write-Host '    ・作業フォルダの中のファイルの読み取り・書き換え・削除'
@@ -320,9 +331,19 @@ try {
     $claudeArgs = @('--settings', $tmpSettings, '--setting-sources', 'user,project,local')
     # `claude --help` が返ってこない事故が過去にあったので、上限 30 秒で打ち切る。
     # 打ち切られた場合は --permission-mode を付けない（設定側の defaultMode で足りる）。
+    # Claude は auto モードで起動する（v1.20.0）。判定役の AI が裏で確かめ、ふだんの操作は人に聞かない
+    # （Claude Code 公式が v2.1.283 から最初のモードにしている。auto モードは Windows でも使える）。
+    # 安全パッケージの禁止の規則・ガード・作業フォルダの控えは、そのまま上に重なる。
+    # auto が無い古い Claude Code では、これまでどおり acceptEdits（ファイル編集だけ自動承認）にする。
     $help = Invoke-Limited -TimeoutSec 30 -File $claudeCmd.Source -Arguments @('--help')
     if ($help -and $help.Contains('--permission-mode')) {
-        $claudeArgs = @('--permission-mode', 'acceptEdits') + $claudeArgs
+        if ($help.Contains('"auto"')) {
+            $claudeArgs = @('--permission-mode', 'auto') + $claudeArgs
+            Write-Host '（Claude は auto モードで動きます。判定役の AI が裏で確かめ、ふだんの操作は確認なしで進みます）'
+        } else {
+            $claudeArgs = @('--permission-mode', 'acceptEdits') + $claudeArgs
+            Write-Host '（この Claude Code には auto モードが無いため、ファイル編集だけ自動で承認します。Claude Code を更新すると確認が減ります）'
+        }
     }
 
     Write-Host '（終了すると一時設定は自動で消えます）'

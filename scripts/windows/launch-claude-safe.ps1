@@ -97,12 +97,19 @@ if (-not $Claude) {
     exit 1
 }
 
-# 長時間おまかせモード（v1.19.9）: 恒久的な設定ファイルは書き換えず、このモードの差分だけを当てた
-# 一時設定（ask は deny へ寄せる・承認は acceptEdits・bypass は封じたまま）を作って渡し、終了時に消す。
-# 変換は launch-longrun.ps1（Claude）と同じ scripts\common\longrun-claude-settings.js。
-# Windows には壁（Claude Code の OS サンドボックス）が無いので --wall は付けない（宣言だけして守れて
-# いるように見せない）。壁が無いことの同意は launch-longrun.ps1 で取ってある。
+# 長時間おまかせモード（d-claude。v1.19.9 で追加・v1.20.0 で全承認に）: 恒久的な設定ファイルは書き換えず、
+# このモードの差分だけを当てた一時設定を作って渡し、終了時に消す。変換は scripts\common\longrun-claude-settings.js。
+#   ・承認の確認は出さない全承認（bypassPermissions）。d-claude（DeepSeek）は Claude Code 公式の判定役
+#     （auto モード）を使えないので、グレーなコマンドは安全パッケージの AI 判定（Gemini）が見る。
+#     判定が「確認」と言ったもの・判定できなかったものは、ガードが止める（AI_SAFE_LONGRUN=1）
+#   ・禁止の規則（deny）とガード（フック）は全承認でも効く。ask は deny へ寄せる
+#   ・Windows には壁（Claude Code の OS サンドボックス）が無いので --wall は付けない。壁が無いことの同意は
+#     launch-longrun.ps1 で取ってある
+#   ・作業フォルダの .claude\settings.json は全承認を封じている（disableBypassPermissionsMode）。このモードでは
+#     作業フォルダの設定は直接読まず（--setting-sources から project を外す）、その中身を写した一時設定
+#     （フック・禁止の規則を含む）だけを渡す
 $permissionMode = "default"
+$settingSources = "user,project,local"
 $longRunDir = $null
 if ($LongRun) {
     $lrBuilder = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PSScriptRoot, '..', 'common', 'longrun-claude-settings.js'))
@@ -114,17 +121,24 @@ if ($LongRun) {
     $longRunDir = Join-Path ([System.IO.Path]::GetTempPath()) ('ai-safe-longrun-' + [System.Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $longRunDir | Out-Null
     $lrSettings = Join-Path $longRunDir 'settings.json'
-    $lrRun = Invoke-NativeQuiet -File $lrNode.Source -Arguments @($lrBuilder, $settings, $lrSettings)
+    $lrRun = Invoke-NativeQuiet -File $lrNode.Source -Arguments @($lrBuilder, $settings, $lrSettings, '--bypass')
     if ($lrRun.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $lrSettings -PathType Leaf)) {
         Remove-Item -LiteralPath $longRunDir -Recurse -Force -ErrorAction SilentlyContinue
         throw ("このモード用の設定を作れませんでした。" + $lrRun.Error)
     }
     $settings = $lrSettings
-    $permissionMode = "acceptEdits"
-    Write-Host '（長時間おまかせモード。終了すると一時設定は自動で消えます）'
+    $permissionMode = "bypassPermissions"
+    $settingSources = "user,local"
+    $env:AI_SAFE_LONGRUN = '1'
+    # 全承認なので、AI 判定（グレーなコマンドを見る役）は必ずオンにする。ふだんの d-claude では
+    # AI_SAFE_ASSISTED_APPROVAL_OPTOUT=1 で外せるが、このモードでは外させない。判定がオフのままだと、
+    # 許可リストにないコマンドが判定なしで通ってしまう。オンなら、判定が「通してよい」と言ったものだけが
+    # 通り、「確認したい」と判定できなかったものはガードが止める（v1.20.0。自動セキュリティ確認の指摘）。
+    $env:AI_SAFE_ASSISTED_APPROVAL = '1'
+    Write-Host '（長時間おまかせモード: 確認は出しません。危険な操作はガードが止め、グレーなコマンドは AI が判定します。終了すると一時設定は自動で消えます）'
 }
 
-$argsList = @("--settings", $settings, "--setting-sources", "user,project,local")
+$argsList = @("--settings", $settings, "--setting-sources", $settingSources)
 # claude --help で --permission-mode が存在するか確認してから付ける
 $helpText = ""
 try {

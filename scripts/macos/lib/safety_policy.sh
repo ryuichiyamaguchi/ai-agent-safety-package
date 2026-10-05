@@ -634,6 +634,11 @@ allow() {
 # defaultMode=acceptEdits でも hook の permissionDecision が優先されるので確実に確認が挟まる。
 ask() {
   local reason="$1"
+  # 長時間おまかせモード（AI_SAFE_LONGRUN=1。launch-longrun が立てる）では、人が見ていないので確認を
+  # 出さず、止める側に倒す（v1.20.0）。止める向きにしか変わらないので、この印が誤って立っても守りは緩まない。
+  if [ "${AI_SAFE_LONGRUN:-0}" = "1" ]; then
+    block "長時間おまかせモードでは確認できないため止めました: $reason"
+  fi
   audit_log "ask" "$reason"
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s"}}\n' \
     "$(json_escape "$reason")"

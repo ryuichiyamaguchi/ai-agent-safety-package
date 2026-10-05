@@ -23,7 +23,9 @@
 #
 # どの環境でも外さないもの:
 #   - **deny 床は 1 本も外さない**（再帰削除・秘密ファイルの読み取り・リモートコード実行など）。
-#   - **`disableBypassPermissionsMode: "disable"` を維持**する。「全部素通し」
+#   - Claude（Anthropic）は auto モード（v1.20.0）。d-claude は全承認（bypassPermissions）だが、
+#     禁止の規則とガード（フック）は全承認でも効く。ガードの「確認」は AI_SAFE_LONGRUN=1 で「止める」に変わる。
+#   - Claude の経路では **`disableBypassPermissionsMode: "disable"` を維持**する。「全部素通し」
 #     （bypassPermissions）は使わない。
 #   - 記録（hooks / 監査ログ）は 1 つも外さない。
 #   - **恒久的な設定ファイルを書き換えない**。一時設定を作り、終了時に trap で必ず消す。
@@ -53,6 +55,9 @@ workspace="$(cd "$workspace" && pwd)"
 export AI_SAFE_ROOT="$workspace/.ai-safety"
 export AI_SAFE_POLICY="$AI_SAFE_ROOT/policy/safety-policy.json"
 export AI_SAFE_LOG_DIR="$HOME/.ai-safety/logs"
+# 長時間おまかせモードの印（v1.20.0）。ガード（フック）はこれを見て、確認（ask）を出す代わりに止める。
+# 人が見ていない前提なので、確認ダイアログで止まったまま待たせない。止める向きにしか効かない印。
+export AI_SAFE_LONGRUN=1
 hooks="$AI_SAFE_ROOT/hooks/macos"
 
 if [ ! -f "$AI_SAFE_POLICY" ]; then
@@ -226,8 +231,9 @@ fi
 if [ "$engine" = "d-claude" ]; then
   cat <<EOF
   d-claude は DeepSeek のキーで動きます。作業の内容は、送信内容の検査（Gateway）を
-  通してから DeepSeek へ送られます。危険とまでは言えないコマンドは、AI が判定して
-  通します（d-claude のふだんの起動と同じです）。
+  通してから DeepSeek へ送られます。確認を出さない全承認で動き、危険とまでは言えない
+  コマンドは AI が判定して通します（AI が「確認したい」と言ったものと、判定できな
+  かったものは止めます）。
 
 EOF
 fi
@@ -240,6 +246,11 @@ cat <<EOF
     ・sudo / git push / git reset / git checkout / git restore / git rebase
     ・「全部素通しモード」への切り替えそのもの
   記録（見張りと監査ログ）は、どの環境でも残ります。
+
+  確認ダイアログは出しません。ガードが「確認したい」と判断した操作
+  （作業フォルダの外への書き込みなど）は、確認の代わりに止めます。
+  AI はほかの方法を探して作業を続けます。
+  Claude は auto モード（判定役の AI が裏で確かめるモード）で動きます。
 
   止まらないもの（気をつけてください）:
     ・作業フォルダの中のファイルの読み取り・書き換え・削除
@@ -347,10 +358,21 @@ fi
 chmod 600 "$tmp_settings"
 
 claude_args=(--settings "$tmp_settings" --setting-sources user,project,local)
+# Claude は auto モードで起動する（v1.20.0）。判定役の AI が裏で確かめ、ふだんの操作は人に聞かない
+# （Claude Code 公式が v2.1.283 から最初のモードにしている。確認を減らしつつ裏で安全チェックをするモード）。
+# 安全パッケージの禁止の規則・ガード・壁・作業フォルダの控えは、そのまま上に重なる。
+# auto が無い古い Claude Code では、これまでどおり acceptEdits（ファイル編集だけ自動承認）にする。
 # `claude --help` が返ってこない事故が過去にあったので、上限 30 秒で打ち切る。
 # 打ち切られた場合は --permission-mode を付けない（設定側の defaultMode で足りる）。
-if run_limited 30 claude --help 2>&1 | grep -q -- "--permission-mode"; then
-  claude_args=(--permission-mode acceptEdits "${claude_args[@]}")
+_claude_help="$(run_limited 30 claude --help 2>&1 || true)"
+if printf '%s' "$_claude_help" | grep -q -- "--permission-mode"; then
+  if printf '%s' "$_claude_help" | grep -q '"auto"'; then
+    claude_args=(--permission-mode auto "${claude_args[@]}")
+    echo "（Claude は auto モードで動きます。判定役の AI が裏で確かめ、ふだんの操作は確認なしで進みます）"
+  else
+    claude_args=(--permission-mode acceptEdits "${claude_args[@]}")
+    echo "（この Claude Code には auto モードが無いため、ファイル編集だけ自動で承認します。Claude Code を更新すると確認が減ります）"
+  fi
 fi
 
 echo "（終了すると一時設定は自動で消えます）"

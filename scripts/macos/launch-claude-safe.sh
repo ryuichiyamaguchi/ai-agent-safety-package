@@ -81,12 +81,19 @@ if [ -n "$_expected_cc_ver" ]; then
   fi
 fi
 
-# 長時間おまかせモード（v1.19.9）: 恒久的な設定ファイルは書き換えず、このモードの差分だけを当てた
-# 一時設定（ask は deny へ寄せる・承認は acceptEdits・bypass は封じたまま）を作って渡し、終了時に消す。
-# 変換は launch-longrun.sh（Claude）と同じ scripts/common/longrun-claude-settings.js。
-# 壁（sandbox-exec ＋ 作業フォルダの sandbox.enabled）があるときは、壁を必須にする（--wall）。
-# 判定の条件は launch-longrun.sh の has_wall claude と同じ。
+# 長時間おまかせモード（d-claude。v1.19.9 で追加・v1.20.0 で全承認に）: 恒久的な設定ファイルは書き換えず、
+# このモードの差分だけを当てた一時設定を作って渡し、終了時に消す。変換は scripts/common/longrun-claude-settings.js。
+#   ・承認の確認は出さない全承認（bypassPermissions）。d-claude（DeepSeek）は Claude Code 公式の判定役
+#     （auto モード）を使えないので、グレーなコマンドは安全パッケージの AI 判定（Gemini）が見る。
+#     判定が「確認」と言ったもの・判定できなかったものは、ガードが止める（AI_SAFE_LONGRUN=1）
+#   ・禁止の規則（deny）とガード（フック）は全承認でも効く。ask は deny へ寄せる
+#   ・壁（sandbox-exec ＋ 作業フォルダの sandbox.enabled）があるときは、壁を必須にし、壁の外での実行し直し
+#     （全承認では確認なしで通る）も禁止する（--wall --bypass → allowUnsandboxedCommands: false）
+#   ・作業フォルダの .claude/settings.json は全承認を封じている（disableBypassPermissionsMode）。どの設定ファイル
+#     に書かれていても全承認は使えなくなるので、このモードでは作業フォルダの設定は直接読まず（--setting-sources
+#     から project を外す）、その中身を写した一時設定（フック・禁止の規則を含む）だけを渡す
 _permission_mode="default"
+_setting_sources="user,project,local"
 if [ "$_longrun" = "1" ]; then
   _lr_builder="$(cd "$_self_dir/.." && pwd)/common/longrun-claude-settings.js"
   [ -f "$_lr_builder" ] || { echo "長時間おまかせモードの設定づくりが見つかりません: $_lr_builder" >&2; echo "「1_安全パッケージを最新版にする」を実行してください。" >&2; exit 2; }
@@ -103,17 +110,24 @@ if [ "$_longrun" = "1" ]; then
   chmod 700 "$_lr_dir"
   trap 'rm -rf "$_lr_dir"' EXIT INT TERM HUP
   if [ -n "$_lr_wall" ]; then
-    node "$_lr_builder" "$settings" "$_lr_dir/settings.json" --wall || { echo "このモード用の設定を作れませんでした。" >&2; exit 1; }
+    node "$_lr_builder" "$settings" "$_lr_dir/settings.json" --wall --bypass || { echo "このモード用の設定を作れませんでした。" >&2; exit 1; }
   else
-    node "$_lr_builder" "$settings" "$_lr_dir/settings.json" || { echo "このモード用の設定を作れませんでした。" >&2; exit 1; }
+    node "$_lr_builder" "$settings" "$_lr_dir/settings.json" --bypass || { echo "このモード用の設定を作れませんでした。" >&2; exit 1; }
   fi
   settings="$_lr_dir/settings.json"
-  _permission_mode="acceptEdits"
-  echo "（長時間おまかせモード。終了すると一時設定は自動で消えます）"
+  _permission_mode="bypassPermissions"
+  _setting_sources="user,local"
+  export AI_SAFE_LONGRUN=1
+  # 全承認なので、AI 判定（グレーなコマンドを見る役）は必ずオンにする。ふだんの d-claude では
+  # AI_SAFE_ASSISTED_APPROVAL_OPTOUT=1 で外せるが、このモードでは外させない。判定がオフのままだと、
+  # 許可リストにないコマンドが判定なしで通ってしまう。オンなら、判定が「通してよい」と言ったものだけが
+  # 通り、「確認したい」と判定できなかったものはガードが止める（v1.20.0。自動セキュリティ確認の指摘）。
+  export AI_SAFE_ASSISTED_APPROVAL=1
+  echo "（長時間おまかせモード: 確認は出しません。危険な操作はガードが止め、グレーなコマンドは AI が判定します。終了すると一時設定は自動で消えます）"
 fi
 
 # --permission-mode の対応有無を help で判定（非対応の Claude Code でも壊れないように）
-claude_args=(--settings "$settings" --setting-sources user,project,local)
+claude_args=(--settings "$settings" --setting-sources "$_setting_sources")
 if claude --help 2>&1 | grep -q -- "--permission-mode"; then
   claude_args=(--permission-mode "$_permission_mode" "${claude_args[@]}")
 fi

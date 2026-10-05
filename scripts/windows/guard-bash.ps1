@@ -11,6 +11,13 @@
 # Claude PreToolUse permissionDecision JSON を stdout に出して exit 0。
 # JSON は exit 0 のときだけ処理される（exit 2 では無視される＝決定的 deny 経路とは別）。
 function Emit-AssistedDecision([string]$Decision, [string]$Reason) {
+    # 長時間おまかせモード（AI_SAFE_LONGRUN=1）では、AI 判定が「確認」と言ったもの（判定できなかったときを
+    # 含む）を、確認ではなく止める（v1.20.0）。止める向きにしか変わらない。
+    if ($Decision -eq 'ask' -and $env:AI_SAFE_LONGRUN -eq '1') {
+        if (Get-Command Set-AiSafeConsoleUtf8 -ErrorAction SilentlyContinue) { Set-AiSafeConsoleUtf8 }
+        [Console]::Error.WriteLine("AI Safety Guard BLOCKED: 長時間おまかせモードでは確認できないため止めました: " + $Reason)
+        exit 2
+    }
     $obj = [PSCustomObject]@{
         hookSpecificOutput = [PSCustomObject]@{
             hookEventName = "PreToolUse"
