@@ -23,9 +23,9 @@
 #       安全側へ倒した設計で、依頼者の意図と違ったため v1.17.1 で撤廃した。
 #
 # どの環境でも外さないもの:
-#   - Claude（Anthropic）は auto モード（v1.20.0）。d-claude は全承認（bypassPermissions）だが、禁止の規則と
-#     ガード（フック）は全承認でも効く。ガードの「確認」は AI_SAFE_LONGRUN=1 で「止める」に変わる。
-#   - deny 床は 1 本も外さない、Claude の経路では disableBypassPermissionsMode: "disable" を維持、
+#   - Claude（Anthropic）は auto モード、d-claude は dontAsk（確認が要る操作は自動で断る。コマンドは AI 判定が
+#     通したものだけガードが許可する）（v1.20.0）。ガードの「確認」は AI_SAFE_LONGRUN=1 で「止める」に変わる。
+#   - deny 床は 1 本も外さない、どの経路でも disableBypassPermissionsMode: "disable" を維持（全承認は使わない）、
 #     記録（hooks / 監査ログ）も外さない、恒久的な設定ファイルは書き換えない。
 param(
     [string]$Workspace = "$env:USERPROFILE\Documents\my-ai-workspace",
@@ -205,7 +205,7 @@ if ($wall) {
 Write-Host ''
 if ($Engine -eq 'd-claude') {
     Write-Host '  d-claude は DeepSeek のキーで動きます。作業の内容は、送信内容の検査（Gateway）を'
-    Write-Host '  通してから DeepSeek へ送られます。確認を出さない全承認で動き、危険とまでは言えない'
+    Write-Host '  通してから DeepSeek へ送られます。確認ダイアログは出さず、危険とまでは言えない'
     Write-Host '  コマンドは AI が判定して通します（AI が「確認したい」と言ったものと、判定できな'
     Write-Host '  かったものは止めます）。'
     Write-Host ''

@@ -61,16 +61,25 @@ test('mac の設定に --wall を付けると、壁を必須にする（failIfUn
   assert.strictEqual(out.sandbox.failIfUnavailable, true, '壁の実起動が保証されていない');
 });
 
-test('--bypass（d-claude の長時間おまかせモード）: 全承認の封印を外し、壁の外での実行し直しは禁止', () => {
-  const { original, out } = runBuilder('settings.mac.json', ['--wall', '--bypass']);
+test('--dclaude（d-claude の長時間おまかせモード）: 全承認は封じたまま、Web 取得と補助ツールを許可し、壁の外での実行し直しは禁止', () => {
+  const { original, out } = runBuilder('settings.mac.json', ['--wall', '--dclaude']);
   const deny = (original.permissions && original.permissions.deny) || [];
   for (const rule of deny) assert.ok(out.permissions.deny.includes(rule), `deny に残ること: ${rule}`);
   assert.deepStrictEqual(out.permissions.ask, []);
-  assert.strictEqual(out.permissions.defaultMode, 'bypassPermissions');
-  assert.ok(!('disableBypassPermissionsMode' in out.permissions));
+  assert.strictEqual(out.permissions.defaultMode, 'acceptEdits');
+  assert.strictEqual(out.permissions.disableBypassPermissionsMode, 'disable', '全承認は封じたまま');
+  for (const rule of ['WebFetch', 'mcp__gemini-search', 'mcp__pollinations-image', 'mcp__agy-image', 'mcp__codex-image', 'mcp__gemini-vision', 'mcp__playwright']) {
+    assert.ok(out.permissions.allow.includes(rule), `許可の規則が無い: ${rule}`);
+  }
+  for (const rule of original.permissions.allow) assert.ok(out.permissions.allow.includes(rule), `元の許可が消えた: ${rule}`);
   assert.strictEqual(out.sandbox.failIfUnavailable, true);
   assert.strictEqual(out.sandbox.allowUnsandboxedCommands, false);
   assert.deepStrictEqual(out.hooks, original.hooks, 'ガード（フック）はそのまま');
+});
+
+test('--dclaude なし（Claude の長時間おまかせモード）では許可の規則を足さない', () => {
+  const { original, out } = runBuilder('settings.windows.json');
+  assert.deepStrictEqual(out.permissions.allow, original.permissions.allow);
 });
 
 test('引数は「元の設定 書き出し先」の 2 つを読む（argv[1] はファイル自身）', () => {

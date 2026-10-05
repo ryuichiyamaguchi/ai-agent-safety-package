@@ -765,70 +765,35 @@
     },
     {
       "id": "longrun-skip-permissions-flag",
-      "group": "長時間おまかせモードの起動を AI に呼ばせない（v1.20.0）",
+      "group": "全承認の Claude を AI に立ち上げさせない（v1.20.0）",
       "command": "claude --dangerously-skip-permissions -p hi",
       "expect": "block",
-      "why": "全承認の指定。AI が確認の出ない Claude を自分で立ち上げられないこと"
+      "why": "全承認の指定。このパッケージはどこでも全承認を使わないので、AI が自分で全承認の Claude を立ち上げることを止める"
     },
     {
       "id": "longrun-bypass-mode-flag",
-      "group": "長時間おまかせモードの起動を AI に呼ばせない（v1.20.0）",
+      "group": "全承認の Claude を AI に立ち上げさせない（v1.20.0）",
       "command": "claude --permission-mode bypassPermissions",
       "expect": "block",
       "why": "同上（モード名での指定）"
     },
     {
-      "id": "longrun-claude-safe-longrun-mac",
-      "group": "長時間おまかせモードの起動を AI に呼ばせない（v1.20.0）",
-      "command": "bash .ai-safety/hooks/macos/launch-claude-safe.sh . --longrun",
-      "expect": "block",
-      "why": "長時間の印付きの安全起動（d-claude は全承認になる）"
-    },
-    {
-      "id": "longrun-claude-safe-longrun-win",
-      "group": "長時間おまかせモードの起動を AI に呼ばせない（v1.20.0）",
-      "command": "powershell -File .ai-safety\\hooks\\windows\\launch-claude-safe.ps1 -Workspace . -LongRun",
-      "expect": "block",
-      "why": "同上（Windows）"
-    },
-    {
-      "id": "longrun-launcher-exec",
-      "group": "長時間おまかせモードの起動を AI に呼ばせない（v1.20.0）",
-      "command": "bash .ai-safety/hooks/macos/launch-longrun.sh . d-claude",
-      "expect": "block",
-      "why": "長時間おまかせモード本体の実行"
-    },
-    {
-      "id": "longrun-launcher-piped-menu",
-      "group": "長時間おまかせモードの起動を AI に呼ばせない（v1.20.0）",
-      "command": "printf \"5\\n\" | bash ./launch-longrun.sh",
-      "expect": "block",
-      "why": "メニューの番号を流し込んで実行"
-    },
-    {
-      "id": "longrun-start-button",
-      "group": "長時間おまかせモードの起動を AI に呼ばせない（v1.20.0）",
-      "command": "open ./スタート/6_長時間おまかせモードで起動.command",
-      "expect": "block",
-      "why": "スタートのボタンを AI が押す"
-    },
-    {
       "id": "longrun-read-scripts",
-      "group": "長時間おまかせモードの起動を AI に呼ばせない（v1.20.0）",
+      "group": "全承認の Claude を AI に立ち上げさせない（v1.20.0）",
       "command": "cat scripts/macos/launch-longrun.sh scripts/windows/launch-longrun.ps1",
       "expect": "pass",
       "why": "読むだけは止めない（誤検知の確認）"
     },
     {
       "id": "longrun-grep-flag",
-      "group": "長時間おまかせモードの起動を AI に呼ばせない（v1.20.0）",
+      "group": "全承認の Claude を AI に立ち上げさせない（v1.20.0）",
       "command": "grep -n -- --longrun scripts/macos/launch-claude-safe.sh",
       "expect": "pass",
       "why": "印を検索するだけは止めない（誤検知の確認）"
     },
     {
       "id": "longrun-auto-mode-flag",
-      "group": "長時間おまかせモードの起動を AI に呼ばせない（v1.20.0）",
+      "group": "全承認の Claude を AI に立ち上げさせない（v1.20.0）",
       "command": "claude --permission-mode auto",
       "expect": "pass",
       "why": "auto モードの指定は全承認ではない"

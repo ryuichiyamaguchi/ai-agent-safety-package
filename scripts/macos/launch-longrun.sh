@@ -23,9 +23,9 @@
 #
 # どの環境でも外さないもの:
 #   - **deny 床は 1 本も外さない**（再帰削除・秘密ファイルの読み取り・リモートコード実行など）。
-#   - Claude（Anthropic）は auto モード（v1.20.0）。d-claude は全承認（bypassPermissions）だが、
-#     禁止の規則とガード（フック）は全承認でも効く。ガードの「確認」は AI_SAFE_LONGRUN=1 で「止める」に変わる。
-#   - Claude の経路では **`disableBypassPermissionsMode: "disable"` を維持**する。「全部素通し」
+#   - Claude（Anthropic）は auto モード、d-claude は dontAsk（確認が要る操作は自動で断る。コマンドは AI 判定が
+#     通したものだけガードが許可する）（v1.20.0）。ガードの「確認」は AI_SAFE_LONGRUN=1 で「止める」に変わる。
+#   - どの経路でも **`disableBypassPermissionsMode: "disable"` を維持**する。「全部素通し」
 #     （bypassPermissions）は使わない。
 #   - 記録（hooks / 監査ログ）は 1 つも外さない。
 #   - **恒久的な設定ファイルを書き換えない**。一時設定を作り、終了時に trap で必ず消す。
@@ -231,7 +231,7 @@ fi
 if [ "$engine" = "d-claude" ]; then
   cat <<EOF
   d-claude は DeepSeek のキーで動きます。作業の内容は、送信内容の検査（Gateway）を
-  通してから DeepSeek へ送られます。確認を出さない全承認で動き、危険とまでは言えない
+  通してから DeepSeek へ送られます。確認ダイアログは出さず、危険とまでは言えない
   コマンドは AI が判定して通します（AI が「確認したい」と言ったものと、判定できな
   かったものは止めます）。
 
